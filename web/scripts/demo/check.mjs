@@ -40,7 +40,7 @@ for (const href of hrefs) {
     await pg.waitForTimeout(2200);
     const text = (await pg.innerText("body").catch(() => "")).toLowerCase();
     if (text.includes("counts double")) clubSeen = true;
-    if (text.includes("captain, counts double")) captainSeen = true;
+    if (text.includes("captain ×2") || text.includes("captain, counts double")) captainSeen = true;
   }
   for (const t of ["sell", "buy"]) await clickByText(".tab", t, 1500);
   await misses(`token ${href}`);

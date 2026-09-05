@@ -16,7 +16,7 @@ The pool fee is the pool's own LP fee, fixed when the pool is created: `(baseFee
 
 ```solidity
 struct FeePolicy {
-    address protocolFeeRecipient; // the protocol's wallet, frozen into every launch
+    address protocolFeeRecipient; // the protocol's recipient, the BuybackTreasury, frozen into every launch
     uint16 creatorShareBps;       // of the base fee: 6000 under an invented ticker, 7000 elsewhere
     uint16 clubShareBps;          // 1000 under an invented ticker, 0 elsewhere
     uint16 protocolShareBps;      // 3000

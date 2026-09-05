@@ -20,7 +20,7 @@ A coin's name, symbol, image, description, socials, pair, opening economics, poo
 
 ## 5. Creator holds 0 launch tokens at creation
 
-`LaunchDeployer.deployToken` mints the supply and hands all of it to the factory, which puts all of it into the locked position. The creator receives nothing at creation. The one exception is the dev buy in the launch transaction, which buys from the pool at the opening price like anyone would, and is disclosed in the launch's own events. `Token` has no mint, no burn hook, no freeze, no blacklist, and no transfer tax.
+`LaunchDeployer.deployToken` mints the supply and hands all of it to the factory, which puts all of it into the locked position. The creator receives nothing at creation. The one exception is the dev buy in the launch transaction, which buys from the pool at the opening price like anyone would, and is disclosed in the launch's own events. `Token` has no mint, no burn hook, no freeze, no blacklist, and one tax only: a buy in its first five seconds pays a snipe tax that starts at 99% and is gone by the fifth second, burned; see [02](./02-lifecycle.md).
 
 ## 6. Nothing to graduate, nothing to squat
 

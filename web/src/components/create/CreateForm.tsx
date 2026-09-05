@@ -69,8 +69,10 @@ const choiceOf = (t: Tab, mode: "new" | "existing"): Choice => (t === "eth" ? "e
  * placeholder: prefilling someone's ticker for them was never the help it looked like, and showing the same word
  * every time made that one word look like the official answer.
  */
+/** A word from the reel that can actually be invented: official Stock Token symbols like NVDA are reserved. */
+const INVENTABLE = REEL_TICKERS.filter((w) => w !== "NVDA");
 function sampleTicker(): string {
-  return REEL_TICKERS[Math.floor(Math.random() * REEL_TICKERS.length)];
+  return INVENTABLE[Math.floor(Math.random() * INVENTABLE.length)];
 }
 // Chosen once per page load in the browser. The server always renders the first word, and React swaps in the
 // browser's pick after hydration instead of flagging the two as a mismatch.
