@@ -427,12 +427,12 @@ export function CreateForm() {
   }, [vanityInp, seed]);
 
   /** The ground salt and address for the current fields, one promise per seed, init code and wallet. */
-  function vanityFor(): Promise<GrindResult> | undefined {
-    const inp = vanityInputs({ user, supply: config.data?.supply, name, symbol, logo, description, socials, seed });
+  function vanityFor(useSeed: Hex = seed): Promise<GrindResult> | undefined {
+    const inp = vanityInputs({ user, supply: config.data?.supply, name, symbol, logo, description, socials, seed: useSeed });
     if (!inp) return undefined;
     let p = vanityCache.current.get(inp.key);
     if (!p) {
-      p = grindSalt({ deployer: ADDRESSES.launchDeployer, initiator: inp.initiator, initCodeHash: inp.initCodeHash, seed });
+      p = grindSalt({ deployer: ADDRESSES.launchDeployer, initiator: inp.initiator, initCodeHash: inp.initCodeHash, seed: useSeed });
       vanityCache.current.set(inp.key, p);
     }
     return p;
@@ -447,11 +447,11 @@ export function CreateForm() {
   }
 
   /** Builds the exact call a launch makes, once, so the pre-flight and the signature cannot disagree. */
-  async function prepare(): Promise<Prepared> {
+  async function prepare(useSeed: Hex = seed): Promise<Prepared> {
     if (!client) throw new Error("no client");
     const fee = launchFee.data ?? 0n;
-    const ground = await vanityFor(); // the same promise the review step shows, so the address cannot differ
-    const salt = ground?.salt ?? seed;
+    const ground = await vanityFor(useSeed); // the same promise the review step shows, so the address cannot differ
+    const salt = ground?.salt ?? useSeed;
     // the deployer's own prediction must agree with the page's, or the site's copy of the bytecode has drifted
     if (ground && user && config.data && !DEMO) {
       const predicted = await client.readContract({
@@ -574,9 +574,9 @@ export function CreateForm() {
    * signing prompt as an unreadable wallet error. The sender's balance is overridden, because the question is
    * whether the contract accepts the call, not whether this wallet can pay for it today.
    */
-  async function preflight(): Promise<Prepared | undefined> {
+  async function preflight(useSeed: Hex = seed): Promise<Prepared | undefined> {
     if (!client) return undefined;
-    const pr = await prepare();
+    const pr = await prepare(useSeed);
     if (DEMO || !user) return pr;
     const account = user;
     // a launch that pulls a token cannot be simulated until its approval has landed, so with an approve step pending
@@ -591,13 +591,22 @@ export function CreateForm() {
     return pr;
   }
 
-  async function submit(): Promise<boolean> {
+  const isSquat = (e: unknown) => /PoolAlreadyExists|PoolAlreadyInitialized/.test(String(e ?? ""));
+  /** The retry carries the new seed explicitly: state set in this render is not visible to this call. */
+  function retryWithFreshSalt(): Promise<boolean> {
+    retriedSquat.current = true;
+    const fresh = randomSalt();
+    setSeed(fresh);
+    return submit(fresh);
+  }
+
+  async function submit(useSeed: Hex = seed): Promise<boolean> {
     const err = validate();
     setFormError(err);
     if (err || !user || !client) return false;
     try {
       // the wallet only signs what the contract has already accepted
-      const pr = await preflight();
+      const pr = await preflight(useSeed);
       if (!pr) return false;
       // an approve lands first, then the launch is simulated with the allowance in place, then signed
       if (pr.approve) {
@@ -609,7 +618,11 @@ export function CreateForm() {
         }
       }
       const hash = await tx.run([{ label: pr.label, request: (w: WriteFn) => w(pr.request as unknown as Parameters<WriteFn>[0]) }]);
-      if (!hash) return false;
+      if (!hash) {
+        // a squat that landed between the simulation and the block: one retry on a fresh salt, with a fresh address
+        if (isSquat(tx.lastError.current) && !retriedSquat.current) return retryWithFreshSalt();
+        return false;
+      }
       const rc = await client.getTransactionReceipt({ hash });
       const logs = parseEventLogs({ abi: FactoryAbi, eventName: "TokenLaunched", logs: rc.logs });
       launchedToken.current = logs[0]?.args.token;
@@ -617,11 +630,7 @@ export function CreateForm() {
       return true;
     } catch (e) {
       // somebody opened this exact pool key first: a fresh salt is a fresh address and a fresh key, once
-      if (/PoolAlreadyExists|PoolAlreadyInitialized/.test(String(e)) && !retriedSquat.current) {
-        retriedSquat.current = true;
-        setSeed(randomSalt());
-        return submit();
-      }
+      if (isSquat(e) && !retriedSquat.current) return retryWithFreshSalt();
       setFormError(errorMessage(e));
       return false;
     }

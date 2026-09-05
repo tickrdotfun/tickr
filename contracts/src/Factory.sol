@@ -422,8 +422,12 @@ contract Factory is IFactory, Ownable2Step, ReentrancyGuard {
         returns (bytes32)
     {
         FeePolicy memory p = defaultPolicy;
+        // the factory's club goes into the pin as it is, not as resolved: a ticker invented inside the launch has no
+        // club at preview time and one at launch time, and the pin must agree with itself across that
         return keccak256(
-            abi.encode(id, c.supply, c.baseFeeBps, e.phantomQuote, e.decimals, c.tickSpacing, pairToken, p.creatorShareBps, p.clubShareBps, p.protocolShareBps, p.protocolFeeRecipient, launchFee)
+            abi.encode(
+                id, c.supply, c.baseFeeBps, e.phantomQuote, e.decimals, c.tickSpacing, pairToken, p.creatorShareBps, p.clubShareBps, p.protocolShareBps, p.protocolFeeRecipient, p.buybackBurnBps, feeClub, launchFee
+            )
         );
     }
 

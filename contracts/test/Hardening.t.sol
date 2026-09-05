@@ -201,7 +201,9 @@ contract HardeningTest is BaseTest {
 
     function test_deployer_capsMetadata_andRefusesEmptyNames() public {
         TokenParams memory p = defaultParams(address(0), 0);
-        p.name = string(new bytes(65));
+        bytes memory long = new bytes(65);
+        for (uint256 i; i < 65; i++) long[i] = "a";
+        p.name = string(long);
         vm.prank(creator);
         vm.expectRevert(LaunchDeployer.MetadataTooLong.selector);
         factory.launchToken{value: LAUNCH_FEE}(p, 0, address(0));
@@ -211,7 +213,9 @@ contract HardeningTest is BaseTest {
         vm.expectRevert(LaunchDeployer.EmptyMetadata.selector);
         factory.launchToken{value: LAUNCH_FEE}(p, 0, address(0));
         p = defaultParams(address(0), 0);
-        p.socials.website = string(new bytes(257));
+        bytes memory site = new bytes(257);
+        for (uint256 i; i < 257; i++) site[i] = "b";
+        p.socials.website = string(site);
         vm.prank(creator);
         vm.expectRevert(LaunchDeployer.MetadataTooLong.selector);
         factory.launchToken{value: LAUNCH_FEE}(p, 0, address(0));

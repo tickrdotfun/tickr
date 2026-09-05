@@ -30,7 +30,7 @@ Checked in order by `stockPrice`, which every other entry point routes through:
 | The asset is an active, official Stock Token in `AnchorRegistry` (kind 2) | `NotOfficialStockToken` |
 | It has a feed registered against it | `NoFeed` |
 | The feed answer is positive | `BadPrice` |
-| The feed is fresher than `maxStaleness` | `StalePrice` |
+| The feed is fresher than `maxStaleness`, three days at deploy so Friday's close still counts through the weekend, and its round is complete (`answeredInRound >= roundId`) | `StalePrice` |
 | Terms are pinned through `previewLaunch` before launching | `LaunchEconomicsMismatch` |
 
 `isEligibleQuote(token)` returns a bool and never reverts, so a front end can filter the list on-chain.

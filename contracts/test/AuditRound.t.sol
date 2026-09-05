@@ -195,6 +195,43 @@ contract AuditRoundTest is BaseTest {
         zap.zapBuy{value: 0.1 ether}(ZapRouter.ZapParams({token: address(t), tokenIn: address(0), amountIn: 0, path: none, minTokensOut: 0, recipient: bob, deadline: vm.getBlockTimestamp() + 1 hours}));
     }
 
+
+    function test_economicsPin_coversTheClub() public {
+        (,, bytes32 expected,) = tickers.previewLaunch("CLUBX", 0);
+        TokenParams memory p = defaultParams(address(0), 0);
+        p.expectedEconomics = expected;
+        uint256 fee = LAUNCH_FEE + tickers.NEW_TICKER_FEE();
+        // the owner drops the club between the preview and the send: the terms would change, so the launch refuses
+        vm.prank(owner);
+        factory.setFeeClub(address(0));
+        vm.prank(creator);
+        vm.expectRevert(IFactory.LaunchEconomicsMismatch.selector);
+        tickers.launch{value: fee}("CLUBX", p, 0);
+        // a fresh preview carries the new terms and goes through, with the club's share folded to the creator
+        (,, bytes32 again,) = tickers.previewLaunch("CLUBX", 0);
+        p.expectedEconomics = again;
+        vm.prank(creator);
+        (, address t,) = tickers.launch{value: fee}("CLUBX", p, 0);
+        assertEq(factory.getLaunchFeePolicy(t).club, address(0));
+        assertEq(factory.getLaunchFeePolicy(t).creatorShareBps, 7_000);
+    }
+
+    function test_names_noEdgeOrDoubleSpaces_noControlCharacters() public {
+        string[4] memory bad = ["NVIDIA ", " NVIDIA", "NVIDIA  Corp", "NVIDIA\tCorp"];
+        for (uint256 i; i < 4; i++) {
+            TokenParams memory p = defaultParams(address(0), 0);
+            p.name = bad[i];
+            vm.prank(creator);
+            vm.expectRevert();
+            factory.launchToken{value: LAUNCH_FEE}(p, 0, address(0));
+        }
+        TokenParams memory ok = defaultParams(address(0), 0);
+        ok.name = unicode"Bananas 🍌 on Robinhood";
+        vm.prank(creator);
+        (address t,) = factory.launchToken{value: LAUNCH_FEE}(ok, 0, address(0));
+        assertTrue(factory.getLaunchedToken(t).exists);
+    }
+
     function _key(address a, address b, uint24 fee, int24 spacing) internal pure returns (PoolKey memory) {
         (address c0, address c1) = a < b ? (a, b) : (b, a);
         return PoolKey(Currency.wrap(c0), Currency.wrap(c1), fee, spacing, IHooksZero.zero());

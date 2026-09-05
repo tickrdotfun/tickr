@@ -34,7 +34,8 @@ function sameSite(req: Request): boolean {
     return false;
   }
   const own = (process.env.PIN_ALLOWED_ORIGINS ?? "").split(",").map((h) => h.trim()).filter(Boolean);
-  const allowed = ["tickrfun.gg", "www.tickrfun.gg", "tickr-zeta.vercel.app", "tickrfun.vercel.app", "localhost:3000", "127.0.0.1:3000", ...own];
+  const dev = process.env.NODE_ENV !== "production" ? ["localhost:3000", "127.0.0.1:3000"] : [];
+  const allowed = ["tickrfun.gg", "www.tickrfun.gg", "tickr-zeta.vercel.app", "tickrfun.vercel.app", ...dev, ...own];
   const mine = req.headers.get("host") ?? "";
   return host === mine || allowed.includes(host);
 }
@@ -46,15 +47,24 @@ function sameSite(req: Request): boolean {
 async function overBudget(req: Request): Promise<boolean> {
   const ip = (req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
   const now = Date.now();
-  const hour = Math.floor(now / WINDOW_MS);
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    const env = getCloudflareContext().env as { NEXT_INC_CACHE_KV?: { get(k: string): Promise<string | null>; put(k: string, v: string, o?: { expirationTtl?: number }): Promise<void> } };
-    if (env.NEXT_INC_CACHE_KV) {
-      const key = `pin:${ip}:${hour}`;
-      const n = Number((await env.NEXT_INC_CACHE_KV.get(key)) ?? "0") + 1;
-      await env.NEXT_INC_CACHE_KV.put(key, String(n), { expirationTtl: 2 * 60 * 60 });
-      return n > PER_WINDOW;
+    const env = getCloudflareContext().env as {
+      NEXT_INC_CACHE_KV?: { get(k: string): Promise<string | null>; put(k: string, v: string, o?: { expirationTtl?: number }): Promise<void> };
+      PIN_BURST?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+    };
+    // the hourly count is kept by one object per address in the tokens Worker: single-threaded, so twenty
+    // requests at once are twenty increments, not twenty reads of zero. the edge burst limit sits in front of it.
+    if (env.PIN_BURST && !(await env.PIN_BURST.limit({ key: ip })).success) return true;
+    const base = process.env.TOKENS_URL;
+    const secret = process.env.BUDGET_KEY;
+    if (base && secret) {
+      const r = await fetch(`${base}budget?key=${encodeURIComponent(ip)}&secret=${encodeURIComponent(secret)}`);
+      if (r.ok) {
+        const d = (await r.json()) as { allowed?: boolean };
+        return d.allowed === false;
+      }
+      return true; // a budget that cannot be asked is a budget that is exhausted, not one that is unlimited
     }
   } catch {
     // not on Cloudflare
@@ -66,9 +76,34 @@ async function overBudget(req: Request): Promise<boolean> {
   return recent.length > PER_WINDOW;
 }
 
+/** Which controls this deployment has, so an operator can check a deploy without uploading anything. */
+export async function GET() {
+  let burst = false;
+  let kv = false;
+  try {
+    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+    const env = getCloudflareContext().env as Record<string, unknown>;
+    burst = !!env.PIN_BURST;
+    kv = !!env.NEXT_INC_CACHE_KV;
+    // one token from a diagnostic bucket per call, so the limiter can be seen to count
+    let probe: unknown = "no binding";
+    try {
+      probe = env.PIN_BURST ? await (env.PIN_BURST as { limit(o: { key: string }): Promise<{ success: boolean }> }).limit({ key: "diag" }) : probe;
+    } catch (e) {
+      probe = `limit threw: ${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`;
+    }
+    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, burst, kv, probe, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
+  } catch {
+    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, burst, kv, bindings: [] });
+  }
+}
+
 export async function POST(req: Request) {
   if (!sameSite(req)) return NextResponse.json({ error: "pinning is for the create page only." }, { status: 403 });
   if (await overBudget(req)) return NextResponse.json({ error: "too many uploads from this address. try again in an hour, or paste an image link." }, { status: 429 });
+  // the size is refused from the header, before any of the body is read
+  const declared = Number(req.headers.get("content-length") ?? "0");
+  if (declared > MAX_BYTES + 64 * 1024) return NextResponse.json({ error: "up to 4 MB." }, { status: 413 });
   const jwt = process.env.PINATA_JWT;
   if (!jwt) return NextResponse.json({ error: "pinning is not configured on this deployment yet. paste an image link instead." }, { status: 503 });
   try {

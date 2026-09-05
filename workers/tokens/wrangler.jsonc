@@ -1,6 +1,6 @@
 {
   "$schema": "../../web/node_modules/wrangler/config-schema.json",
-  // Builds the "any token" list every five minutes and writes it to KV. The site reads that one key, so a
+  // Builds the "any token" list every fifteen minutes and writes it to KV. The site reads that one key, so a
   // visitor's request never makes a hundred chain calls.
   "name": "tickr-tokens",
   "main": "src/index.ts",
@@ -9,6 +9,8 @@
   "triggers": { "crons": ["*/15 * * * *"] },
   "observability": { "enabled": true },
   "kv_namespaces": [{ "binding": "TICKR_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }],
+  "durable_objects": { "bindings": [{ "name": "PIN_BUDGET", "class_name": "PinBudget" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PinBudget"] }],
   "vars": {
     "RPC_URL": "https://rpc.mainnet.chain.robinhood.com",
     "EXPLORER": "https://robinhoodchain.blockscout.com/api/v2",

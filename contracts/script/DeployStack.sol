@@ -43,6 +43,8 @@ abstract contract DeployStack {
     /// @dev A token needs a v3 pool holding this much WETH, or else this much USDG, to price a launch.
     uint256 internal constant MIN_DEPTH_WETH = 5 ether;
     uint256 internal constant MIN_DEPTH_USDG = 15_000e6;
+    /// @dev Stock feeds print during market hours only: Friday's close must still count on Sunday evening.
+    uint256 internal constant STOCK_MAX_STALENESS = 3 days;
     /// @dev The live ETH/USDG pool the ticker fee is converted through, and the spacing of every launch pool.
     uint24 internal constant ETH_USDG_FEE = 100;
     int24 internal constant ETH_USDG_TICK_SPACING = 1;
@@ -142,7 +144,7 @@ abstract contract DeployStack {
         s.coinQuote = new CoinQuoteLauncher(owner, s.factory, pm, s.registry, ILaunchSeeder(address(s.seeder)));
         s.tickers = new TickerLauncher(s.factory, s.registry, IERC20(usdg), ILaunchSeeder(address(s.seeder)));
         // One USD target for every Stock Token; each launch converts it through that asset's own Chainlink feed.
-        s.stockQuote = new StockQuoteLauncher(owner, s.factory, s.registry, ILaunchSeeder(address(s.seeder)), STOCK_TARGET_RAISE_USD, 1 days);
+        s.stockQuote = new StockQuoteLauncher(owner, s.factory, s.registry, ILaunchSeeder(address(s.seeder)), STOCK_TARGET_RAISE_USD, STOCK_MAX_STALENESS);
         // Any token on the chain with a real market, priced from its deepest v3 pool against WETH or USDG.
         s.marketQuote = new MarketQuoteLauncher(owner, s.factory, s.registry, IUniswapV3Factory(_v3Factory()), _weth(), usdg, ILaunchSeeder(address(s.seeder)), MIN_DEPTH_WETH, MIN_DEPTH_USDG);
         // Buy any coin with ETH in one transaction, whatever it is quoted in.

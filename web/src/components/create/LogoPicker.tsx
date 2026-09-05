@@ -143,6 +143,8 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
   // an image pasted while the image area has focus becomes the coin image. nowhere else on the page listens,
   // so a screenshot pasted into a text field, or by accident, is never uploaded.
   const onZonePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return; // the link field inside the zone takes text
     const f = Array.from(e.clipboardData?.files ?? []).find((x) => x.type.startsWith("image/"));
     if (!f) return;
     e.preventDefault();

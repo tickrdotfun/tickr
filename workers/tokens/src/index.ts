@@ -4,7 +4,7 @@
  * The site's create page offers every token on Robinhood Chain that a launch can be priced in: an ERC-20 with a
  * Uniswap v3 pool against WETH or USDG deep enough for `MarketQuoteLauncher` to accept it. Working that out takes
  * a Blockscout crawl and a few hundred chain reads, which is far too much for a visitor's request. So this Worker
- * does it every five minutes and writes the answer to KV under `chain-tokens`; the site reads that one key.
+ * does it every fifteen minutes and writes the answer to KV under `chain-tokens`; the site reads that one key.
  *
  * It holds no keys and signs nothing. Everything it reads is public.
  */
@@ -25,6 +25,8 @@ type Env = {
   MARKET_QUOTE_LAUNCHER: string;
   BLOCKSCOUT_KEY?: string;
   REFRESH_KEY?: string;
+  BUDGET_KEY?: string;
+  PIN_BUDGET: DurableObjectNamespace;
 };
 
 export type ChainToken = {
@@ -346,6 +348,30 @@ async function refresh(env: Env) {
   return { ...out, stored: false, keeping: kept ? (JSON.parse(kept) as { tokens: unknown[] }).tokens.length : 0 };
 }
 
+/**
+ * The pin budget: how many uploads an address may make per hour, counted in one place. A Durable Object is a
+ * single-threaded counter, so twenty requests at once cannot each see "zero" the way a read-then-write in KV can.
+ */
+export class PinBudget {
+  state: DurableObjectState;
+  constructor(state: DurableObjectState) {
+    this.state = state;
+  }
+  async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const limit = Number(url.searchParams.get("limit") ?? "12");
+    const windowMs = Number(url.searchParams.get("window") ?? String(60 * 60_000));
+    const now = Date.now();
+    const hits = ((await this.state.storage.get<number[]>("hits")) ?? []).filter((t) => now - t < windowMs);
+    const allowed = hits.length < limit;
+    if (allowed) {
+      hits.push(now);
+      await this.state.storage.put("hits", hits);
+    }
+    return Response.json({ allowed, count: hits.length, limit });
+  }
+}
+
 export default {
   async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(refresh(env).then((o) => console.log(`tokens: ${o.tokens.length} of ${o.stats.candidates} candidates`)));
@@ -358,6 +384,13 @@ export default {
       if (!env.REFRESH_KEY || url.searchParams.get("key") !== env.REFRESH_KEY) return new Response("not found", { status: 404 });
       const out = await refresh(env);
       return Response.json({ ok: true, ...out.stats, tokens: out.tokens.length, stored: out.stored, keeping: out.keeping });
+    }
+    // the pin budget for the site: one counter per address, atomic. `key` is the caller's address, `secret` proves the caller is ours.
+    if (url.pathname === "/budget") {
+      if (!env.BUDGET_KEY || url.searchParams.get("secret") !== env.BUDGET_KEY) return new Response("not found", { status: 404 });
+      const who = url.searchParams.get("key") ?? "unknown";
+      const stub = env.PIN_BUDGET.get(env.PIN_BUDGET.idFromName(who));
+      return stub.fetch(new Request(`https://budget/?limit=12&window=${60 * 60_000}`));
     }
     const cached = await env.TICKR_KV.get(KEY);
     return new Response(cached ?? JSON.stringify({ tokens: [], at: 0 }), { headers: { "content-type": "application/json", "cache-control": "public, max-age=60" } });

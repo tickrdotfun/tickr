@@ -22,6 +22,7 @@ contract LaunchDeployer is ILaunchDeployer {
 
     error EmptyMetadata();
     error BadSymbol();
+    error BadName();
     error MetadataTooLong();
 
     constructor(address factory_) {
@@ -49,6 +50,14 @@ contract LaunchDeployer is ILaunchDeployer {
     /// @dev Bounded so `name`, `symbol`, `socials()` and `contractURI()` stay readable by anyone forever.
     function _checkMetadata(TokenParams calldata p) internal pure {
         if (bytes(p.name).length == 0 || bytes(p.symbol).length == 0) revert EmptyMetadata();
+        // a name may hold any script, but not a space at either end, two spaces in a row, or a control character:
+        // the reserved list compares whole names, and those are the ways to look like one without matching it
+        bytes memory nm = bytes(p.name);
+        if (nm[0] == 0x20 || nm[nm.length - 1] == 0x20) revert BadName();
+        for (uint256 i; i < nm.length; i++) {
+            if (uint8(nm[i]) < 0x20 || nm[i] == 0x7F) revert BadName();
+            if (nm[i] == 0x20 && i + 1 < nm.length && nm[i + 1] == 0x20) revert BadName();
+        }
         // a symbol is letters and digits, nothing else: no "NVDA " past the reserved list, no lookalike scripts
         bytes memory sym = bytes(p.symbol);
         for (uint256 i; i < sym.length; i++) {

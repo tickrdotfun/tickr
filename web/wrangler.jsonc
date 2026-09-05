@@ -8,6 +8,8 @@
   "assets": { "binding": "ASSETS", "directory": ".open-next/assets" },
   "observability": { "enabled": true },
   "vars": { "TOKENS_URL": "https://tickr-tokens.tickrdotfun.workers.dev/" },
+  // three pins a minute per address, counted atomically at the edge; the hourly budget in KV sits behind it
+  "ratelimits": [{ "name": "PIN_BURST", "namespace_id": "1001", "simple": { "limit": 3, "period": 60 } }],
   "kv_namespaces": [
     // Next's own cache; the token list lives in the same namespace, written by the tickr-tokens Worker.
     { "binding": "NEXT_INC_CACHE_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }
@@ -19,6 +21,7 @@
       "assets": { "binding": "ASSETS", "directory": ".open-next/assets" },
       "observability": { "enabled": true },
       "vars": { "TOKENS_URL": "https://tickr-tokens.tickrdotfun.workers.dev/" },
+      "ratelimits": [{ "name": "PIN_BURST", "namespace_id": "1002", "simple": { "limit": 3, "period": 60 } }],
       "kv_namespaces": [{ "binding": "NEXT_INC_CACHE_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }]
     }
   }

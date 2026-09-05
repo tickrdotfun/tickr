@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import type { Hash } from "viem";
 import { errorMessage } from "@/lib/format";
@@ -40,6 +40,8 @@ export function useTx() {
   const [hash, setHash] = useState<Hash | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [step, setStep] = useState<string | undefined>();
+  // the failure behind the last undefined result, for callers that want to react to a specific revert
+  const lastError = useRef<unknown>(undefined);
 
   const run = useCallback(
     async (steps: TxStep[]): Promise<Hash | undefined> => {
@@ -77,6 +79,7 @@ export function useTx() {
         setStep(undefined);
         return last;
       } catch (e) {
+        lastError.current = e;
         setStatus("error");
         setError(errorMessage(e));
         setStep(undefined);
@@ -93,5 +96,5 @@ export function useTx() {
     setStep(undefined);
   }, []);
 
-  return { run, status, hash, error, step, reset, busy: status === "signing" || status === "confirming" };
+  return { run, status, hash, error, step, reset, lastError, busy: status === "signing" || status === "confirming" };
 }
