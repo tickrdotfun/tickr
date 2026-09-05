@@ -575,6 +575,12 @@
   .grid-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 32px; margin-top: 10px; }
   .grid-search { max-width: 260px; }
   /* plain text, not pills: these are a quiet preference, not a control panel */
+  /* the quick shares under the amount box: one row of equal cells, joined to the box above */
+  .amount-quick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 44px; margin-top: -1px; border: 1px solid var(--border); border-radius: 0 0 10px 10px; overflow: hidden; background: rgb(0 0 0 / 0.18); }
+  .amount-quick button { padding: 9px 0; font-size: 13.5px; color: var(--muted); background: transparent; border: 0; border-left: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; }
+  .amount-quick button:first-child { border-left: 0; }
+  .amount-quick button:hover:not(:disabled) { color: var(--text); background: rgb(255 255 255 / 0.04); }
+  .amount-quick button:disabled { color: var(--dim); }
   .seg { display: inline-flex; align-items: baseline; gap: 14px; }
   .seg-k { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
   .seg-item {

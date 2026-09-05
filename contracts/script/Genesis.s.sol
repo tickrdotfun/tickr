@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Script, console} from "forge-std/Script.sol";
-import {Vm} from "forge-std/Vm.sol";
+import {GenesisSizer} from "./lib/GenesisSizer.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -31,35 +31,11 @@ import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 /// env: PRIVATE_KEY (the deployer, whitelisted at deploy), TREASURY (holds the genesis TICKR and is its fee recipient, defaults to the deployer),
 /// GENESIS_LOGO (image URI, may be empty), GENESIS_SHARE_BPS (first buy as a share of supply, default 680 = 6.8%).
 ///
+/// This file holds one contract and must stay that way: with two, `forge script script/Genesis.s.sol` refuses to
+/// run without `--tc`, and neither local.sh nor the runbook passes it. Helpers live in script/lib.
+///
 /// TICKR's address ends in 6942, like every coin launched from the site. The salt is ground here, off chain, against
 /// the deployed LaunchDeployer's own prediction, and the script refuses to launch if the prediction does not end that way.
-/// @dev Runs one sizing attempt as the deployer, in the simulation only. It lives outside the script contract so
-/// that a failing attempt can be caught: a probe the dollar pool cannot absorb reverts, and must count as too much.
-contract GenesisSizer {
-    Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
-
-    /// @dev `eth` into dollars, every dollar into the launch-and-buy, as the deployer.
-    function attempt(
-        LaunchSeeder seeder,
-        TickerLauncher tickers,
-        address usdg,
-        PoolKey memory ethUsdg,
-        TokenParams memory p,
-        uint256 fees,
-        uint256 eth,
-        address me
-    ) external returns (uint256 usdgGot, uint256 out) {
-        uint256 before = IERC20(usdg).balanceOf(me);
-        vm.prank(me);
-        seeder.swapExactIn{value: eth}(ethUsdg, true, eth, 0, me);
-        usdgGot = IERC20(usdg).balanceOf(me) - before;
-        vm.prank(me);
-        IERC20(usdg).approve(address(tickers), usdgGot);
-        vm.prank(me);
-        (,,, out) = tickers.launchAndBuy{value: fees}("FUN", p, 0, usdgGot, 0);
-    }
-}
-
 contract Genesis is Script {
     using stdJson for string;
 

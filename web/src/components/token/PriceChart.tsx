@@ -42,9 +42,11 @@ export function PriceChart({ d }: { d: TokenData }) {
   const td = meta.decimals ?? 18;
   const qd = quote?.decimals ?? 18;
 
+  // the opening point needs the supply and both decimals; until they are in, there is nothing right to draw
+  const ready = !!client && !!poolId && !!pool.key && !!launch && meta.totalSupply !== undefined && meta.decimals !== undefined && quote?.decimals !== undefined;
   const swaps = useQuery({
-    queryKey: ["swaps", poolId],
-    enabled: !!client && !!poolId && !!pool.key,
+    queryKey: ["swaps", poolId, td, qd, meta.totalSupply?.toString()],
+    enabled: ready,
     staleTime: 15_000,
     refetchInterval: 20_000,
     queryFn: async (): Promise<Point[]> => {
@@ -65,7 +67,7 @@ export function PriceChart({ d }: { d: TokenData }) {
       logs.sort((x, y) => (x.blockNumber === y.blockNumber ? Number(x.logIndex ?? 0) - Number(y.logIndex ?? 0) : x.blockNumber < y.blockNumber ? -1 : 1));
 
       // the opening price, from the launch itself: what the pool held against the whole supply
-      const opening = Number(launch.phantomQuote) / 10 ** qd / (Number(meta.totalSupply ?? 0n) / 10 ** td || 1);
+      const opening = Number(launch.phantomQuote) / 10 ** qd / (Number(meta.totalSupply ?? 0n) / 10 ** td);
       const points: Point[] = [{ time: Number(launch.launchedAt ?? 0n) as UTCTimestamp, value: opening }];
       if (logs.length) {
         // two block reads give the line its clock; blocks between them are spaced evenly

@@ -39,6 +39,8 @@ forge script script/RegisterStockTokens.s.sol --rpc-url $RPC --broadcast 2>&1 | 
 
 echo "▸ genesis: TICKR priced in FUN, the first launch, then launches open"
 forge script script/Genesis.s.sol --rpc-url $RPC --broadcast --slow 2>&1 | grep -aE "^\s+genesis|Error" || true
+# without the official coin the fork is not the product; stop here rather than record a site without it
+grep -q genesisToken "$DEPLOY_RECORD" || { echo "genesis did not land on the fork; see above"; exit 1; }
 echo "▸ seeding demo launches"
 forge script script/Seed.s.sol --rpc-url $RPC --broadcast --slow --gas-estimate-multiplier 200 2>&1 | grep -aE "^\s*[0-9] |Error" || true
 # warm every cold read the demo pages make against live-chain contracts, while the upstream still serves the fork block

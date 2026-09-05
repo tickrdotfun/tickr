@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useBalance } from "wagmi";
 import { erc20Abi } from "viem";
 import type { TokenData } from "@/hooks/useTokenData";
@@ -137,14 +137,16 @@ export function TradePanel({ d }: { d: TokenData }) {
     }
   }
 
-  const setMax = () => {
+  /** A share of what the wallet holds, in the box: the whole balance at 10,000, with gas headroom kept when paying in ETH. */
+  const setShare = (bps: bigint) => {
     if (side === "buy") {
       if (quoteBal === undefined) return;
-      // leave a little gas headroom when paying in ETH
-      const v = inEth ? (quoteBal > 10n ** 15n ? quoteBal - 10n ** 15n : 0n) : quoteBal;
-      setAmount(fmtRaw(v, payDecimals));
-    } else if (tokenBal !== undefined) setAmount(fmtRaw(tokenBal, td));
+      const spendable = inEth ? (quoteBal > 10n ** 15n ? quoteBal - 10n ** 15n : 0n) : quoteBal;
+      setAmount(fmtRaw((spendable * bps) / 10_000n, payDecimals));
+    } else if (tokenBal !== undefined) setAmount(fmtRaw((tokenBal * bps) / 10_000n, td));
   };
+  const setMax = () => setShare(10_000n);
+  const amountBox = useRef<HTMLInputElement>(null);
 
   const poolFeeBps = launch ? Number(launch.poolFee) / 100 : undefined;
   const baseBps = policy ? Number(policy.hookFeeBps) : undefined;
@@ -183,7 +185,21 @@ export function TradePanel({ d }: { d: TokenData }) {
               bal {side === "buy" ? fmtAmount(quoteBal, payDecimals, { sig: 4 }) : fmtAmount(tokenBal, td, { sig: 4 })}
             </button>
           </div>
-          <input className="num !text-[20px]" inputMode="decimal" placeholder="0.0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input ref={amountBox} className="num !text-[20px]" inputMode="decimal" placeholder="0.0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          {/* a share of the balance in one tap; the pencil is for typing a number */}
+          <div className="amount-quick" role="group" aria-label="amount as a share of the balance">
+            {[1_000n, 2_500n, 5_000n, 10_000n].map((bps) => (
+              <button key={bps.toString()} type="button" className="num" onClick={() => setShare(bps)} disabled={side === "buy" ? quoteBal === undefined : tokenBal === undefined}>
+                {Number(bps) / 100}%
+              </button>
+            ))}
+            <button type="button" aria-label="type an amount" title="type an amount" onClick={() => amountBox.current?.focus()}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
+          </div>
           {!nativePair && ethAvailable && (
             <button
               type="button"

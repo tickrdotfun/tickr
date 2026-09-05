@@ -9,6 +9,7 @@ import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {HookMine} from "./lib/HookMine.sol";
 
 import {Factory, FactoryInit} from "../src/Factory.sol";
+import {IFactory} from "../src/interfaces/IFactory.sol";
 import {LaunchDeployer} from "../src/LaunchDeployer.sol";
 import {FeeEscrow} from "../src/FeeEscrow.sol";
 import {LaunchLocker} from "../src/LaunchLocker.sol";
@@ -19,6 +20,8 @@ import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {LaunchAndBuyRouter} from "../src/LaunchAndBuyRouter.sol";
 import {AnchorRegistry} from "../src/AnchorRegistry.sol";
 import {BuybackVault} from "../src/BuybackVault.sol";
+import {BuybackTreasury} from "../src/BuybackTreasury.sol";
+import {IFeeEscrow} from "../src/interfaces/IFeeEscrow.sol";
 import {TickerLauncher} from "../src/TickerLauncher.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CoinQuoteLauncher} from "../src/mode3/CoinQuoteLauncher.sol";
@@ -66,6 +69,7 @@ abstract contract DeployStack {
         FeeEscrow escrow;
         LaunchLocker locker;
         BuybackVault buybackVault;
+        BuybackTreasury treasury;
         LaunchDeployer launchDeployer;
         LaunchSeeder seeder;
         ChartGuardHook chartHook;
@@ -90,11 +94,12 @@ abstract contract DeployStack {
 
     /// @param sender the account whose nonce sequences the CREATE deployments (EOA in a script, test contract in tests)
     /// @param create2Deployer who executes `new{salt}` (CREATE2 proxy in a script, the test contract in tests)
+    /// @param teamWallet where the team's slice of protocol revenue goes; the factory's own recipient is the treasury
     function _deployStack(
         address sender,
         address create2Deployer,
         address owner,
-        address protocolFeeRecipient,
+        address teamWallet,
         IPoolManager pm,
         IPositionManager posm,
         IAllowanceTransfer permit2,
@@ -104,9 +109,11 @@ abstract contract DeployStack {
         s.escrow = new FeeEscrow();
         s.buybackVault = new BuybackVault(owner);
 
-        // locker -> guard hook (CREATE2) -> launch deployer -> executor -> factory
-        address executorPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 3);
-        address factoryPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 4);
+        // treasury -> locker -> guard hook (CREATE2) -> launch deployer -> executor -> factory
+        address executorPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 4);
+        address factoryPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 5);
+        // the protocol's share goes to the buyback treasury from the first launch on; the team is paid from there
+        s.treasury = new BuybackTreasury(IFactory(factoryPred), IFeeEscrow(address(s.escrow)), LaunchSeeder(payable(executorPred)), IERC20(usdg), teamWallet);
         s.locker = new LaunchLocker(posm, pm, factoryPred);
         {
             uint160 guardFlags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.AFTER_SWAP_FLAG;
@@ -128,7 +135,7 @@ abstract contract DeployStack {
                 launchFee: LAUNCH_FEE,
                 maxCreatorTaxBps: MAX_CREATOR_TAX_BPS,
                 defaultPolicy: FeePolicy({
-                    protocolFeeRecipient: protocolFeeRecipient,
+                    protocolFeeRecipient: address(s.treasury),
                     creatorShareBps: 6_000, // of the 1% trade fee: creator 60%, ticker club 10%, protocol 30%
                     clubShareBps: 1_000,
                     protocolShareBps: 3_000,

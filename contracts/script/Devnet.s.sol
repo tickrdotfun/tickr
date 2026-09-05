@@ -157,6 +157,7 @@ contract Devnet is Script, DeployStack {
         vm.serializeAddress(j, "launchDeployer", address(s.launchDeployer));
         vm.serializeAddress(j, "launchSeeder", address(s.seeder));
         vm.serializeAddress(j, "buybackVault", address(s.buybackVault));
+        vm.serializeAddress(j, "buybackTreasury", address(s.treasury));
         vm.serializeAddress(j, "anchorRegistry", address(s.registry));
         vm.serializeAddress(j, "launchAndBuyRouter", address(s.router));
         vm.serializeAddress(j, "tickerLauncher", address(s.tickers));

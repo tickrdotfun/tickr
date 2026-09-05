@@ -51,8 +51,8 @@ export function TokenDetails({ d, address, burnedUsd }: { d: TokenData; address:
               />
               <Fact
                 k="base fee split"
-                v={split ? [split.creatorShareBps, ...(split.clubShareBps > 0 ? [split.clubShareBps] : []), split.protocolShareBps].map((b) => `${Math.round(b / 100)}%`).join(" / ") : "-"}
-                sub={split ? `${split.clubShareBps > 0 ? "creator, ticker club, protocol" : "creator, protocol"}. frozen at launch` : "frozen at launch"}
+                v={split ? [split.creatorShareBps, ...(split.clubShareBps > 0 ? [split.clubShareBps] : []), split.protocolShareBps].map((b) => String(Math.round(b / 100))).join(" / ") : "-"}
+                sub={split ? `percent to ${split.clubShareBps > 0 ? "creator, ticker club, protocol" : "creator, protocol"}. frozen at launch` : "frozen at launch"}
               />
               <Fact
                 k="creator tax"
