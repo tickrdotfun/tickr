@@ -175,7 +175,7 @@ contract AuditRoundTest is BaseTest {
         factory.launchToken{value: LAUNCH_FEE + 1}(p, 0, address(0));
         vm.prank(owner);
         factory.setLaunchFee(LAUNCH_FEE);
-        FeePolicy memory pol = FeePolicy({protocolFeeRecipient: protocolFees, creatorShareBps: 5_000, clubShareBps: 1_000, protocolShareBps: 4_000, buybackBurnBps: 0, club: address(0), hookFeeBps: 100, maxInternalPriceImpactBps: 300});
+        FeePolicy memory pol = FeePolicy({protocolFeeRecipient: protocolFees, creatorShareBps: 4_500, clubShareBps: 1_000, protocolShareBps: 4_500, buybackBurnBps: 0, club: address(0), hookFeeBps: 100, maxInternalPriceImpactBps: 300});
         vm.prank(owner);
         factory.setFeePolicy(pol);
         vm.prank(creator);
@@ -185,7 +185,7 @@ contract AuditRoundTest is BaseTest {
         p = defaultParams(address(0), 0);
         vm.prank(creator);
         (address t,) = factory.launchToken{value: LAUNCH_FEE}(p, 0, address(0));
-        assertEq(factory.getLaunchFeePolicy(t).creatorShareBps, 6_000, "the new split, with the club's part folded to the creator outside a ticker");
+        assertEq(factory.getLaunchFeePolicy(t).creatorShareBps, 5_500, "the new split, with the club's part folded to the creator outside a ticker");
     }
 
     function test_zap_emptyPathIsABadPath() public {
@@ -214,7 +214,7 @@ contract AuditRoundTest is BaseTest {
         vm.prank(creator);
         (, address t,) = tickers.launch{value: fee}("CLUBX", p, 0);
         assertEq(factory.getLaunchFeePolicy(t).club, address(0));
-        assertEq(factory.getLaunchFeePolicy(t).creatorShareBps, 7_000);
+        assertEq(factory.getLaunchFeePolicy(t).creatorShareBps, 6_000);
     }
 
     function test_names_noEdgeOrDoubleSpaces_noControlCharacters() public {

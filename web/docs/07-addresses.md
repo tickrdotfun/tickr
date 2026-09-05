@@ -48,7 +48,7 @@ Addresses are written to `contracts/deployments/4663.json` by the deploy script.
 | `LaunchAndBuyRouter` | Create + first buy in one tx (must be a factory registrar) | TBD, see `contracts/deployments/4663.json` after deploy |
 | `AnchorRegistry` | ETH / USDG / official Stock Token allowlist | TBD, see `contracts/deployments/4663.json` after deploy |
 | `BuybackVault` | Receives buyback slices; strategy interface only in v1 | TBD, see `contracts/deployments/4663.json` after deploy |
-| `BuybackTreasury` | The protocol's fee recipient, frozen into every launch: collects the protocol share, pays the team its 20%, buys TICKR with the other 80% and burns it. No owner | TBD, see `contracts/deployments/4663.json` after deploy |
+| `BuybackTreasury` | The protocol's fee recipient, frozen into every launch: collects the protocol share, pays the team half, buys TICKR with the other half and burns it. No owner | TBD, see `contracts/deployments/4663.json` after deploy |
 | `TickerLauncher` | Invents tickers (one-for-one USDG wrappers) and launches coins under them; a factory registrar and the ticker club; no owner | TBD, see `contracts/deployments/4663.json` after deploy |
 | `Factory` | Launches, records, owner terms, the CTO timelock; `launchToken`, `getLaunchedToken`, `poolKeyOf` | TBD, see `contracts/deployments/4663.json` after deploy |
 | `ChartGuardHook` | The hook on every ticker's dollar pool: opened only by the seeder at one dollar, liquidity within the band, no swap that moves the price | TBD, see `contracts/deployments/4663.json` after deploy |

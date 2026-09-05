@@ -247,8 +247,8 @@ export function CreateForm() {
   });
   const diyOn = tab === "diy" && !isZero(ADDRESSES.tickerLauncher);
   const sharedOn = diyOn && diyMode === "existing";
-  // the split this launch will freeze: 60 / 10 / 30 under a ticker, where the club exists; elsewhere the club's
-  // share is the creator's, 70 / 30
+  // the split this launch will freeze: 50 / 10 / 40 under a ticker, where the club exists; elsewhere the club's
+  // share is the creator's, 60 / 40
   const split: FeeSplit | undefined = policy.data
     ? diyOn
       ? { creatorShareBps: Number(policy.data[1]), clubShareBps: Number(policy.data[2]), protocolShareBps: Number(policy.data[3]) }

@@ -136,9 +136,9 @@ abstract contract DeployStack {
                 maxCreatorTaxBps: MAX_CREATOR_TAX_BPS,
                 defaultPolicy: FeePolicy({
                     protocolFeeRecipient: address(s.treasury),
-                    creatorShareBps: 6_000, // of the 1% trade fee: creator 60%, ticker club 10%, protocol 30%
+                    creatorShareBps: 5_000, // of the 1% trade fee: creator 50%, ticker club 10%, protocol 40%; no club, and the club's 10% is the creator's
                     clubShareBps: 1_000,
-                    protocolShareBps: 3_000,
+                    protocolShareBps: 4_000,
                     buybackBurnBps: 0,
                     club: address(0),
                     hookFeeBps: 100,

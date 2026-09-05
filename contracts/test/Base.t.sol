@@ -137,9 +137,9 @@ abstract contract BaseTest is Test, DeployPermit2 {
                 maxCreatorTaxBps: 1_000,
                 defaultPolicy: FeePolicy({
                     protocolFeeRecipient: protocolFees,
-                    creatorShareBps: 6_000, // of the 1% trade fee: creator 60%, ticker club 10%, protocol 30%
+                    creatorShareBps: 5_000, // of the 1% trade fee: creator 50%, ticker club 10%, protocol 40%
                     clubShareBps: 1_000,
-                    protocolShareBps: 3_000,
+                    protocolShareBps: 4_000,
                     buybackBurnBps: 0,
                     club: address(0),
                     hookFeeBps: 100,

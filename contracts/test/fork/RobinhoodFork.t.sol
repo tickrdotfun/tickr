@@ -70,7 +70,7 @@ contract RobinhoodForkTest is Test, DeployStack {
         PoolKey memory key = s.factory.poolKeyOf(t);
         assertEq(PoolId.unwrap(key.toId()), poolId);
         assertEq(address(key.hooks), address(0), "no hook");
-        // buy, sell, collect: the split lands where it should and the coin side burns
+        // buy, sell, collect: the split lands where it should on both sides
         vm.prank(alice);
         uint256 got = s.seeder.swapExactIn{value: 1 ether}(key, true, 1 ether, 0, alice);
         assertGt(got, 0);
@@ -81,7 +81,8 @@ contract RobinhoodForkTest is Test, DeployStack {
         (uint256 q, uint256 c) = s.locker.collectFees(t);
         assertGt(q, 0, "ETH fees collected");
         assertGt(c, 0, "coin fees collected");
-        assertEq(Token(t).balanceOf(BURN), c, "the whole coin-side fee burned");
+        assertEq(Token(t).balanceOf(BURN), (c * 4_000) / 10_000, "the protocol's share of the coin side burned");
+        assertEq(s.escrow.balanceOfToken(creator, t), c - (c * 4_000) / 10_000, "the creator holds the rest in the coin");
         assertGt(s.escrow.balanceOf(creator), 0, "creator's ETH in escrow");
         emit log_named_address("FORK coin", t);
         emit log_named_bytes32("FORK pool id", poolId);
@@ -245,8 +246,9 @@ contract RobinhoodForkTest is Test, DeployStack {
         assertTrue(did0 && did1, "both orders launched on the real USDG");
     }
 
-    /// The coin side burns in full on the real chain: sell, collect, the dead balance grows by the whole coin fee.
-    function test_fork_sellSideFeesBurnInFull() public {
+    /// The coin side splits on the real chain: sell, collect, the dead balance grows by the protocol's share of the coin
+    /// fee and the creator's escrow in the coin grows by the rest.
+    function test_fork_sellSide_creatorKeepsTheirShare_protocolAndClubBurn() public {
         if (!live) return;
         bytes32 expected = s.factory.previewLaunchEconomics(0, address(0));
         vm.prank(creator);
@@ -262,8 +264,9 @@ contract RobinhoodForkTest is Test, DeployStack {
         uint256 creatorEthBefore = s.escrow.balanceOf(creator);
         (uint256 q, uint256 c) = s.locker.collectFees(t);
         assertGt(c, 0, "coin fees collected");
-        assertEq(Token(t).balanceOf(BURN) - deadBefore, c, "all of it dead");
-        assertEq(s.escrow.balanceOfToken(creator, t), 0, "creator holds no coin from fees");
+        uint256 burned = (c * 4_000) / 10_000;
+        assertEq(Token(t).balanceOf(BURN) - deadBefore, burned, "the protocol's 40% of the coin side is dead");
+        assertEq(s.escrow.balanceOfToken(creator, t), c - burned, "the creator holds its 60% of the coin side");
         assertGt(s.escrow.balanceOf(creator) - creatorEthBefore, 0, "creator earned the quote on the buy");
         assertEq(Token(t).totalSupply(), SUPPLY);
         emit log_named_uint("BURN coin fee collected", c);

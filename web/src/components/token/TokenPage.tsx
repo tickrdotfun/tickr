@@ -99,7 +99,7 @@ export function TokenPage({ address }: { address: Address }) {
               <Figure hue="signal" label="pool price" n={fmtPrice(price)} unit={qs} sub={`per ${meta.symbol ?? "token"}`} />
               <Figure hue="blue" label="market cap" n={mcap !== undefined ? fmtNumber(mcap) : "-"} unit={mcap !== undefined ? qs : ""} sub={`opened at ${fmtAmount(launch.phantomQuote, qd, { sig: 4 })} ${qs}`} />
               <Figure hue="yellow" label="liquidity" n={pool.quoteInPool !== undefined ? fmtNumber(pool.quoteInPool) : "-"} unit={qs} sub="in the locked position, quote side" />
-              <Figure hue="orange" label="fees earned" n={fmtAmount(feesQuote, qd, { sig: 4 })} unit={qs} sub="on buys, in the quote. sells burn their fee" />
+              <Figure hue="orange" label="fees earned" n={fmtAmount(feesQuote, qd, { sig: 4 })} unit={qs} sub="in the quote, on buys. sells pay in the coin, split the same way" />
               <Figure hue="pink" label="burned" n={fmtAmount(fees.burned ?? 0n, meta.decimals, { sig: 4 })} unit={meta.symbol ?? ""} sub={`${burnedPct !== undefined ? `${burnedPct}% of supply` : "dead address balance"}${burnedUsd !== undefined && burnedUsd > 0 ? `, about ${fmtUsd(burnedUsd)}` : ""}`} />
             </div>
           </Panel>

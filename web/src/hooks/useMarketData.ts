@@ -5,12 +5,15 @@ import { usePublicClient } from "wagmi";
 import { parseAbiItem, type Address, type Hex } from "viem";
 import { AnchorRegistryAbi, StockQuoteLauncherAbi, TickerLauncherAbi, TokenAbi } from "@/lib/abis";
 import { poolManagerAbi } from "@/lib/extraAbis";
-import { ADDRESSES, BURN, DEPLOYED, START_BLOCK, isZero, sameAddr } from "@/lib/addresses";
+import { ADDRESSES, BURN, DEPLOYED, OFFICIAL, START_BLOCK, isZero, sameAddr } from "@/lib/addresses";
 import { POLL_MS } from "@/lib/constants";
 import { poolIdOf, slot0Slot, sqrtPriceFromSlot0, tokenPriceInQuote } from "@/lib/pool";
 import { useLaunches, type Launch } from "./useLaunches";
 
 /** Uniswap v4 PoolManager: one per swap, amounts from the swapper's side (negative = paid in). */
+const FEES_COLLECTED = parseAbiItem(
+  "event FeesCollected(address indexed token, uint256 quoteCollected, uint256 coinCollected, uint256 protocolQuote, uint256 creatorQuote, uint256 clubQuote, uint256 creatorCoin, uint256 burnedCoin)",
+);
 const SWAP = parseAbiItem(
   "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
 );
@@ -30,6 +33,7 @@ export type Row = {
   marketCap?: number;
   marketCapUsd?: number;
   volumeUsd: number;
+  paidToCreatorUsd: number;
   volumeQuote: number;
   buys: number;
   lastBuyBlock: bigint;
@@ -43,6 +47,9 @@ export type MarketData = {
   tickersInvented: number;
   totalVolumeUsd: number;
   totalMarketCapUsd: number;
+  paidToCreatorsUsd: number;
+  coinsBurned: number;
+  officialBurnedPct?: number;
   pricedShare: number;
   cutoffBlock: bigint;
   blockTime: number;
@@ -74,7 +81,7 @@ export function useMarketData(window: WindowKey = "all") {
     refetchInterval: POLL_MS * 2,
     queryFn: async (): Promise<MarketData> => {
       if (!client || list.length === 0) {
-        return { rows: [], tickersInvented: 0, totalVolumeUsd: 0, totalMarketCapUsd: 0, pricedShare: 1, cutoffBlock: 0n, blockTime: 2 };
+        return { rows: [], tickersInvented: 0, totalVolumeUsd: 0, totalMarketCapUsd: 0, paidToCreatorsUsd: 0, coinsBurned: 0, pricedShare: 1, cutoffBlock: 0n, blockTime: 2 };
       }
 
       // 1. per-launch state: the coin's metadata and its pool's price
@@ -168,6 +175,16 @@ export function useMarketData(window: WindowKey = "all") {
         vol.set(id, e);
       }
 
+      // what creators have been paid in the quote, from every collection the locker ever logged, priced like volume
+      const collections = await client
+        .getLogs({ address: ADDRESSES.launchLocker, event: FEES_COLLECTED, args: { token: list.map((l) => l.token) }, fromBlock: START_BLOCK, toBlock: "latest" })
+        .catch(() => []);
+      const creatorQuoteBy = new Map<string, bigint>();
+      for (const log of collections) {
+        const t = (log.args.token ?? "0x").toLowerCase();
+        creatorQuoteBy.set(t, (creatorQuoteBy.get(t) ?? 0n) + (log.args.creatorQuote ?? 0n));
+      }
+
       const rows: Row[] = list.map((l, i) => {
         const q = quoteInfo.get(l.pairToken.toLowerCase()) ?? { symbol: "?", decimals: 18, kind: "erc20" as QuoteKind };
         const decimals = Number(at(i, 3) ?? 18);
@@ -200,6 +217,7 @@ export function useMarketData(window: WindowKey = "all") {
           marketCapUsd: marketCap !== undefined && rate !== undefined ? marketCap * rate : undefined,
           volumeQuote,
           volumeUsd: rate !== undefined ? volumeQuote * rate : 0,
+          paidToCreatorUsd: rate !== undefined ? (Number(creatorQuoteBy.get(l.token.toLowerCase()) ?? 0n) / 10 ** q.decimals) * rate : 0,
           buys: v?.buys ?? 0,
           lastBuyBlock: v?.lastBuy ?? 0n,
           createdBlock: l.blockNumber ?? 0n,
@@ -217,6 +235,9 @@ export function useMarketData(window: WindowKey = "all") {
         tickersInvented: Number(tickerCount),
         totalVolumeUsd: priced.reduce((s, r) => s + r.volumeUsd, 0),
         totalMarketCapUsd: priced.reduce((s, r) => s + (r.marketCapUsd ?? 0), 0),
+        paidToCreatorsUsd: priced.reduce((s, r) => s + r.paidToCreatorUsd, 0),
+        coinsBurned: rows.filter((r) => (r.burnedPct ?? 0) > 0).length,
+        officialBurnedPct: rows.find((r) => sameAddr(r.launch.token, OFFICIAL.token))?.burnedPct,
         pricedShare: rows.length ? priced.length / rows.length : 1,
         cutoffBlock,
         blockTime,

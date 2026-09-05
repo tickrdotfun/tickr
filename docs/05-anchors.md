@@ -102,7 +102,7 @@ Launching under a ticker that exists costs the launch fee, 0.0005 ETH. Inventing
 
 ## Nobody owns a ticker
 
-There is no owner slot, no role, and no line in any later pair's fee split for whoever typed the name first. Opening BANANA with BREAD grants BREAD its own 60% and one thing in the club: the founder's coin is the club's captain by default, and the captain counts double when a pot is split. That is a weight, not a right. The founder cannot touch any other coin's fees, cannot keep anyone out, and holds nothing over the name. `TickerLauncher` itself has no owner either.
+There is no owner slot, no role, and no line in any later pair's fee split for whoever typed the name first. Opening BANANA with BREAD grants BREAD its own 50% and one thing in the club: the founder's coin is the club's captain by default, and the captain counts double when a pot is split. That is a weight, not a right. The founder cannot touch any other coin's fees, cannot keep anyone out, and holds nothing over the name. `TickerLauncher` itself has no owner either.
 
 ## The ticker club
 
@@ -127,7 +127,7 @@ function currentEpoch() view returns (uint256);                                 
 ```
 
 
-Outside a ticker there is no club, so an official pair freezes 70% creator, 30% protocol.
+Outside a ticker there is no club, so an official pair freezes 60% creator, 40% protocol.
 
 ## Reserved tickers
 

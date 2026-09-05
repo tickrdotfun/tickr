@@ -19,7 +19,7 @@ struct FeePolicy {
     address protocolFeeRecipient; // the protocol's recipient, the BuybackTreasury, frozen into every launch
     uint16 creatorShareBps;       // of the base fee: 6000 under an invented ticker, 7000 elsewhere
     uint16 clubShareBps;          // 1000 under an invented ticker, 0 elsewhere
-    uint16 protocolShareBps;      // 3000
+    uint16 protocolShareBps;      // 4000
     uint16 buybackBurnBps;        // 0 at launch; reserved for a later buyback policy
     uint16 hookFeeBps;            // the base fee in bps, 100, copied from the config at launch
     uint16 maxInternalPriceImpactBps; // unused in this version
@@ -33,12 +33,12 @@ The policy in force is copied into the launch record at creation. If the pair is
 `LaunchLocker.collectFees(token)` is permissionless. It performs a zero-liquidity decrease on the launch position and takes both currencies to the locker, then splits each side:
 
 1. The pool fee is base plus tax. The base part of what came in is `amount * baseFeeBps / (baseFeeBps + creatorTaxBps)`; the rest is the creator's tax and is the creator's alone.
-2. The base part of the quote side goes 30% to the protocol's escrow balance, 10% to the ticker club when the pair is an invented ticker, and the remainder to the creator's escrow balance. The club is paid by transferring the wrapper to `TickerLauncher` and calling `onClubFee`, and the volume that fee stands for is recorded with `recordVolume`. A club that cannot book its slice hands it to the protocol instead of blocking the collection.
-3. The coin side is burned in full: every coin the position earned on sells goes to `0x000000000000000000000000000000000000dEaD`. Nobody is paid in the coin; creators earn the quote on buys. Every coin launched here is deflationary this way: each sell removes its fee from the supply for good, and the site shows the dead balance as the share of supply burned.
+2. The base part of the quote side goes 40% to the protocol's escrow balance, 10% to the ticker club when the pair is an invented ticker, and the remainder to the creator's escrow balance. The club is paid by transferring the wrapper to `TickerLauncher` and calling `onClubFee`, and the volume that fee stands for is recorded with `recordVolume`. A club that cannot book its slice hands it to the protocol instead of blocking the collection.
+3. The coin side splits the same way. The base part goes 40% to the dead address for the protocol, 10% to the dead address for the club when there is one, and the remainder to the creator's escrow balance in the coin; the tax part goes whole to the creator's escrow balance in the coin. So every sell still takes coins out of circulation, the protocol's and the club's shares of it, and creators keep their own. Every coin launched here deflates on every sell.
 
 `FeesCollected` reports every figure of a collection. `LaunchLocker.pendingFees(token)` shows what is owed before one.
 
-The protocol's 30% is paid to the `BuybackTreasury`, not to a wallet: 80% of it buys and burns TICKR, 20% funds the team. See [13 the official coin](./13-official-coin.md). Inside a coin's first five seconds, a buy pays a snipe tax on the coin side too, burned to the dead address like every other coin-side fee; see [02 lifecycle](./02-lifecycle.md). The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
+The protocol's 40% is paid to the `BuybackTreasury`, not to a wallet: half of it buys and burns TICKR, half funds the team. See [13 the official coin](./13-official-coin.md). Inside a coin's first five seconds, a buy pays a snipe tax on the coin side too, burned to the dead address like every other coin-side fee; see [02 lifecycle](./02-lifecycle.md). The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
 
 ## Who collects
 

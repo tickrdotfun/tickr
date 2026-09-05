@@ -25,7 +25,7 @@ import {LaunchSeeder} from "./LaunchSeeder.sol";
 /// @notice The protocol's fee share, put to one use. The factory names this contract as the protocol fee
 /// recipient, so every launch from the first one on credits its protocol share here, in `FeeEscrow`. Anyone may
 /// `collect`: the treasury claims what the escrow holds for it, turns what it can into dollars (invented tickers
-/// unwrap at par, ETH goes through the live ETH/USDG pool by the seeder's own swap), forwards the team's slice
+/// unwrap at par, ETH goes through the live ETH/USDG pool by the seeder's own swap), forwards the team's half
 /// and everything it cannot convert to the team wallet, and earmarks the rest. Anyone may then `buy`: earmarked
 /// dollars become FUN one for one, FUN buys TICKR in its own pool, and the TICKR goes to the dead address.
 ///
@@ -40,7 +40,7 @@ contract BuybackTreasury is ReentrancyGuard {
     using PoolIdLibrary for PoolKey;
 
     /// @notice The share of protocol revenue that buys and burns; the rest goes to the team wallet.
-    uint256 public constant BUYBACK_SHARE_BPS = 8_000;
+    uint256 public constant BUYBACK_SHARE_BPS = 5_000;
     /// @notice A buy may move a pool's price by at most this much.
     uint256 public constant MAX_IMPACT_BPS = 300;
     /// @notice The least time between two buys.

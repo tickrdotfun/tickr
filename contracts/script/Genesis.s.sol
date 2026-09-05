@@ -29,7 +29,7 @@ import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 /// times, so the dollars found there buy the same coins on the chain.
 ///
 /// env: PRIVATE_KEY (the deployer, whitelisted at deploy), TREASURY (holds the genesis TICKR and is its fee recipient, defaults to the deployer),
-/// GENESIS_LOGO (image URI, may be empty), GENESIS_SHARE_BPS (first buy as a share of supply, default 680 = 6.8%).
+/// GENESIS_LOGO (image URI, may be empty), GENESIS_SHARE_BPS (first buy as a share of supply, default 500 = 5%).
 ///
 /// This file holds one contract and must stay that way: with two, `forge script script/Genesis.s.sol` refuses to
 /// run without `--tc`, and neither local.sh nor the runbook passes it. Helpers live in script/lib.
@@ -52,7 +52,7 @@ contract Genesis is Script {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address me = vm.addr(pk);
         address treasury = vm.envOr("TREASURY", me);
-        uint256 shareBps = vm.envOr("GENESIS_SHARE_BPS", uint256(680));
+        uint256 shareBps = vm.envOr("GENESIS_SHARE_BPS", uint256(500));
         Factory factory = Factory(payable(j.readAddress(".factory")));
         TickerLauncher tickers = TickerLauncher(j.readAddress(".tickerLauncher"));
         LaunchSeeder seeder = LaunchSeeder(payable(j.readAddress(".launchSeeder")));
@@ -71,7 +71,7 @@ contract Genesis is Script {
             description: "the coin of tickr. priced in FUN, a one-for-one wrapper of USDG. the first launch on the platform, on the same rules as every launch.",
             socials: Socials("https://x.com/tickrdotfun_rh", "", "", "https://tickrfun.gg", ""),
             creatorFeeRecipient: treasury,
-            creatorTaxBps: 0,
+            creatorTaxBps: 200, // 2% on every trade, all of it to the treasury wallet, shown like any creator tax
             buybackEnabled: false,
             expectedEconomics: expected,
             salt: bytes32(0)
@@ -113,8 +113,8 @@ contract Genesis is Script {
         console.log("  genesis first buy: TICKR", got / 1e18, "for usdg", usdgIn);
         console.log("  genesis first buy share bps", (got * 10_000) / supplyOf);
 
-        // 5. the slice to the treasury
-        if (treasury != me) IERC20(tickr).transfer(treasury, got);
+        // 5. exactly the disclosed share to the treasury; the crumbs the search overshot by stay with the deployer
+        if (treasury != me) IERC20(tickr).transfer(treasury, got < target ? got : target);
 
         // 6. open launches to everyone, and take the deployer's own pass away: from here it is a wallet like any other
         factory.setLaunchEnabled(true);

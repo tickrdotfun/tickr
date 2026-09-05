@@ -26,11 +26,17 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
   const burnedPct = meta.totalSupply && meta.totalSupply > 0n ? (Number(((fees.burned ?? 0n) * 10_000n) / meta.totalSupply) / 100).toFixed(2) : undefined;
   const inPool = pendingQuote > 0n || pendingCoin > 0n;
   const quoteClaimable = (nativePair ? escrow.native : escrow.quoteToken) ?? 0n;
+  const coinClaimable = escrow.coin ?? 0n;
   const collected = fees.collected;
 
   const collect = () =>
     tx
       .run([{ label: "collect fees", request: (w) => w({ abi: LaunchLockerAbi, address: ADDRESSES.launchLocker, functionName: "collectFees", args: [launch.token] }) }])
+      .then((h) => h && d.refetch());
+
+  const claimCoin = () =>
+    tx
+      .run([{ label: `claim ${ts}`, request: (w) => w({ abi: FeeEscrowAbi, address: ADDRESSES.feeEscrow, functionName: "claimToken", args: [launch.token] }) }])
       .then((h) => h && d.refetch());
 
   const claimQuote = () =>
@@ -114,9 +120,24 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
             </button>
           </dd>
         </div>
+        <div className="detail-row detail-row-action">
+          <dt>yours to claim, in {ts}</dt>
+          <dd>
+            {user ? (
+              <span className="num">
+                {fmtAmount(coinClaimable, meta.decimals, { sig: 4 })} {ts}
+              </span>
+            ) : (
+              <span className="text-dim">connect a wallet</span>
+            )}
+            <button className="btn btn-xs btn-primary" disabled={tx.busy || !user || coinClaimable === 0n} onClick={claimCoin}>
+              claim
+            </button>
+          </dd>
+        </div>
       </dl>
       <p className="detail-note detail-note-tight">
-        the pool&apos;s 1% fee sits in the locked position until anyone collects it. the quote side splits {split ? `${Math.round(split.creatorShareBps / 100)} / ${split.clubShareBps > 0 ? `${Math.round(split.clubShareBps / 100)} / ` : ""}${Math.round(split.protocolShareBps / 100)}` : ""}, the coin side burns.
+        the pool&apos;s fee sits in the locked position until anyone collects it. both sides split {split ? `${Math.round(split.creatorShareBps / 100)} / ${split.clubShareBps > 0 ? `${Math.round(split.clubShareBps / 100)} / ` : ""}${Math.round(split.protocolShareBps / 100)}` : ""}: the creator&apos;s share and the tax are theirs, the rest of the coin side burns.
       </p>
       <TxStatus {...tx} />
     </div>

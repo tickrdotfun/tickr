@@ -14,7 +14,7 @@ Source: [github.com/tickrdotfun/tickr](https://github.com/tickrdotfun/tickr). Th
 | [03 Price and market cap](./03-curve-math.md) | the one-sided position as a constant product curve, opening market caps, fees in the math |
 | [04 ETH, USDG and Stock Tokens](./04-custom-pairs.md) | mode 1. the three official quote assets, per-asset economics, the `expectedEconomics` pin, native vs ERC-20 calling conventions |
 | [05 Invented tickers](./05-anchors.md) | a ticker is a one-for-one wrapper of USDG. inventing one, launching under one, why nobody owns it, the dollar pool, the club, the required disclosure |
-| [06 Fees](./06-fees.md) | launch fee, the pool fee, creator tax, the 60/10/30 split, collecting, burning, claims, where the protocol share goes |
+| [06 Fees](./06-fees.md) | launch fee, the pool fee, creator tax, the 50/10/40 split, collecting, burning, claims, where the protocol share goes |
 | [07 Addresses](./07-addresses.md) | chain facts, canonical Uniswap v4 and v3 addresses on Robinhood Chain, the contract table |
 | [09 Risks](./09-risks.md) | what can go wrong, the exact list of owner powers, unaudited status |
 | [10 tickr coins](./10-coin-quotes.md) | mode 3. pricing a launch in a coin this factory launched, and the guardrails on it |

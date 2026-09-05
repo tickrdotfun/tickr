@@ -13,6 +13,8 @@ event LaunchSeeded(address indexed token, bytes32 indexed poolId, uint256 tokenI
 event DollarPoolSeeded(address indexed wrapper, bytes32 poolId, uint256 usdgIn, uint256 wrapperIn, uint256 tokenId);
 // LaunchLocker
 event PositionLocked(address indexed positionManager, uint256 indexed tokenId);
+// creatorCoin is the creator's share of the coin side plus the whole tax part, credited in the escrow; burnedCoin is the
+// protocol's and the club's shares of it, sent to the dead address
 event FeesCollected(address indexed token, uint256 quoteCollected, uint256 coinCollected, uint256 protocolQuote, uint256 creatorQuote, uint256 clubQuote, uint256 creatorCoin, uint256 burnedCoin);
 // routers and launchers
 event FirstBuy(address indexed token, uint256 quoteIn, uint256 tokensOut);

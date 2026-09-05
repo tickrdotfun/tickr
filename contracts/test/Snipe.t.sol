@@ -109,10 +109,12 @@ contract SnipeTest is BaseTest {
         sell(t, alice, kept);
         assertEq(t.balanceOf(alice), 0, "sold it all");
         assertEq(t.balanceOf(DEAD_ADDR), deadBefore, "no tax on a sell");
-        // the coin side of the fees reaches the locker whole, and the locker burns it, as ever
+        // the coin side of the fees reaches the locker whole and splits there: the protocol's 40% burns, the creator's 60% is escrowed
         uint256 pending = _coinPending(t);
         assertGt(pending, 0);
-        locker.collectFees(address(t));
-        assertEq(t.balanceOf(DEAD_ADDR) - deadBefore, pending, "the coin fees were burned in full");
+        (, uint256 c) = locker.collectFees(address(t));
+        assertEq(c, pending, "the locker collected the whole coin fee, untaxed");
+        assertEq(t.balanceOf(DEAD_ADDR) - deadBefore, (c * 4_000) / 10_000, "the protocol's share of the coin fees burned");
+        assertEq(escrow.balanceOfToken(creator, address(t)), c - (c * 4_000) / 10_000, "the creator's share sits in the escrow");
     }
 }

@@ -96,8 +96,8 @@ contract BuybackTest is BaseTest {
 
         uint256 fromEth = total - 1_500e6;
         assertApproxEqRel(fromEth, 2_000e6, 0.01e18, "one ETH became about two thousand dollars through the live pool");
-        assertEq(toTeam, (total * 2_000) / 10_000, "twenty percent to the team");
-        assertEq(earmarked, total - toTeam, "eighty percent earmarked");
+        assertEq(toTeam, (total * 5_000) / 10_000, "half to the team");
+        assertEq(earmarked, total - toTeam, "half earmarked");
         assertEq(usdg.balanceOf(team), toTeam, "the team holds its slice");
         assertEq(treasury.earmarkedUsdg(), earmarked);
         assertEq(usdg.balanceOf(address(treasury)), earmarked, "the treasury holds exactly the earmark");

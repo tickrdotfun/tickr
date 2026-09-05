@@ -33,7 +33,7 @@ export function Buyback({ d }: { d: TokenData }) {
     <div className="buyback">
       <div className="fig-k">buyback and burn</div>
       <p className="detail-note" style={{ marginTop: 8 }}>
-        80% of protocol revenue buys {ts} here and burns it. anyone can trigger a buy every ten minutes. burning does not guarantee a higher price.
+        half of protocol revenue buys {ts} here and burns it. anyone can trigger a buy every ten minutes. burning does not guarantee a higher price.
       </p>
 
       <div className="fact-grid" style={{ marginTop: 20 }}>

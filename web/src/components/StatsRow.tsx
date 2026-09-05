@@ -22,6 +22,18 @@ export function StatsRow() {
       note: d && d.pricedShare < 1 ? "of priced launches" : undefined,
       cls: "sw-blue",
     },
+    {
+      k: "paid to creators",
+      v: d ? fmtUsd(d.paidToCreatorsUsd) : "-",
+      note: d && d.pricedShare < 1 ? "of priced launches" : undefined,
+      cls: "sw-green",
+    },
+    {
+      k: "burned",
+      v: d ? `${d.coinsBurned} ${d.coinsBurned === 1 ? "coin" : "coins"}` : "-",
+      note: d && d.officialBurnedPct !== undefined ? `tickr ${d.officialBurnedPct.toFixed(2)}% of supply` : undefined,
+      cls: "sw-pink",
+    },
   ];
   return (
     <dl className="stats-row">

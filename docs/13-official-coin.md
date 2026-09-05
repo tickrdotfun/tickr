@@ -9,9 +9,9 @@ tickr has one coin of its own. Its ticker is **TICKR**, it is priced in **FUN**,
 | Coin | TICKR, name `tickr`, 18 decimals |
 | Pair | FUN, an invented ticker: a one-for-one wrapper of USDG |
 | Supply | 1,000,000,000, all of it in the locked pool at launch; nobody holds any at creation, and the only way to hold some in the launch transaction is a first buy from the curve like anyone else |
-| Fee split | 60% creator, 10% ticker club, 30% protocol, frozen at launch, the same as every coin under a ticker |
+| Fee split | 50% creator, 10% ticker club, 40% protocol, frozen at launch, the same as every coin under a ticker |
 | Creator | the team. The creator share of TICKR's fees goes to the team's fee wallet |
-| Creator tax | none |
+| Creator tax | 2%, on every trade, all of it to the team's fee wallet, shown on every trade like any creator tax |
 | Allocation, airdrop, vesting | none |
 
 ## How it was launched
@@ -20,17 +20,21 @@ In the genesis transaction, while launching was still closed to everyone but the
 
 ## The first buy
 
-In the genesis transaction itself, the team bought a slice of TICKR: `6.8%` of supply, the same share the first coin on a comparable launchpad's deployer bought at its launch. It is paid in FUN minted from USDG that the deployer bought with ETH the moment before, bought from the pool at the pool's price with no exemption from the fee, and the transaction is public. The size is worked out by running that same transaction in a simulation first and searching for the dollars that buy the share; the pool is new both times, so the answer is exact.
+In the genesis transaction itself, the team bought a slice of TICKR: `5%` of supply, delivered to the treasury wallet. It is paid in FUN minted from USDG that the deployer bought with ETH the moment before, bought from the pool at the pool's price with no exemption from the fee, and the transaction is public. The size is worked out by running that same transaction in a simulation first and searching for the dollars that buy the share; the pool is new both times, so the answer is exact.
+
+After launch the team sends that 5% to the dead address by hand and lists the transaction here:
+
+- burn of the genesis 5%: transaction hash to follow
 
 ## Buybacks
 
 The protocol's share of every fee, and every launch fee, is paid to a contract, `BuybackTreasury`, not to a wallet. It is the protocol fee recipient from the first launch, frozen into TICKR and every coin after it. The treasury has no owner and no way to withdraw: money leaves it two ways only, to the team wallet and to the dead address.
 
-Anyone may call `collect(tokens)`. It claims what the escrow holds for the treasury, turns what it can into dollars (an invented ticker unwraps at par, ETH goes through the live ETH/USDG pool), sends `100% - 80% = 20%` of the dollars to the team wallet, and sets the other 80% aside. Anything it cannot convert, a Stock Token or a coin used as a quote, goes whole to the team wallet, since the treasury has no honest price for it.
+Anyone may call `collect(tokens)`. It claims what the escrow holds for the treasury, turns what it can into dollars (an invented ticker unwraps at par, ETH goes through the live ETH/USDG pool), sends half of the dollars to the team wallet, and sets the other half aside. Anything it cannot convert, a Stock Token or a coin used as a quote, goes whole to the team wallet, since the treasury has no honest price for it.
 
 Anyone may then call `buy()`, at most once every ten minutes. It spends at most 5% of the dollars set aside, and never enough to move TICKR's pool by more than 300 basis points; it turns those dollars into FUN, buys TICKR in the TICKR/FUN pool, and sends the TICKR to `0x000000000000000000000000000000000000dEaD`. The size and the least it will accept are computed on chain, so a caller cannot steer the price. Every buy is a `BoughtAndBurned` event, and the TICKR page shows the running total.
 
-`BUYBACK_SHARE_BPS` is 8,000, the 80% above. Burning takes coins out of circulation. It does not guarantee a higher price.
+`BUYBACK_SHARE_BPS` is 5,000, the half above. Burning takes coins out of circulation. It does not guarantee a higher price.
 
 ## The FUN club
 
