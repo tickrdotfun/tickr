@@ -1192,7 +1192,7 @@ export function CreateForm() {
                   ))}
                 </div>
               )}
-              <p className="text-[13px] text-dim mt-3">bought inside the launch transaction itself, at the opening price.</p>
+              <p className="text-[13px] text-dim mt-3">bought inside the launch transaction itself, at the opening price. it pays no snipe tax; any other buy in the coin&apos;s first five seconds does, burned.</p>
               {firstBuyPreview && econ && firstBuyAmt > 0n && (
                 <div className="text-[14px] text-muted mt-2">
                   {devMode === "tokens" ? (

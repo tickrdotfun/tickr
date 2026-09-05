@@ -69,6 +69,10 @@ export default function TermsPage() {
             protocol.
           </li>
           <li>an optional creator tax, chosen by the creator at launch, capped by the factory. it goes entirely to the creator&apos;s fee wallet.</li>
+          <li>
+            a snipe tax on buys in a coin&apos;s first five seconds: 99% in the launch second, falling to nothing by the fifth. it is burned. the
+            launcher&apos;s wallet and its fee wallet do not pay it, and sells never do.
+          </li>
         </ul>
         <p>
           every one of these is visible in the transaction before you sign it. tickr takes no share of any coin&apos;s supply, at launch or ever.

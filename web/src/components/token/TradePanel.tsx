@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { useBalance } from "wagmi";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useBalance, useReadContract } from "wagmi";
 import { erc20Abi } from "viem";
 import type { TokenData } from "@/hooks/useTokenData";
 import { useTx, type WriteFn } from "@/hooks/useTx";
@@ -62,6 +62,24 @@ export function TradePanel({ d }: { d: TokenData }) {
   const outSymbol = inEth ? "ETH" : qs;
   const outDecimals = inEth ? 18 : qd;
   const amt = safeParseUnits(amount, side === "buy" ? payDecimals : td);
+  // the coin's first five seconds: a buy pays the snipe tax on its way out of the pool. the coin itself says the
+  // rate for this wallet this second, so the panel asks it while a launch is fresh and shows what will arrive
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Math.floor(Date.now() / 1000));
+    tick();
+    const id = setInterval(tick, 1_000);
+    return () => clearInterval(id);
+  }, []);
+  const fresh = now > 0 && !!launch && now - Number(launch.launchedAt) < 30;
+  const snipe = useReadContract({
+    abi: TokenAbi,
+    address: launch?.token,
+    functionName: "currentSnipeTaxBps",
+    args: [user ?? ZERO],
+    query: { enabled: fresh && !!launch, refetchInterval: 1_000 },
+  });
+  const snipeBps = fresh ? Number(snipe.data ?? 0n) : 0;
 
   // buys: ETH through the route, or the quote through the one pool
   const buyPath = inEth ? (nativePair && own ? [own] : ethPath) : own ? [own] : null;
@@ -70,7 +88,8 @@ export function TradePanel({ d }: { d: TokenData }) {
     if (side !== "buy" || inEth || !amt || !launch || !pool.key || pool.liquidity === undefined || !pool.sqrtP) return undefined;
     return quoteExactIn({ amountIn: amt, liquidity: pool.liquidity, sqrtPriceX96: pool.sqrtP, feePips: Number(launch.poolFee), zeroForOne: !pool.key.tokenIs0 });
   }, [side, inEth, amt, launch, pool.key, pool.liquidity, pool.sqrtP]);
-  const buyOut = inEth ? zp.data?.tokensOut : localBuy;
+  // the zap's preview already reports what the buyer keeps; a buy paid in the quote goes straight through the pool
+  const buyOut = inEth ? zp.data?.tokensOut : localBuy !== undefined && snipeBps > 0 ? localBuy - (localBuy * BigInt(snipeBps)) / 10_000n : localBuy;
 
   // sells: the own pool first, then the route backwards to ETH, or the quote straight out of the one pool
   const sellPath = inEth ? (nativePair && own ? [own] : ethPath ? reverseRoute(ethPath) : null) : own ? [own] : null;
@@ -220,6 +239,11 @@ export function TradePanel({ d }: { d: TokenData }) {
               <Row k={`Receive (${ts})`} v={buyOut !== undefined ? fmtAmount(buyOut, td) : amt && zp.isFetching ? "quoting" : "-"} />
               <Row k="Min. after slippage" v={buyOut !== undefined ? `${fmtAmount(applySlippage(buyOut, slipBps), td)} ${ts}` : "-"} />
               {inEth && zp.isError && <div className="text-[13px] text-signal">no quote at this size. try a smaller amount{nativePair ? "" : `, or pay in ${qs}`}.</div>}
+              {snipeBps > 0 && (
+                <div className="text-[13px] text-signal">
+                  launch window: a buy this second pays a {(snipeBps / 100).toFixed(snipeBps % 100 === 0 ? 0 : 1)}% snipe tax, burned. it is gone within five seconds of launch.
+                </div>
+              )}
               <details className="trade-more">
                 <summary>breakdown</summary>
                 <Row k="Route" v={inEth ? (route.data?.label ?? "") : `${qs} → coin`} />
