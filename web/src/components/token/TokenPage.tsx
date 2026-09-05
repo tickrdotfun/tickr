@@ -3,14 +3,13 @@
 import type { Address } from "viem";
 import { useTokenData } from "@/hooks/useTokenData";
 import { DEPLOYED } from "@/lib/addresses";
-import { IS_DEVNET } from "@/lib/chain";
 import { fmtAmount, fmtNumber, fmtPrice, shortAddr, fmtUsd } from "@/lib/format";
 import { isOfficialCoin } from "@/lib/addresses";
-import { OfficialBadge, QuoteChip, CreatorIssuedBadge } from "../QuoteChip";
 import { TokenLogo } from "../TokenLogo";
 import { Panel, Spinner } from "../ui";
 import { TradePanel } from "./TradePanel";
 import { TokenDetails } from "./TokenDetails";
+import { PriceChart } from "./PriceChart";
 import { useMarketData } from "@/hooks/useMarketData";
 import { sameAddr } from "@/lib/addresses";
 
@@ -36,7 +35,7 @@ export function TokenPage({ address }: { address: Address }) {
         <div className="text-muted mt-2 num">{address} was not launched by this factory.</div>
       </div>
     );
-  const { launch, meta, quote, pool, fees, isTicker } = d;
+  const { launch, meta, quote, pool, fees } = d;
   if (!launch) return null;
 
   const qd = quote?.decimals ?? 18;
@@ -77,31 +76,6 @@ export function TokenPage({ address }: { address: Address }) {
                   <span className="badge sw-signal">live</span>
                   {isOfficialCoin(address) && <span className="badge sw-green">official coin</span>}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 mt-3">
-                  <QuoteChip meta={quote} size="md" />
-                  {quote?.kind === "official" && <OfficialBadge />}
-                  {(quote?.kind === "ticker" || isTicker) && <CreatorIssuedBadge />}
-                  <span className="badge">pool fee {(Number(launch.poolFee) / 10_000).toFixed(2)}%</span>
-                  {burnedPct !== undefined && <span className="badge sw-pink">{burnedPct}% burned</span>}
-                  {launch.creatorTaxBps > 0 && <span className="badge">creator tax {(launch.creatorTaxBps / 100).toFixed(2)}%</span>}
-                  {launch.buybackEnabled && <span className="badge">buyback on</span>}
-                  {!IS_DEVNET && pool.poolId && (
-                    <a className="badge no-underline hover:no-underline" href={dexScreenerUrl(pool.poolId)} target="_blank" rel="noreferrer">
-                      chart
-                    </a>
-                  )}
-                </div>
-                {(quote?.kind === "ticker" || isTicker) && (
-                  <p className="text-[13px] text-dim mt-3">
-                    priced in <span className="num">{quote?.symbol ?? "a name"}</span>, a wrapped dollar a creator named. not a <span className="cap">Stock Token</span>, pays no dividend, carries no share.
-                  </p>
-                )}
-                {quote?.kind === "official" && (
-                  <p className="text-[13px] text-dim mt-3">
-                    priced in <span className="num">{quote.symbol}</span>, a <span className="cap">Stock Token</span> issued by Robinhood Assets. this coin is a creator&apos;s coin, not a{" "}
-                    <span className="cap">Stock Token</span>: it pays no dividend and carries no share.
-                  </p>
-                )}
                 {meta.description && <p className="text-muted mt-3 max-w-2xl whitespace-pre-wrap break-words">{meta.description}</p>}
                 {links.length > 0 && (
                   <div className="flex flex-wrap gap-4 mt-3 text-[14px]">
@@ -115,6 +89,8 @@ export function TokenPage({ address }: { address: Address }) {
               </div>
             </div>
           </Panel>
+
+          <PriceChart d={d} />
 
           {/* Stats */}
           <Panel>

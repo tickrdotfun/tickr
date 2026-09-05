@@ -77,6 +77,9 @@ async function overBudget(req: Request): Promise<boolean> {
 }
 
 /** Which controls this deployment has, so an operator can check a deploy without uploading anything. */
+// every answer, the diagnostics included, is read at request time, never baked at build
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   let burst = false;
   let kv = false;
@@ -92,7 +95,9 @@ export async function GET() {
     } catch (e) {
       probe = `limit threw: ${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`;
     }
-    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, burst, kv, probe, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
+    // names only, never values: which secrets the worker was given, and whether they reached process.env
+    const secretNames = Object.keys(env).filter((k) => /JWT|KEY|SECRET/i.test(k));
+    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, envHasJwt: "PINATA_JWT" in env, secretNames, burst, kv, probe, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
   } catch {
     return NextResponse.json({ pinning: !!process.env.PINATA_JWT, burst, kv, bindings: [] });
   }

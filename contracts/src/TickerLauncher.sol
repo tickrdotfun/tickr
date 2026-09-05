@@ -24,11 +24,17 @@ import {TickerToken} from "./TickerToken.sol";
 /// wrapper of USDG with the symbol somebody typed. So BREAD/BANANA is a real pair on-chain and on every chart,
 /// and economically it is BREAD against USDG.
 ///
-/// Nobody owns a ticker. Opening one grants nothing. What a ticker has is a club: every coin priced in it pays
-/// the club's slice of its trade fee (10% of the 1% at deploy) into a pot for that ticker, and the pot is shared
-/// by the creators of the *other* graduated coins under the same ticker, pro rata to their pool volume over the
-/// same thirty days. A coin never pays its own creator through the club; that is what the creator's 60% is for.
-/// No volume in the window, no share.
+/// Nobody owns a ticker: no owner slot, no rights over any other coin, no permission to ask before joining. What a
+/// ticker has is a club: every coin priced in it pays the club's slice of its trade fee (10% of the 1% at deploy)
+/// into a pot for that ticker, and the pot is shared by the creators of the *other* coins under the same ticker,
+/// by their pool volume over the same thirty days. A coin never pays its own creator through the club; that is
+/// what the creator's 60% is for. No volume in the window, no share.
+///
+/// Every club has a captain, and the captain counts double when a pot is split. The founder's coin, the first
+/// launched under the ticker, is captain by default; in a window where it has no volume, the coin with the most
+/// volume under the ticker takes the seat for that window, and the founder gets it back in any later window it
+/// trades in. Any volume keeps the seat; there is no floor. The captain has nothing else: it cannot touch anyone's
+/// fees, it keeps nobody out, and it owns nothing.
 ///
 /// Time is cut into epochs of thirty days. Volume is recorded in the epoch it trades; club fees are booked in
 /// the epoch they are swept. An epoch's pot is claimable once the epoch has closed, so nothing about a claim
@@ -61,6 +67,9 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
     mapping(address => mapping(uint256 => uint256)) public volumeOf;
     /// @notice Pool volume of every coin under a ticker: ticker => epoch => amount.
     mapping(address => mapping(uint256 => uint256)) public clubVolume;
+    /// @notice The coin with the most volume under a ticker in an epoch, kept as volume lands, so nothing ever loops
+    /// over the coins under a ticker. Ties keep the incumbent.
+    mapping(address => mapping(uint256 => address)) public topOf;
     /// @notice paying coin => epoch => member coin => whether the member has taken its share of that pot.
     /// @notice How much of `payer`'s pot for `epoch` has been paid to `member`, so a pot booked late is still
     /// claimable for the rest, and nothing is ever paid twice.
@@ -149,18 +158,41 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
         expected = factory.previewLaunchEconomicsWithPair(launchConfigId, ticker, econ);
     }
 
+    /// @notice The captain of `ticker`'s club for `epoch`: the founder's coin, the first launched under the ticker,
+    /// whenever it has volume in the epoch; otherwise the coin with the most volume; zero when nothing traded. Final
+    /// once the epoch has closed, which is when claims open, so no claim can see the seat move.
+    function captainOf(address ticker, uint256 epoch) public view returns (address) {
+        address[] storage coins = _pairsOf[ticker];
+        if (coins.length == 0) return address(0);
+        address founder = coins[0];
+        if (volumeOf[founder][epoch] > 0) return founder;
+        return topOf[ticker][epoch];
+    }
+
+    /// @dev A coin's weight in a split: its volume, doubled for the captain.
+    function _weight(address coin, address captain, uint256 epoch) internal view returns (uint256) {
+        uint256 v = volumeOf[coin][epoch];
+        return coin == captain ? v * 2 : v;
+    }
+
+    /// @dev The sum of every weight under the ticker, without a loop: all the volume, plus the captain's once more.
+    function _totalWeight(address ticker, address captain, uint256 epoch) internal view returns (uint256) {
+        return clubVolume[ticker][epoch] + volumeOf[captain][epoch];
+    }
+
     /// @notice What `member` would receive from the pots of `payers` for a closed `epoch`. Zero for an open
     /// epoch, for a member with no volume, and for pots already taken.
     function claimable(address member, address[] calldata payers, uint256 epoch) external view returns (uint256 amount) {
         if (epoch >= currentEpoch()) return 0;
         address ticker = _pairOf(member);
-        uint256 v = volumeOf[member][epoch];
-        if (!isTicker[ticker] || v == 0) return 0;
-        uint256 total = clubVolume[ticker][epoch];
+        if (!isTicker[ticker] || volumeOf[member][epoch] == 0) return 0;
+        address captain = captainOf(ticker, epoch);
+        uint256 w = _weight(member, captain, epoch);
+        uint256 total = _totalWeight(ticker, captain, epoch);
         for (uint256 i; i < payers.length; i++) {
             address p = payers[i];
             if (p == member || _pairOf(p) != ticker) continue;
-            uint256 share = (pot[ticker][epoch][p] * v) / total;
+            uint256 share = (pot[ticker][epoch][p] * w) / total;
             uint256 done = paid[p][epoch][member];
             if (share > done) amount += share - done;
         }
@@ -242,12 +274,16 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
         uint256 epoch = currentEpoch();
         volumeOf[token][epoch] += quoteAmount;
         clubVolume[ticker][epoch] += quoteAmount;
+        // the leader is kept as volume lands; a tie keeps the incumbent
+        address top = topOf[ticker][epoch];
+        if (top != token && volumeOf[token][epoch] > volumeOf[top][epoch]) topOf[ticker][epoch] = token;
     }
 
     /// @notice Pay `member`'s creator its share of the pots `payers` filled in a closed `epoch`. Anyone may call;
     /// the money goes to the member's current fee recipient. A member's share of one payer's pot is the pot times
-    /// the member's volume over the volume of every coin under the ticker, the payer included; the payer's own
-    /// share of its pot is the protocol's, so a coin with dust volume earns dust. Each pot is taken once per member.
+    /// the member's weight over the weight of every coin under the ticker, the payer included, where a weight is a
+    /// coin's volume and the captain's is twice that; the payer's own share of its pot is the protocol's, so a coin
+    /// with dust volume earns dust. Each pot is taken once per member.
     function claimClub(address member, address[] calldata payers, uint256 epoch)
         external
         nonReentrant
@@ -256,13 +292,14 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
         if (epoch >= currentEpoch()) revert EpochOpen();
         address ticker = _pairOf(member);
         if (!isTicker[ticker]) revert NotUnderTicker();
-        uint256 v = volumeOf[member][epoch];
-        if (v == 0) return 0;
-        uint256 total = clubVolume[ticker][epoch];
+        if (volumeOf[member][epoch] == 0) return 0;
+        address captain = captainOf(ticker, epoch);
+        uint256 w = _weight(member, captain, epoch);
+        uint256 total = _totalWeight(ticker, captain, epoch);
         for (uint256 i; i < payers.length; i++) {
             address p = payers[i];
             if (p == member || _pairOf(p) != ticker) continue;
-            uint256 share = (pot[ticker][epoch][p] * v) / total;
+            uint256 share = (pot[ticker][epoch][p] * w) / total;
             uint256 done = paid[p][epoch][member];
             if (share <= done) continue;
             paid[p][epoch][member] = share;
@@ -275,14 +312,15 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
     }
 
     /// @notice The part of a pot nobody else can claim goes to the protocol once the epoch has closed: the payer's
-    /// own share of its pot, weighted by its volume, or the whole pot when no coin under the ticker had volume.
+    /// own share of its pot, by its weight, or the whole pot when no coin under the ticker had volume.
     function sweepDeadPot(address token, uint256 epoch) external nonReentrant returns (uint256 amount) {
         if (epoch >= currentEpoch()) revert EpochOpen();
         address ticker = _pairOf(token);
         if (!isTicker[ticker]) revert NotUnderTicker();
-        uint256 total = clubVolume[ticker][epoch];
+        address captain = captainOf(ticker, epoch);
+        uint256 total = _totalWeight(ticker, captain, epoch);
         uint256 potAmount = pot[ticker][epoch][token];
-        uint256 share = total == 0 ? potAmount : (potAmount * volumeOf[token][epoch]) / total;
+        uint256 share = total == 0 ? potAmount : (potAmount * _weight(token, captain, epoch)) / total;
         uint256 done = deadPaid[token][epoch];
         if (share <= done) revert NothingToSweep();
         amount = share - done;

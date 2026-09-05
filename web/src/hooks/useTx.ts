@@ -36,7 +36,7 @@ async function walletSeesFactory(getProvider: () => Promise<unknown>): Promise<b
 type Client = NonNullable<ReturnType<typeof usePublicClient>>;
 
 /** Every custom error our contracts declare, plus the two that mean a pool key was taken first. */
-const KNOWN_ERRORS: Abi = [
+export const KNOWN_ERRORS: Abi = [
   ...Object.values(Abis).flatMap((a) => (Array.isArray(a) ? (a as Abi).filter((x) => x.type === "error") : [])),
   { type: "error", name: "PoolAlreadyExists", inputs: [] },
   { type: "error", name: "PoolAlreadyInitialized", inputs: [] },

@@ -24,7 +24,7 @@ import { useMarketData } from "@/hooks/useMarketData";
 import { useChainTokens } from "@/hooks/useChainTokens";
 import { QuotePicker, type PickItem } from "./QuotePicker";
 import { useEthUsd } from "@/hooks/useEthUsd";
-import { useTx, type WriteFn } from "@/hooks/useTx";
+import { useTx, type WriteFn, KNOWN_ERRORS } from "@/hooks/useTx";
 import { StockLogo } from "../StockLogo";
 import { OfficialBadge } from "../QuoteChip";
 import { TxStatus } from "../TxStatus";
@@ -585,7 +585,7 @@ export function CreateForm() {
     const req = (pr.approve ? pr.approve.request : pr.request) as unknown as Parameters<typeof client.simulateContract>[0];
     await client.simulateContract({
       ...req,
-      abi: [...(req.abi as Abi), ...ERC20_ERRORS] as Abi, // so token errors decode by name
+      abi: [...(req.abi as Abi), ...ERC20_ERRORS, ...KNOWN_ERRORS] as Abi, // so token errors decode by name
       account,
       stateOverride: [{ address: account, balance: parseEther("1000") }],
     });
@@ -593,6 +593,11 @@ export function CreateForm() {
   }
 
   const isSquat = (e: unknown) => /PoolAlreadyExists|PoolAlreadyInitialized/.test(String(e ?? ""));
+  // the closed gate, in words: until the first launch, and whenever the owner closes launching, nobody can launch
+  const plainRevert = (e: unknown) =>
+    /NotWhitelisted|LaunchDisabled|LaunchesClosed/.test(errorMessage(e) + String(e ?? ""))
+      ? "launches are not open on this deployment yet. the first launch opens them, and then anyone can launch."
+      : errorMessage(e);
   /** The retry carries the new seed explicitly: state set in this render is not visible to this call. */
   function retryWithFreshSalt(): Promise<boolean> {
     retriedSquat.current = true;
@@ -615,7 +620,7 @@ export function CreateForm() {
         if (!ok) return false;
         if (!DEMO) {
           const req = pr.request as unknown as Parameters<typeof client.simulateContract>[0];
-          await client.simulateContract({ ...req, abi: [...(req.abi as Abi), ...ERC20_ERRORS] as Abi, account: user });
+          await client.simulateContract({ ...req, abi: [...(req.abi as Abi), ...ERC20_ERRORS, ...KNOWN_ERRORS] as Abi, account: user });
         }
       }
       const hash = await tx.run([{ label: pr.label, request: (w: WriteFn) => w(pr.request as unknown as Parameters<WriteFn>[0]) }]);
@@ -632,7 +637,7 @@ export function CreateForm() {
     } catch (e) {
       // somebody opened this exact pool key first: a fresh salt is a fresh address and a fresh key, once
       if (isSquat(e) && !retriedSquat.current) return retryWithFreshSalt();
-      setFormError(errorMessage(e));
+      setFormError(plainRevert(e));
       return false;
     }
   }
@@ -1102,7 +1107,7 @@ export function CreateForm() {
           </div>
           <div className="mt-5">
             <Field label="Description" hint={`shown on the coin's page and stored with the coin. ${description.length.toLocaleString()} of 1,000 characters.`}>
-              <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} />
+              <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} placeholder="what this coin is, in a sentence or two." />
             </Field>
           </div>
           <div className="mt-7">

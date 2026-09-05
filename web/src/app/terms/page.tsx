@@ -73,7 +73,8 @@ export default function TermsPage() {
         <p>
           every one of these is visible in the transaction before you sign it. tickr takes no share of any coin&apos;s supply, at launch or ever.
           the ticker club is described in the <Link href="/docs/anchors">docs</Link>: it pays the creators of other coins under the same
-          ticker, by their trading volume, and it pays nothing to whoever typed the name first.
+          ticker, by their trading volume. the founder&apos;s coin is captain of the club by default and counts double while it trades; it owns
+          nothing and has no say over any other coin.
         </p>
       </section>
 

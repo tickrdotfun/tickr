@@ -12,10 +12,12 @@ export type ClubMember = {
   creator: Address;
   volume: bigint; // this window
   lastVolume: bigint; // the window that just closed
-  weight: number; // share of this window's volume, 0..1
+  weight: number; // share of this window's total weight, 0..1; the captain's volume counts twice
   lastWeight: number;
   pot: bigint; // what this coin paid into the club this window
   lastPot: bigint;
+  captain: boolean; // captain this window: the founder's coin while it trades, else the biggest coin
+  lastCaptain: boolean;
 };
 
 /**
@@ -38,6 +40,11 @@ export function useTickerClub(ticker?: Address, member?: Address) {
         client.readContract({ ...launcher, functionName: "EPOCH" }) as Promise<bigint>,
       ]);
       const last = epoch > 0n ? epoch - 1n : undefined;
+      // the captain counts double: the founder's coin while it trades, else the coin with the most volume
+      const [captain, lastCaptain] = await Promise.all([
+        client.readContract({ ...launcher, functionName: "captainOf", args: [ticker, epoch] }).catch(() => undefined) as Promise<Address | undefined>,
+        last === undefined ? Promise.resolve(undefined) : (client.readContract({ ...launcher, functionName: "captainOf", args: [ticker, last] }).catch(() => undefined) as Promise<Address | undefined>),
+      ]);
       const per = 6;
       const reads = await client.multicall({
         contracts: pairs.flatMap((t) => [
@@ -62,11 +69,18 @@ export function useTickerClub(ticker?: Address, member?: Address) {
         lastVolume: last === undefined ? 0n : ((at(i, 3) as bigint | undefined) ?? 0n),
         pot: (at(i, 4) as bigint | undefined) ?? 0n,
         lastPot: last === undefined ? 0n : ((at(i, 5) as bigint | undefined) ?? 0n),
+        captain: !!captain && sameAddr(t, captain),
+        lastCaptain: !!lastCaptain && sameAddr(t, lastCaptain),
       }));
       const total = rows.reduce((s, r) => s + r.volume, 0n);
       const lastTotal = rows.reduce((s, r) => s + r.lastVolume, 0n);
+      // weights as the contract splits a pot: a coin's volume, twice for the captain, over the sum of all of them
+      const w = (r: (typeof rows)[number]) => (r.captain ? r.volume * 2n : r.volume);
+      const lw = (r: (typeof rows)[number]) => (r.lastCaptain ? r.lastVolume * 2n : r.lastVolume);
+      const totalW = rows.reduce((s, r) => s + w(r), 0n);
+      const lastTotalW = rows.reduce((s, r) => s + lw(r), 0n);
       const share = (v: bigint, t: bigint) => (t > 0n ? Number((v * 10_000n) / t) / 10_000 : 0);
-      const members: ClubMember[] = rows.map((r) => ({ ...r, weight: share(r.volume, total), lastWeight: share(r.lastVolume, lastTotal) }));
+      const members: ClubMember[] = rows.map((r) => ({ ...r, weight: share(w(r), totalW), lastWeight: share(lw(r), lastTotalW) }));
 
       // what the coin on this page could claim from the window that just closed
       let claimable = 0n;
@@ -83,6 +97,8 @@ export function useTickerClub(ticker?: Address, member?: Address) {
         payers: pairs as Address[],
         totalVolume: total,
         lastTotalVolume: lastTotal,
+        captain,
+        lastCaptain,
         potNow: rows.reduce((s, r) => s + r.pot, 0n),
         potLast: rows.reduce((s, r) => s + r.lastPot, 0n),
         claimable,

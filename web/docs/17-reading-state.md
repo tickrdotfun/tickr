@@ -73,6 +73,8 @@ function isTicker(address) view returns (bool);
 function tickerCount() view returns (uint256);
 function tickerAt(uint256 i) view returns (address);
 function pairsOf(address ticker) view returns (address[]);
+function captainOf(address ticker, uint256 epoch) view returns (address);   // counts double in that epoch's split: the founder's coin while it trades, else the top coin
+function topOf(address ticker, uint256 epoch) view returns (address);       // the most volume under the ticker in the epoch
 function NEW_TICKER_FEE() view returns (uint256);           // 0.0015 ETH
 // TickerToken: a one for one wrapper
 function counter() view returns (IERC20);                   // USDG

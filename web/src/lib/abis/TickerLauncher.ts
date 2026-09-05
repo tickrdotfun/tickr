@@ -67,6 +67,30 @@ export const TickerLauncherAbi = [
   },
   {
     "type": "function",
+    "name": "captainOf",
+    "inputs": [
+      {
+        "name": "ticker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "epoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "claimClub",
     "inputs": [
       {
@@ -778,6 +802,30 @@ export const TickerLauncherAbi = [
         "name": "symbol",
         "type": "string",
         "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "topOf",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [

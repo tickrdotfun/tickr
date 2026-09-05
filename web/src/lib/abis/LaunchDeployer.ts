@@ -307,6 +307,16 @@ export const LaunchDeployerAbi = [
   },
   {
     "type": "error",
+    "name": "BadName",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BadSymbol",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EmptyMetadata",
     "inputs": []
   },
