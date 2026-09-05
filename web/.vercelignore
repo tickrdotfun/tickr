@@ -1,0 +1,3 @@
+# the deploy is rooted here; nothing outside web/ is needed
+.next
+node_modules

@@ -1,0 +1,57 @@
+# 06 · Fees
+
+Three inputs, one place they land, one function that splits them.
+
+## The inputs
+
+| what | amount | when |
+| --- | --- | --- |
+| launch fee | 0.0005 ETH | once, at creation, to the protocol |
+| new ticker fee | 0.0015 ETH more | once, when a ticker is invented; it opens the ticker's dollar pool, locked |
+| pool fee | 1% base plus the creator's tax, 0 to 2% | every buy and sell, taken by the pool from the swap's input |
+
+The pool fee is the pool's own LP fee, fixed when the pool is created: `(baseFeeBps + creatorTaxBps) * 100` in Uniswap's hundredths of a bip, so 10000 for 1%. It is part of the pool key and can never change. Buys pay it in the pair, sells pay it in the coin, and it accrues to the locked launch position.
+
+## FeePolicy
+
+```solidity
+struct FeePolicy {
+    address protocolFeeRecipient; // the protocol's wallet, frozen into every launch
+    uint16 creatorShareBps;       // of the base fee: 6000 under an invented ticker, 7000 elsewhere
+    uint16 clubShareBps;          // 1000 under an invented ticker, 0 elsewhere
+    uint16 protocolShareBps;      // 3000
+    uint16 buybackBurnBps;        // 0 at launch; reserved for a later buyback policy
+    uint16 hookFeeBps;            // the base fee in bps, 100, copied from the config at launch
+    uint16 maxInternalPriceImpactBps; // unused in this version
+}
+```
+
+The policy in force is copied into the launch record at creation. If the pair is not an invented ticker, the club's share folds into the creator's, so the split a launch shows is the split it keeps. The owner can change the policy for future launches only.
+
+## Collecting
+
+`LaunchLocker.collectFees(token)` is permissionless. It performs a zero-liquidity decrease on the launch position and takes both currencies to the locker, then splits each side:
+
+1. The pool fee is base plus tax. The base part of what came in is `amount * baseFeeBps / (baseFeeBps + creatorTaxBps)`; the rest is the creator's tax and is the creator's alone.
+2. The base part of the quote side goes 30% to the protocol's escrow balance, 10% to the ticker club when the pair is an invented ticker, and the remainder to the creator's escrow balance. The club is paid by transferring the wrapper to `TickerLauncher` and calling `onClubFee`, and the volume that fee stands for is recorded with `recordVolume`. A club that cannot book its slice hands it to the protocol instead of blocking the collection.
+3. The coin side is burned in full: every coin the position earned on sells goes to `0x000000000000000000000000000000000000dEaD`. Nobody is paid in the coin; creators earn the quote on buys. Every coin launched here is deflationary this way: each sell removes its fee from the supply for good, and the site shows the dead balance as the share of supply burned.
+
+`FeesCollected` reports every figure of a collection. `LaunchLocker.pendingFees(token)` shows what is owed before one.
+
+The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
+
+## Who collects
+
+Anyone may call `collectFees(token)` at any time and pays only the gas. tickr also runs a keeper: the wallet that deployed the contracts, which holds no power once ownership has moved to the owner wallet, calls `collectFees` on every coin whose `pendingFees` are worth more than the gas, on a schedule. The same call from any other wallet does the same thing. Its address is published in [07 addresses](./07-addresses.md) once it exists.
+
+## Claiming: FeeEscrow
+
+Escrow balances are pull only. `claim()` pays the caller its ETH balance, `claimToken(token)` its balance in that token. Nothing is pushed to anyone, so a recipient that rejects transfers blocks only itself.
+
+## The ticker club
+
+Under an invented ticker, 10% of the base fee of every coin goes into that coin's pot for the current thirty day epoch, and the creators of the other coins under the same ticker claim from it in proportion to their recorded volume. Details in [05 anchors](./05-anchors.md).
+
+## BuybackVault
+
+`buybackBurnBps` is zero in the policy at launch, so no buyback is taken. The vault exists so a future policy can route a share of new launches' fees into it; the owner's only power over it is to set the strategy that may release what it holds.

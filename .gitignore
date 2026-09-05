@@ -1,0 +1,20 @@
+# foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/lib/**/.git
+# node
+node_modules/
+web/.next/
+web/out/
+.env
+.env.local
+*.log
+.DS_Store
+
+# cloudflare
+web/.open-next/
+web/.wrangler/
+workers/*/node_modules/
+workers/*/.wrangler/
+contracts/deployments/*.json

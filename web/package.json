@@ -1,0 +1,49 @@
+{
+  "name": "tickr-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/sync-deployments.mjs && node scripts/sync-docs.mjs && node scripts/build-docs-bundle.mjs && next dev",
+    "build": "node scripts/sync-deployments.mjs && node scripts/sync-docs.mjs && node scripts/build-docs-bundle.mjs && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "sync-abis": "node scripts/sync-abis.mjs",
+    "sync-deployments": "node scripts/sync-deployments.mjs",
+    "typecheck": "next typegen && tsc --noEmit",
+    "sync-docs": "node scripts/sync-docs.mjs && node scripts/build-docs-bundle.mjs",
+    "ship": "NEXT_PUBLIC_CHAIN_ID=4663 node scripts/sync-deployments.mjs && vercel deploy --prod --yes",
+    "ship:domain": "NEXT_PUBLIC_CHAIN_ID=4663 node scripts/sync-deployments.mjs && VERCEL_ORG_ID=team_kTUlUFS6q4Wi3Bp3wFUzNaT8 VERCEL_PROJECT_ID=prj_UtTlgDvl1A0ZbrAc5NZtfqPi8Ax1 vercel deploy --prod --yes",
+    "cf:preview": "NEXT_PUBLIC_DEMO=1 NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_DEMO=1 NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com opennextjs-cloudflare build && NEXT_PUBLIC_DEMO=1 wrangler deploy --env=\"\"",
+    "cf:build": "NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com opennextjs-cloudflare build",
+    "cf:live": "NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com opennextjs-cloudflare build && wrangler deploy --env live"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5",
+    "marked": "^15.0.12",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "viem": "^2",
+    "wagmi": "^2.19.5"
+  },
+  "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.6",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wrangler": "^4.129.0"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "pnpm": {
+    "overrides": {
+      "ws@>=8.0.0 <8.21.0": ">=8.21.0",
+      "axios@>=1.15.1 <1.18.0": ">=1.18.0",
+      "decode-uri-component@<=0.4.2": ">=0.5.0"
+    }
+  }
+}

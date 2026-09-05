@@ -1,0 +1,11 @@
+{
+  "name": "tickr-tokens",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "run-once": "wrangler dev --test-scheduled"
+  },
+  "dependencies": { "viem": "^2.56.3" },
+  "devDependencies": { "wrangler": "^4.129.0" }
+}

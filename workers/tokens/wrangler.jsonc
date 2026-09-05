@@ -1,0 +1,22 @@
+{
+  "$schema": "../../web/node_modules/wrangler/config-schema.json",
+  // Builds the "any token" list every five minutes and writes it to KV. The site reads that one key, so a
+  // visitor's request never makes a hundred chain calls.
+  "name": "tickr-tokens",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "observability": { "enabled": true },
+  "kv_namespaces": [{ "binding": "TICKR_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }],
+  "vars": {
+    "RPC_URL": "https://rpc.mainnet.chain.robinhood.com",
+    "EXPLORER": "https://robinhoodchain.blockscout.com/api/v2",
+    "WETH": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+    "USDG": "0x5fc5360D0400A0Fd4f2af552ADD042D716F1d168",
+    "V3_FACTORY": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+    "POOL_MANAGER": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+    "MULTICALL3": "0xcA11bde05977b3631167028862bE2a173976CA11",
+    "MARKET_QUOTE_LAUNCHER": ""
+  }
+}

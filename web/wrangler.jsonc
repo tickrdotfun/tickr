@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The preview deployment: the site with NEXT_PUBLIC_DEMO=1, replaying the recorded fork.
+  "name": "tickr-preview",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-05",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "binding": "ASSETS", "directory": ".open-next/assets" },
+  "observability": { "enabled": true },
+  "vars": { "TOKENS_URL": "https://tickr-tokens.tickrdotfun.workers.dev/" },
+  "kv_namespaces": [
+    // Next's own cache; the token list lives in the same namespace, written by the tickr-tokens Worker.
+    { "binding": "NEXT_INC_CACHE_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }
+  ],
+  "env": {
+    "live": {
+      // tickrfun.gg: the full site against the real chain.
+      "name": "tickr",
+      "assets": { "binding": "ASSETS", "directory": ".open-next/assets" },
+      "observability": { "enabled": true },
+      "vars": { "TOKENS_URL": "https://tickr-tokens.tickrdotfun.workers.dev/" },
+      "kv_namespaces": [{ "binding": "NEXT_INC_CACHE_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }]
+    }
+  }
+}
