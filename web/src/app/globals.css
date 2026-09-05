@@ -540,7 +540,7 @@
     border-radius: 18px;
     overflow: hidden;
   }
-  @media (min-width: 720px) { .stats-row { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (min-width: 720px) { .stats-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   .stat-cell { background: var(--tickr-ink); padding: 22px 22px 24px; position: relative; }
   .stat-cell::before {
     content: "";
