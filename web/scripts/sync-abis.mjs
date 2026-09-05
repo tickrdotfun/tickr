@@ -23,6 +23,7 @@ const NAMES = [
   "ZapRouter",
   "LaunchSeeder",
   "LaunchLocker",
+  "BuybackTreasury",
 ];
 
 mkdirSync(destDir, { recursive: true });

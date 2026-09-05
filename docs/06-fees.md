@@ -38,7 +38,7 @@ The policy in force is copied into the launch record at creation. If the pair is
 
 `FeesCollected` reports every figure of a collection. `LaunchLocker.pendingFees(token)` shows what is owed before one.
 
-The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
+The protocol's 30% is paid to the `BuybackTreasury`, not to a wallet: 80% of it buys and burns TICKR, 20% funds the team. See [13 the official coin](./13-official-coin.md). Inside a coin's first five seconds, a buy pays a snipe tax on the coin side too, burned to the dead address like every other coin-side fee; see [02 lifecycle](./02-lifecycle.md). The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
 
 ## Who collects
 

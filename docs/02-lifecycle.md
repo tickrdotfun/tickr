@@ -22,7 +22,7 @@ Inventing a new ticker costs `TickerLauncher.NEW_TICKER_FEE` on top of the launc
 
 The pool is a plain Uniswap v4 pool. Anything that trades Uniswap v4 on Robinhood Chain trades it from the block it is created in: the site through `ZapRouter`, `LaunchSeeder.swapExactIn` for a single pool, Uniswap's own router, aggregators, terminals and bots. The pool's LP fee is the 1% base plus the creator's tax, charged on every swap in the asset that goes in: buys pay it in the pair, sells pay it in the coin.
 
-There is no snipe tax and no trading delay. The dev buy is the creator's way to be first.
+A buy out of the pool in a coin's first five seconds pays a snipe tax: 99% in the launch second, 25% one second in, 3% at two, then dust, then nothing from the fifth second on. It is burned to the dead address like every coin-side fee. The launcher's wallet and its fee wallet never pay it, and sells never do. There is no trading delay. The dev buy is the creator's way to be first.
 
 ## 3. Fees
 

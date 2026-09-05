@@ -4,12 +4,13 @@ import type { Address } from "viem";
 import { useTokenData } from "@/hooks/useTokenData";
 import { DEPLOYED } from "@/lib/addresses";
 import { fmtAmount, fmtNumber, fmtPrice, shortAddr, fmtUsd } from "@/lib/format";
-import { isOfficialCoin } from "@/lib/addresses";
+import { isOfficialCoin, isZero, ADDRESSES } from "@/lib/addresses";
 import { TokenLogo } from "../TokenLogo";
 import { Panel, Spinner } from "../ui";
 import { TradePanel } from "./TradePanel";
 import { TokenDetails } from "./TokenDetails";
 import { PriceChart } from "./PriceChart";
+import { Buyback } from "./Buyback";
 import { useMarketData } from "@/hooks/useMarketData";
 import { sameAddr } from "@/lib/addresses";
 
@@ -102,6 +103,12 @@ export function TokenPage({ address }: { address: Address }) {
               <Figure hue="pink" label="burned" n={fmtAmount(fees.burned ?? 0n, meta.decimals, { sig: 4 })} unit={meta.symbol ?? ""} sub={`${burnedPct !== undefined ? `${burnedPct}% of supply` : "dead address balance"}${burnedUsd !== undefined && burnedUsd > 0 ? `, about ${fmtUsd(burnedUsd)}` : ""}`} />
             </div>
           </Panel>
+
+          {isOfficialCoin(address) && !isZero(ADDRESSES.buybackTreasury) && (
+            <Panel>
+              <Buyback d={d} />
+            </Panel>
+          )}
 
           <TokenDetails d={d} address={address} burnedUsd={burnedUsd} />
         </div>

@@ -241,10 +241,16 @@ abstract contract BaseTest is Test, DeployPermit2 {
         });
     }
 
+    /// the coin's first five seconds tax every buy but the launcher's own; most tests want the plain coin after that
+    function pastTheWindow() internal {
+        vm.warp(vm.getBlockTimestamp() + 6);
+    }
+
     function launchNative(address who) internal returns (Token token, bytes32 poolId) {
         TokenParams memory p = defaultParams(address(0), 0);
         vm.prank(who);
         (address t, bytes32 id) = factory.launchToken{value: LAUNCH_FEE}(p, 0, address(0));
+        pastTheWindow();
         return (Token(t), id);
     }
 
@@ -252,6 +258,7 @@ abstract contract BaseTest is Test, DeployPermit2 {
         TokenParams memory p = defaultParams(pair, 0);
         vm.prank(who);
         (address t, bytes32 id) = factory.launchToken{value: LAUNCH_FEE}(p, 0, pair);
+        pastTheWindow();
         return (Token(t), id);
     }
 

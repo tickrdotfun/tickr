@@ -14,7 +14,6 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {PriceMath} from "../src/libraries/PriceMath.sol";
 
 /// The buyback treasury: the protocol's share collects here, splits 80/20 exactly, converts what converts at par or
 /// through the live dollar pool, forwards the rest to the team, and buys and burns TICKR under a rate limit, a
@@ -62,6 +61,7 @@ contract BuybackTest is BaseTest {
         (address f, address t,) = tickers.launch{value: LAUNCH_FEE + tickers.NEW_TICKER_FEE()}("FUN", p, 0);
         fun = TickerToken(f);
         tickr = Token(t);
+        pastTheWindow();
     }
 
     function _creditUsdg(uint256 amount) internal {
@@ -70,10 +70,10 @@ contract BuybackTest is BaseTest {
         escrow.creditToken(address(treasury), address(usdg), amount);
     }
 
-    function _priceOfTickr(PoolKey memory key) internal view returns (uint256 priceX18) {
-        (uint160 sqrtP,,,) = poolManager.getSlot0(key.toId());
-        uint256 p = PriceMath.priceX18(sqrtP); // currency1 per currency0
-        return Currency.unwrap(key.currency0) == address(tickr) ? p : 1e36 / p;
+    /// the pool's sqrt price, and whether a rise in it means TICKR got dearer (TICKR as currency0) or cheaper
+    function _sqrtPrice(PoolKey memory key) internal view returns (uint160 sqrtP, bool upIsDearer) {
+        (sqrtP,,,) = poolManager.getSlot0(key.toId());
+        upIsDearer = Currency.unwrap(key.currency0) == address(tickr);
     }
 
     // ---------------------------------------------------------------- collect
@@ -164,15 +164,17 @@ contract BuybackTest is BaseTest {
         treasury.collect(tokens);
         uint256 earmark = treasury.earmarkedUsdg();
         PoolKey memory key = factory.poolKeyOf(address(tickr));
-        uint256 before = _priceOfTickr(key);
+        (uint160 before, bool upIsDearer) = _sqrtPrice(key);
         (uint256 previewIn, uint256 previewMin) = treasury.previewBuy();
         (uint256 usdgIn, uint256 tickrOut) = treasury.buy();
         assertEq(usdgIn, previewIn, "the preview is the buy");
         assertGe(tickrOut, previewMin, "never below the floor it computed");
         assertLe(usdgIn, (earmark * 500) / 10_000, "at most five percent per call");
-        uint256 after_ = _priceOfTickr(key);
-        assertLe((after_ * 10_000) / before, 10_300 + 1, "the price moved at most three hundred basis points");
-        assertGt(after_, before, "and it did move up: coins were bought");
+        (uint160 after_,) = _sqrtPrice(key);
+        // TICKR got dearer: the sqrt price moved toward its side, by at most sqrt(1.03), which is 1.0149
+        uint256 sqrtRatioBps = upIsDearer ? (uint256(after_) * 10_000) / before : (uint256(before) * 10_000) / after_;
+        assertGt(sqrtRatioBps, 10_000, "the price moved: coins were bought");
+        assertLe(sqrtRatioBps, 10_149 + 1, "and by at most three hundred basis points");
     }
 
     function test_buyback_permissionless() public {

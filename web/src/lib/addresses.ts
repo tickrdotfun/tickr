@@ -17,6 +17,7 @@ type Deployments = {
   stockQuoteLauncher?: string;
   zapRouter?: string;
   v3Factory?: string;
+  buybackTreasury?: string;
   marketQuoteLauncher?: string;
   poolManager?: string;
   positionManager?: string;
@@ -61,6 +62,7 @@ export const ADDRESSES = {
   marketQuoteLauncher: pick(d.marketQuoteLauncher, process.env.NEXT_PUBLIC_MARKET_QUOTE_LAUNCHER),
   zapRouter: pick(d.zapRouter, process.env.NEXT_PUBLIC_ZAP_ROUTER),
   chartGuardHook: pick(d.chartGuardHook, process.env.NEXT_PUBLIC_CHART_GUARD_HOOK),
+  buybackTreasury: pick(d.buybackTreasury, process.env.NEXT_PUBLIC_BUYBACK_TREASURY),
   poolManager: pick(d.poolManager, process.env.NEXT_PUBLIC_POOL_MANAGER, "0x8366a39CC670B4001A1121B8F6A443A643e40951"),
   positionManager: pick(
     d.positionManager,

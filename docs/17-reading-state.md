@@ -97,6 +97,9 @@ function socials() view returns (Socials);
 function liquidityPool() view returns (bytes32);      // its pool id
 function owner() view returns (address);              // always zero: there is no owner
 function contractURI() view returns (string);         // ERC-7572 JSON, inline: name, symbol, description, image, links
+function launchedAt() view returns (uint64);
+function SNIPE_WINDOW() view returns (uint256);       // 5 seconds
+function currentSnipeTaxBps(address recipient) view returns (uint256);   // the snipe tax a buy pays right now, zero for the launch's own wallets and after the window
 // LaunchDeployer
 function MAX_NAME() view returns (uint256);           // 64, then MAX_SYMBOL 16, MAX_LOGO 8192, MAX_DESCRIPTION 2048, MAX_SOCIAL 256
 ```
@@ -109,6 +112,26 @@ struct Market { address pool; address counter; uint24 fee; uint256 depth; uint25
 function bestMarket(address quote) view returns (Market);   // reverts with the reason when there is none
 function minDepth(address counter) view returns (uint256);  // the floor, total and within the band
 function BAND_BPS() view returns (uint256);                 // 500
+```
+
+## The buyback treasury
+
+```solidity
+// BuybackTreasury: the protocol's fee share, buying and burning TICKR
+function earmarkedUsdg() view returns (uint256);   // dollars set aside for buys
+function totalUsdgSpent() view returns (uint256);
+function totalTickrBurned() view returns (uint256);
+function lastBuyAt() view returns (uint256);
+function nextBuyAt() view returns (uint256);        // zero until the first buy
+function previewBuy() view returns (uint256 usdgIn, uint256 minTickrOut);
+function official() view returns (address tickr, address fun);
+function collect(address[] tokens) returns (uint256 usdgTotal, uint256 toTeam, uint256 earmarked);
+function buy() returns (uint256 usdgIn, uint256 tickrOut);
+// events
+event Collected(uint256 usdgTotal, uint256 toTeam, uint256 earmarked);
+event Forwarded(address indexed asset, uint256 amount);       // an unconvertible asset sent whole to the team
+event BoughtAndBurned(uint256 usdgIn, uint256 tickrOut, address indexed caller);
+// constants: BUYBACK_SHARE_BPS 8000, MAX_IMPACT_BPS 300, MIN_INTERVAL 10 minutes, MAX_TRANCHE_BPS 500
 ```
 
 ## The site's own endpoints

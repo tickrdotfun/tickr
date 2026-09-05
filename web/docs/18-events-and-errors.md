@@ -40,6 +40,7 @@ event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 am
 | `EpochOpen`, `NotUnderTicker`, `NothingToSweep` | ticker launcher | the club epoch is still running, the coin is not under that ticker, or the pot is empty. |
 | `QuoteIsAnchor`, `QuoteLaunchedHere`, `NoMarket`, `QuotePriceUnavailable`, `NoTargetRaise` | market quote launcher | the token is an anchor or a tickr coin (use that path), has no v3 pool over the floor, or its price cannot be read. |
 | `PoolAlreadyExists` | seeder | somebody opened the coin's pool key first. change the salt and launch again. |
+| `SnipeTaxed(to, amount, bps)` | the coin | a buy inside the first five seconds paid its snipe tax to the dead address. an event, not an error. |
 | `PositionNotLocked`, `NotPositionManager` | seeder, locker | the position did not land in the locker, or something other than the position manager tried to hand it one. |
 | `RefundFailed` | seeder | the input the pool did not take could not be sent back to the caller. |
 | `EmptyMetadata`, `MetadataTooLong`, `BadName`, `BadSymbol` | deployer | name or symbol empty, a field over its limit, a name with a space at either end, two spaces in a row or a byte outside printable ASCII, or a symbol with anything but letters and digits. |

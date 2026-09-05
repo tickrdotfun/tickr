@@ -13,3 +13,4 @@ export { LaunchDeployerAbi } from "./LaunchDeployer";
 export { ZapRouterAbi } from "./ZapRouter";
 export { LaunchSeederAbi } from "./LaunchSeeder";
 export { LaunchLockerAbi } from "./LaunchLocker";
+export { BuybackTreasuryAbi } from "./BuybackTreasury";

@@ -176,6 +176,9 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
         if (p.path.length == 0 || !_isOwnPool(p.path[p.path.length - 1], p.token)) revert BadPath();
         (address c, uint256 a) = _walk(p.path, p.tokenIn, amountIn);
         if (c != p.token) revert BadPath();
+        // what the router holds is what it forwards: inside its launch window a coin taxes the buy on its way out of
+        // the pool, so the pool's own count of the output is more than arrived here
+        a = IERC20(p.token).balanceOf(address(this));
         if (a < p.minTokensOut) revert Slippage();
         IERC20(p.token).safeTransfer(recipient, a);
         tokensOut = a;

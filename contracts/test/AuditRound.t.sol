@@ -34,6 +34,7 @@ contract AuditRoundTest is BaseTest {
         p.expectedEconomics = expected;
         vm.prank(creator);
         (ticker, coin,) = tickers.launch{value: fee}(name, p, 0);
+        pastTheWindow();
         // a buy in the ticker and a collection, so the club holds a pot in the ticker
         vm.startPrank(alice);
         usdg.approve(ticker, 2_000e6);

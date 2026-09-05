@@ -13,7 +13,8 @@ import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 
 /// @notice forge script script/Deploy.s.sol --rpc-url robinhood --broadcast --verify
-/// env: PRIVATE_KEY (deployer, becomes owner unless OWNER is set), PROTOCOL_FEE_RECIPIENT (defaults to deployer)
+/// env: PRIVATE_KEY (deployer, becomes owner unless OWNER is set), PROTOCOL_FEE_RECIPIENT (the team wallet: the
+/// protocol fee recipient is the BuybackTreasury, which pays this wallet the team share and burns the rest)
 contract Deploy is Script, DeployStack {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -22,7 +23,7 @@ contract Deploy is Script, DeployStack {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(pk);
         address owner = vm.envOr("OWNER", deployer);
-        address feeRecipient = vm.envOr("PROTOCOL_FEE_RECIPIENT", deployer);
+        address teamWallet = vm.envOr("PROTOCOL_FEE_RECIPIENT", deployer); // the treasury pays it the team share
         require(block.chainid == 4663, "run against Robinhood Chain");
         require(RH_POOL_MANAGER.code.length > 0 && RH_POSITION_MANAGER.code.length > 0, "v4 not found");
         require(CREATE2_DEPLOYER.code.length > 0, "CREATE2 proxy not found: the guard hook cannot be mined");
@@ -43,7 +44,7 @@ contract Deploy is Script, DeployStack {
             deployer,
             CREATE2_DEPLOYER,
             deployer,
-            feeRecipient,
+            teamWallet,
             IPoolManager(RH_POOL_MANAGER),
             IPositionManager(RH_POSITION_MANAGER),
             IAllowanceTransfer(PERMIT2),

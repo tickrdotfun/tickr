@@ -1,5 +1,7 @@
 # 16 · Trading from code
 
+Inside a coin's first five seconds a buy pays the snipe tax, taken on the way out of the pool: `Token.currentSnipeTaxBps(recipient)` is the rate at that second, and a quote that ignores it will not match what settles. The zap's `previewZap` already reports what the buyer keeps.
+
 Every tickr pool is a Uniswap v4 pool with no hook. Uniswap's Universal Router, the v4 Quoter, aggregators and terminals trade it with the pool key in [17 reading state](./17-reading-state.md) and no tickr specific code. Their quotes already include the LP fee, because it is the pool's own.
 
 ## One pool

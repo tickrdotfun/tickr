@@ -8,7 +8,7 @@ No custody, atomic launches, everything readable on chain, immutable per version
 
 ## 2. Lifecycle
 
-One state: live. `Factory._launch` deploys the coin (`LaunchDeployer.deployToken`, CREATE2, salt namespaced by the initiator), opens its Uniswap v4 pool at the opening price with no hook, tick spacing 10, fee `(baseFeeBps + creatorTaxBps) * 100`, mints one position holding the entire supply from the opening tick to the end of the range to `LaunchLocker` (`LaunchSeeder.seedLaunch`), records `LaunchedToken` and copies the `FeePolicy` in force. A dev buy is a swap on the new pool in the same transaction through `LaunchAndBuyRouter` or a launcher. No graduation, no phases, no rescue, no snipe tax.
+One state: live. `Factory._launch` deploys the coin (`LaunchDeployer.deployToken`, CREATE2, salt namespaced by the initiator), opens its Uniswap v4 pool at the opening price with no hook, tick spacing 10, fee `(baseFeeBps + creatorTaxBps) * 100`, mints one position holding the entire supply from the opening tick to the end of the range to `LaunchLocker` (`LaunchSeeder.seedLaunch`), records `LaunchedToken` and copies the `FeePolicy` in force. A dev buy is a swap on the new pool in the same transaction through `LaunchAndBuyRouter` or a launcher. No graduation, no phases, no rescue. One snipe tax, in the coin itself: a transfer out of the pool manager in the coin's first five seconds pays 9900 / 2500 / 300 / 50 / 10 bps by elapsed second, burned to `0xdEaD`; the launch's deployer, its fee recipient and the locker are exempt; sells never pay. `Token.currentSnipeTaxBps(recipient)` is the rate a quote must apply.
 
 ## 3. Pool math
 

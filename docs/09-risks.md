@@ -19,7 +19,7 @@ Read this before launching, buying, or integrating. Nothing here is advice.
 
 ## Third party liquidity and other pools
 
-A tickr pool is a plain Uniswap v4 pool. Anyone may add liquidity to it and remove their own again, and anyone may open another pool for the same two tokens at another fee or price. Neither touches the locked launch position, and a pool nobody trades in prices nothing. There is no snipe protection: bots can buy in the block after a launch like anyone else, and the dev buy in the launch transaction is the creator's way to be first.
+A tickr pool is a plain Uniswap v4 pool. Anyone may add liquidity to it and remove their own again, and anyone may open another pool for the same two tokens at another fee or price. Neither touches the locked launch position, and a pool nobody trades in prices nothing. Snipe protection is a tax, not a gate: a buy out of the pool in the coin's first five seconds pays 99% in the launch second, 25% one second in, 3% at two, then dust, then nothing, all of it burned to the dead address. The launcher and its fee wallet are exempt, sells are never taxed, and from the fifth second the coin is a plain ERC-20. Bots can still buy in the block after a launch, at that price.
 
 ## Liquidity is locked forever
 
@@ -46,7 +46,7 @@ The factory is `Ownable2Step`. The owner can change the terms of future launches
 
 What the owner cannot do: take anything out of a pool, a locked position, the fee escrow, or a ticker's USDG reserve; stop an existing coin from trading; change an existing launch's fee, tax, pair or economics; mint, freeze or blacklist a coin; block a fee collection. There is no rescue function and no phase in which funds wait on anyone: the pool exists in the launch transaction and the position is locked in it.
 
-Related owners outside the factory: the `AnchorRegistry` owner can `register` / `setActive` anchors (new launches only); the `BuybackVault` owner can `setStrategy`, and only that strategy can release what the vault holds, which is nothing while `buybackBurnBps` is zero.
+Related owners outside the factory: the `AnchorRegistry` owner can `register` / `setActive` anchors (new launches only); the `BuybackVault` owner can `setStrategy`, and only that strategy can release what the vault holds, which is nothing while `buybackBurnBps` is zero. The `BuybackTreasury`, which receives the protocol's fee share, has no owner at all: no admin, no withdrawal, no rescue. Its money leaves only to the team wallet and the dead address, by the rules in [13](./13-official-coin.md).
 
 ## Unaudited
 

@@ -24,7 +24,13 @@ In the genesis transaction itself, the team bought a slice of TICKR: `6.8%` of s
 
 ## Buybacks
 
-Nothing about buybacks is written into the contracts, and there is no share of anything reserved for them. If the team runs buybacks of TICKR, they will be described here first: the wallet that does them and what it does with the coins.
+The protocol's share of every fee, and every launch fee, is paid to a contract, `BuybackTreasury`, not to a wallet. It is the protocol fee recipient from the first launch, frozen into TICKR and every coin after it. The treasury has no owner and no way to withdraw: money leaves it two ways only, to the team wallet and to the dead address.
+
+Anyone may call `collect(tokens)`. It claims what the escrow holds for the treasury, turns what it can into dollars (an invented ticker unwraps at par, ETH goes through the live ETH/USDG pool), sends `100% - 80% = 20%` of the dollars to the team wallet, and sets the other 80% aside. Anything it cannot convert, a Stock Token or a coin used as a quote, goes whole to the team wallet, since the treasury has no honest price for it.
+
+Anyone may then call `buy()`, at most once every ten minutes. It spends at most 5% of the dollars set aside, and never enough to move TICKR's pool by more than 300 basis points; it turns those dollars into FUN, buys TICKR in the TICKR/FUN pool, and sends the TICKR to `0x000000000000000000000000000000000000dEaD`. The size and the least it will accept are computed on chain, so a caller cannot steer the price. Every buy is a `BoughtAndBurned` event, and the TICKR page shows the running total.
+
+`BUYBACK_SHARE_BPS` is 8,000, the 80% above. Burning takes coins out of circulation. It does not guarantee a higher price.
 
 ## The FUN club
 

@@ -32,6 +32,7 @@ contract TickerTest is BaseTest {
         uint256 value = LAUNCH_FEE + (isNew ? tickers.NEW_TICKER_FEE() : 0);
         vm.prank(who);
         (address q, address t,) = tickers.launch{value: value}(symbol, p, 0);
+        pastTheWindow();
         return (TickerToken(q), Token(t));
     }
 
