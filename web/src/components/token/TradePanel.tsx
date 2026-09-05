@@ -10,7 +10,7 @@ import { useZapRoute } from "@/hooks/useZapRoute";
 import { TokenAbi, ZapRouterAbi } from "@/lib/abis";
 import { ADDRESSES, ZERO } from "@/lib/addresses";
 import { DEFAULT_SLIPPAGE_BPS } from "@/lib/constants";
-import { bpsToPct, fmtAmount, safeParseUnits, splitLabel } from "@/lib/format";
+import { bpsToPct, fmtAmount, safeParseUnits } from "@/lib/format";
 import { applySlippage, quoteExactIn } from "@/lib/pool";
 import { reverseRoute } from "@/lib/route";
 import { TxStatus } from "../TxStatus";
@@ -327,11 +327,9 @@ export function TradePanel({ d }: { d: TokenData }) {
           </button>
         )}
         <TxStatus {...tx} />
-        <div className="text-[13px] text-dim">
+        <div className="text-[12.5px] text-dim">
           pool fee {poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"}
-          {baseBps !== undefined && launch ? `: ${bpsToPct(baseBps)} base${launch.creatorTaxBps > 0 ? ` + ${bpsToPct(launch.creatorTaxBps)} creator tax` : ""}` : ""}
-          {policy ? `. the base splits ${splitLabel({ creatorShareBps: Number(policy.creatorShareBps), clubShareBps: Number(policy.clubShareBps), protocolShareBps: Number(policy.protocolShareBps) })}` : ""}
-          . taken inside the swap, in the locked position.
+          {launch && launch.creatorTaxBps > 0 && baseBps !== undefined ? ` (${bpsToPct(baseBps)} base + ${bpsToPct(launch.creatorTaxBps)} creator tax)` : ""}, inside the swap.
         </div>
       </div>
     </Panel>

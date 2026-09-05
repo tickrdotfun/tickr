@@ -36,29 +36,45 @@ export function TickerClub({ d }: { d: TokenData }) {
 
   return (
     <div className="club">
-      <p className="detail-note">
-        10% of the base fee paid under {qs} goes to the creators of the other coins under {qs}, by their pool volume
-        over the same thirty days. volume is booked when a coin&apos;s fees are collected. no volume in the window, no
-        share. a coin never pays itself.
-      </p>
-      <p className="detail-note">
-        the founder&apos;s coin is captain and counts double. if it stops trading, the biggest coin takes the seat for that window.
+      <p className="detail-note detail-note-tight">
+        10% of every fee under {qs} is shared by the creators of the other coins under it, by thirty-day volume. the founder&apos;s coin is captain and counts double while it trades.
       </p>
 
       {!c ? (
         <p className="text-muted text-[13px]">{club.isLoading ? "reading the club…" : "no club data"}</p>
       ) : (
         <>
-          <div className="fact-grid">
-            <Fact k="this window's pot" v={`${fmtAmount(c.potNow, qd)} ${qs}`} sub={`window ${c.epoch.toString()}, closes ${new Date(c.windowEndsAt * 1000).toLocaleDateString()}`} />
-            <Fact k="last window's pot" v={`${fmtAmount(c.potLast, qd)} ${qs}`} sub="claimable now, by weight" />
-            <Fact k="members with weight" v={String(c.members.filter((m) => m.volume > 0n).length)} sub={`of ${c.members.length} coins under ${qs}`} />
-            <Fact
-              k={`${meta.symbol ?? "this coin"} can claim`}
-              v={me ? `${fmtAmount(c.claimable, qd)} ${qs}` : "-"}
-              sub={me && me.lastVolume > 0n ? "from last window" : "no volume last window"}
-            />
-          </div>
+          <dl className="detail-rows">
+            <div className="detail-row">
+              <dt>this window&apos;s pot</dt>
+              <dd>
+                <span className="num">
+                  {fmtAmount(c.potNow, qd)} {qs}
+                </span>
+                <span className="text-dim"> closes {new Date(c.windowEndsAt * 1000).toLocaleDateString()}</span>
+              </dd>
+            </div>
+            <div className="detail-row">
+              <dt>last window&apos;s pot</dt>
+              <dd>
+                <span className="num">
+                  {fmtAmount(c.potLast, qd)} {qs}
+                </span>
+                <span className="text-dim"> claimable now</span>
+              </dd>
+            </div>
+            <div className="detail-row detail-row-action">
+              <dt>{meta.symbol ?? "this coin"} can claim</dt>
+              <dd>
+                <span className="num">{me ? `${fmtAmount(c.claimable, qd)} ${qs}` : "-"}</span>
+                {me && c.last !== undefined && (
+                  <button className="btn btn-xs btn-primary" disabled={tx.busy || !user || c.claimable === 0n} onClick={claim}>
+                    claim
+                  </button>
+                )}
+              </dd>
+            </div>
+          </dl>
 
           <table className="club-table">
             <thead>
@@ -67,54 +83,29 @@ export function TickerClub({ d }: { d: TokenData }) {
                 <th className="num">30d volume</th>
                 <th className="num">weight</th>
                 <th className="num">last window</th>
-                <th className="num">paid in</th>
-                <th>creator</th>
               </tr>
             </thead>
             <tbody>
               {c.members.map((m) => (
-                <tr key={m.token} data-me={sameAddr(m.token, launch.token)}>
+                <tr key={m.token} data-me={sameAddr(m.token, launch.token)} data-out={m.volume === 0n}>
                   <td>
                     <span className="num">{m.symbol}</span>
-                    {m.captain && <span className="badge sw-yellow ml-2">captain, counts double</span>}
+                    {m.captain && <span className="club-captain">captain ×2</span>}
                   </td>
                   <td className="num">{fmtAmount(m.volume, qd)}</td>
                   <td className="num">{m.volume > 0n ? pct(m.weight, 1) : "0%"}</td>
                   <td className="num">
                     {m.lastVolume > 0n ? pct(m.lastWeight, 1) : "0%"}
-                    {m.lastCaptain && <span className="text-dim"> captain</span>}
+                    {m.lastCaptain && <span className="text-dim"> ×2</span>}
                   </td>
-                  <td className="num">{fmtAmount(m.pot, qd)}</td>
-                  <td className="num">{shortAddr(m.creator)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-
-          {me && c.last !== undefined && (
-            <div className="club-claim">
-              <button className="btn btn-sm btn-primary" disabled={tx.busy || !user || c.claimable === 0n} onClick={claim}>
-                claim club for {meta.symbol ?? "this coin"}
-              </button>
-              <span className="text-dim text-[13px]">
-                anyone can call; it pays {shortAddr(launch.creatorFeeRecipient)}
-                {isCreator ? " (you)" : ""}
-              </span>
-            </div>
-          )}
+          {isCreator && <p className="detail-note detail-note-tight">claims pay {shortAddr(launch.creatorFeeRecipient)}, you.</p>}
           <TxStatus {...tx} />
         </>
       )}
-    </div>
-  );
-}
-
-function Fact({ k, v, sub }: { k: string; v: string; sub: string }) {
-  return (
-    <div className="fact">
-      <div className="fact-k">{k}</div>
-      <div className="fact-v num">{v}</div>
-      <div className="fact-s">{sub}</div>
     </div>
   );
 }

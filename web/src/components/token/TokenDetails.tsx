@@ -42,38 +42,28 @@ export function TokenDetails({ d, address, burnedUsd }: { d: TokenData; address:
 
       <div className="detail-body">
         {tab === "market" && (
-          <>
-            <div className="fact-grid">
-              <Fact
-                k="pool fee"
-                v={pct(Number(launch.poolFee) / 1_000_000, 2)}
-                sub={baseBps !== undefined ? `${pct(baseBps / 10_000, 2)} base${launch.creatorTaxBps > 0 ? ` + ${pct(launch.creatorTaxBps / 10_000, 2)} creator tax` : ""}` : "uniswap v4, set at launch"}
-              />
-              <Fact
-                k="base fee split"
-                v={split ? [split.creatorShareBps, ...(split.clubShareBps > 0 ? [split.clubShareBps] : []), split.protocolShareBps].map((b) => String(Math.round(b / 100))).join(" / ") : "-"}
-                sub={split ? `percent to ${split.clubShareBps > 0 ? "creator, ticker club, protocol" : "creator, protocol"}. frozen at launch` : "frozen at launch"}
-              />
-              <Fact
-                k="creator tax"
-                v={launch.creatorTaxBps > 0 ? pct(launch.creatorTaxBps / 10_000, 2) : "none"}
-                sub={launch.creatorTaxBps > 0 ? "all of it to the creator" : "the creator set none"}
-              />
-              <Fact k="liquidity" v="locked" sub="the position cannot be withdrawn" />
-            </div>
-            <dl className="detail-rows">
-              <DRow k="lp position">
-                <span className="num">#{launch.lpTokenId.toString()}</span> <span className="chip-lock">locked forever</span>
+          <dl className="detail-rows detail-rows-first">
+            <DRow k="pool fee">
+              <span className="num">{pct(Number(launch.poolFee) / 1_000_000, 2)}</span>
+              {baseBps !== undefined && launch.creatorTaxBps > 0 && <span className="text-dim"> {pct(baseBps / 10_000, 2)} base + {pct(launch.creatorTaxBps / 10_000, 2)} creator tax</span>}
+            </DRow>
+            <DRow k="fee split">
+              <span className="num">{split ? [split.creatorShareBps, ...(split.clubShareBps > 0 ? [split.clubShareBps] : []), split.protocolShareBps].map((b) => String(Math.round(b / 100))).join(" / ") : "-"}</span>
+              <span className="text-dim"> {split ? (split.clubShareBps > 0 ? "creator, ticker club, protocol" : "creator, protocol") : ""}, frozen at launch</span>
+            </DRow>
+            <DRow k="creator tax">{launch.creatorTaxBps > 0 ? <span className="num">{pct(launch.creatorTaxBps / 10_000, 2)}</span> : "none"}</DRow>
+            <DRow k="liquidity">
+              locked forever <span className="text-dim">position </span>
+              <span className="num">#{launch.lpTokenId.toString()}</span>
+            </DRow>
+            {pool.poolId && (
+              <DRow k="pool id">
+                <span className="num detail-hex" title={pool.poolId}>
+                  {pool.poolId.slice(0, 10)}…{pool.poolId.slice(-8)}
+                </span>
               </DRow>
-              {pool.poolId && (
-                <DRow k="pool id">
-                  <span className="num detail-hex" title={pool.poolId}>
-                    {pool.poolId.slice(0, 10)}…{pool.poolId.slice(-8)}
-                  </span>
-                </DRow>
-              )}
-            </dl>
-          </>
+            )}
+          </dl>
         )}
 
         {tab === "fees" && <FeeLedger d={d} split={split} burnedUsd={burnedUsd} />}
@@ -92,16 +82,6 @@ export function TokenDetails({ d, address, burnedUsd }: { d: TokenData; address:
         )}
       </div>
     </section>
-  );
-}
-
-function Fact({ k, v, sub }: { k: string; v: string; sub: string }) {
-  return (
-    <div className="fact">
-      <div className="fact-k">{k}</div>
-      <div className="fact-v num">{v}</div>
-      <div className="fact-s">{sub}</div>
-    </div>
   );
 }
 
