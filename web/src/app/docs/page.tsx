@@ -50,7 +50,7 @@ const STEPS: [number, string, string][] = [
   [
     4,
     "the fees",
-    "the pool fee lands in the locked position. anyone can collect it; the split frozen at launch sends the quote side to the escrow and the club, the creator's coin side to the escrow, and burns the rest.",
+    "the pool fee lands in the locked position. anyone can collect it; the split frozen at launch sends the quote side to the escrow for the creator, the club and the protocol's buyback treasury, and burns the coin side in full. a buy in a coin's first five seconds pays a snipe tax, burned too.",
   ],
 ];
 
