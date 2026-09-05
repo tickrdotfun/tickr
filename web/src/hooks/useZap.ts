@@ -29,6 +29,32 @@ export function zapParams(token: Address, path: Hop[], recipient: Address, minTo
   };
 }
 
+export type Client = NonNullable<ReturnType<typeof usePublicClient>>;
+
+/** One quote of a buy paid in ETH: `previewZap` always reverts with `Preview(quoteOut, tokensOut)`. */
+export async function previewZapOnce(client: Client, token: Address, path: Hop[], valueWei: bigint, from?: Address): Promise<ZapPreview | null> {
+  try {
+    await client.simulateContract({
+      abi: ZapRouterAbi,
+      address: ADDRESSES.zapRouter,
+      functionName: "previewZap",
+      args: [zapParams(token, path, from ?? PREVIEW_RECIPIENT)],
+      value: valueWei,
+      account: from,
+    });
+    return null; // cannot happen: previewZap always reverts
+  } catch (e) {
+    if (e instanceof BaseError) {
+      const revert = e.walk((err) => err instanceof ContractFunctionRevertedError);
+      if (revert instanceof ContractFunctionRevertedError && revert.data?.errorName === "Preview") {
+        const [quoteOut, tokensOut] = revert.data.args as readonly [bigint, bigint];
+        return { quoteOut, tokensOut };
+      }
+    }
+    throw e;
+  }
+}
+
 /**
  * Quote a buy paid in ETH by simulating `previewZap`, which always reverts with `Preview(quoteOut, tokensOut)`.
  * Re-runs whenever the ETH amount or route changes.
@@ -42,26 +68,7 @@ export function useZapPreview(token: Address | undefined, path: Hop[] | null | u
     refetchInterval: 5_000,
     queryFn: async (): Promise<ZapPreview | null> => {
       if (!client || !token || !path || !valueWei) return null;
-      try {
-        await client.simulateContract({
-          abi: ZapRouterAbi,
-          address: ADDRESSES.zapRouter,
-          functionName: "previewZap",
-          args: [zapParams(token, path, from ?? PREVIEW_RECIPIENT)],
-          value: valueWei,
-          account: from,
-        });
-        return null; // cannot happen: previewZap always reverts
-      } catch (e) {
-        if (e instanceof BaseError) {
-          const revert = e.walk((err) => err instanceof ContractFunctionRevertedError);
-          if (revert instanceof ContractFunctionRevertedError && revert.data?.errorName === "Preview") {
-            const [quoteOut, tokensOut] = revert.data.args as readonly [bigint, bigint];
-            return { quoteOut, tokensOut };
-          }
-        }
-        throw e;
-      }
+      return previewZapOnce(client, token, path, valueWei, from);
     },
   });
 }

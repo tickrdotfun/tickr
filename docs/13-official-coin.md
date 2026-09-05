@@ -16,11 +16,11 @@ tickr has one coin of its own. Its ticker is **TICKR**, it is priced in **FUN**,
 
 ## How it was launched
 
-In the genesis transaction, while launching was still closed to everyone but the deployer: `TickerLauncher.launch("FUN", ...)` invented FUN, paid the ticker fee that opened FUN's guarded one dollar pool, and opened TICKR's pool with the whole supply locked in it, on the same terms as every coin after it. Then the disclosed first buy, then launches opened to everyone.
+In the genesis transaction, while launching was still closed to everyone but the deployer: `TickerLauncher.launchAndBuy("FUN", ...)` invented FUN, paid the ticker fee that opened FUN's guarded one dollar pool, opened TICKR's pool with the whole supply locked in it, on the same terms as every coin after it, and made the disclosed first buy, all in that one transaction, so nothing could trade the pool before it. Then launches opened to everyone.
 
 ## The first buy
 
-In the same genesis transaction sequence, the team bought a slice of TICKR through the zap, paid in ETH: `6.8%` of supply, the same share the first coin on a comparable launchpad's deployer bought at its launch. It is bought on the open curve at the curve's price, with no exemption from the fee, and the transaction is public. The team's fee wallet is whitelisted from the snipe tax for that buy, which is the same exemption every creator can give an address at launch.
+In the genesis transaction itself, the team bought a slice of TICKR: `6.8%` of supply, the same share the first coin on a comparable launchpad's deployer bought at its launch. It is paid in FUN minted from USDG that the deployer bought with ETH the moment before, bought from the pool at the pool's price with no exemption from the fee, and the transaction is public. The size is worked out by running that same transaction in a simulation first and searching for the dollars that buy the share; the pool is new both times, so the answer is exact.
 
 ## Buybacks
 

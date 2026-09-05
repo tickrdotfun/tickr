@@ -20,14 +20,15 @@ export function QuoteChip({ meta, size = "sm" }: { meta?: QuoteMeta; size?: "sm"
           ? "sw-blue"
           : "sw-white";
   return (
-    <span className={`badge cap ${cls} ${size === "md" ? "text-[12px] px-2.5" : ""}`} title={meta.kind === "official" ? "Official Stock Token" : meta.kind === "ticker" ? "Issued by the launch creator" : meta.address}>
+    <span className={`badge cap ${cls} ${size === "md" ? "text-[12px] px-2.5" : ""}`} title={meta.kind === "official" ? "a Stock Token from the Robinhood Assets registry" : meta.kind === "ticker" ? "Issued by the launch creator" : meta.address}>
       {meta.label}
     </span>
   );
 }
 
+/** The pair is a Stock Token from the registry. Says so about the pair, never about the coin next to it. */
 export function OfficialBadge() {
-  return <span className="badge sw-yellow cap">Official Stock Token</span>;
+  return <span className="badge sw-yellow cap">Stock Token pair</span>;
 }
 
 export function CreatorIssuedBadge() {

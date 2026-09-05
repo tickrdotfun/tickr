@@ -15,6 +15,15 @@
     { "binding": "NEXT_INC_CACHE_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }
   ],
   "env": {
+    "sepolia": {
+      // the dress rehearsal: the full site against the Sepolia deployment. deleted after the rehearsal.
+      "name": "tickr-sepolia",
+      "assets": { "binding": "ASSETS", "directory": ".open-next/assets" },
+      "observability": { "enabled": true },
+      "vars": { "TOKENS_URL": "https://tickr-tokens.tickrdotfun.workers.dev/" },
+      "ratelimits": [{ "name": "PIN_BURST", "namespace_id": "1003", "simple": { "limit": 3, "period": 60 } }],
+      "kv_namespaces": [{ "binding": "NEXT_INC_CACHE_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }]
+    },
     "live": {
       // tickrfun.gg: the full site against the real chain.
       "name": "tickr",

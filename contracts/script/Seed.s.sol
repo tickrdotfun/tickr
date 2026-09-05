@@ -32,6 +32,13 @@ contract Seed is Script {
     Factory factory;
     LaunchSeeder seeder;
     address me;
+    /// @dev Every amount below is scaled by this, in basis points: 10,000 on a fork or a devnet with ETH to burn,
+    /// a hundred or so on a public testnet where the deployer holds a fraction of an ETH.
+    uint256 scaleBps;
+
+    function _s(uint256 x) internal view returns (uint256) {
+        return (x * scaleBps) / 10_000;
+    }
 
     function run() external {
         string memory j = vm.readFile(string.concat(vm.projectRoot(), "/", vm.envOr("DEPLOY_RECORD", string.concat("deployments/", vm.toString(block.chainid), ".json"))));
@@ -49,15 +56,16 @@ contract Seed is Script {
         LaunchLocker locker = LaunchLocker(payable(j.readAddress(".launchLocker")));
         address usdg = j.readAddress(".usdg");
         uint256 fee = factory.launchFee();
+        scaleBps = vm.envOr("SEED_SCALE_BPS", uint256(10_000));
 
         vm.startBroadcast(pk);
 
         // 1. CANDLE, priced in ETH, with a dev buy in the launch
-        (address candle,,) = router.launchAndBuy{value: fee + 0.05 ether}(
+        (address candle,,) = router.launchAndBuy{value: fee + _s(0.05 ether)}(
             _params("Candle", "CANDLE", "a candle, priced in ETH", factory.previewLaunchEconomics(0, address(0)), "candle"),
             0,
             address(0),
-            0.05 ether,
+            _s(0.05 ether),
             0,
             me
         );
@@ -67,12 +75,12 @@ contract Seed is Script {
         (address paper,) = factory.launchToken{value: fee}(
             _params("Paper Hands", "PAPER", "paper, priced in ETH", factory.previewLaunchEconomics(0, address(0)), "paper"), 0, address(0)
         );
-        _buy(paper, 1.5 ether);
+        _buy(paper, _s(1.5 ether));
         console.log("  2 PAPER eth pair, 1.5 ETH of buys", paper);
 
         // 3. dollars to invent tickers with, from the live ETH/USDG pool
         PoolKey memory ethUsdg = PoolKey(Currency.wrap(address(0)), Currency.wrap(usdg), FEE_ETH_USDG, TICK_ETH_USDG, IHooks(address(0)));
-        seeder.swapExactIn{value: 2 ether}(ethUsdg, true, 2 ether, 0, me);
+        seeder.swapExactIn{value: _s(2 ether)}(ethUsdg, true, _s(2 ether), 0, me);
         console.log("  3 usdg on hand", IERC20(usdg).balanceOf(me) / 1e6);
 
         // 4. BREAD, priced in BANANA. BANANA does not exist yet: inventing it opens its guarded dollar pool
@@ -83,13 +91,13 @@ contract Seed is Script {
         console.log("  4 BANANA invented, BREAD under it", banana, bread);
 
         // 5. a buy of BREAD: dollars become BANANA one for one, then BANANA buys in the pool
-        _buyWithDollars(usdg, banana, bread, 1_500e6);
+        _buyWithDollars(usdg, banana, bread, _s(1_500e6));
         console.log("  5 bought BREAD with 1500 BANANA");
 
         // 6. a second coin under BANANA, with a dev buy in dollars
         (,, expected,) = tickers.previewLaunch("BANANA", 0);
-        IERC20(usdg).approve(address(tickers), 500e6);
-        (, address split,,) = tickers.launchAndBuy{value: fee}("BANANA", _params("Split", "SPLIT", "a split, also priced in BANANA", expected, "split"), 0, 500e6, 0);
+        IERC20(usdg).approve(address(tickers), _s(500e6));
+        (, address split,,) = tickers.launchAndBuy{value: fee}("BANANA", _params("Split", "SPLIT", "a split, also priced in BANANA", expected, "split"), 0, _s(500e6), 0);
         console.log("  6 SPLIT under BANANA, 500 dollar dev buy", split);
 
         // 7. a coin priced in PAPER. Buying it means buying PAPER first
@@ -102,7 +110,7 @@ contract Seed is Script {
         (address ketchup, address fries,) = tickers.launch{value: fee + tickers.NEW_TICKER_FEE()}(
             "KETCHUP", _params("Fries", "FRIES", "fries, priced in KETCHUP", expected, "fries"), 0
         );
-        _buyWithDollars(usdg, ketchup, fries, 300e6);
+        _buyWithDollars(usdg, ketchup, fries, _s(300e6));
         locker.collectFees(bread);
         console.log("  8 KETCHUP ticker, FRIES under it; BREAD fees collected", ketchup, fries);
 
@@ -117,7 +125,7 @@ contract Seed is Script {
             PoolKey memory empty;
             path[0] = ZapRouter.Hop({kind: 1, key: empty, pool: m.pool});
             path[1] = ZapRouter.Hop({kind: 0, key: factory.poolKeyOf(rocket), pool: address(0)});
-            zap.zapBuy{value: 0.02 ether}(ZapRouter.ZapParams({token: rocket, tokenIn: address(0), amountIn: 0, path: path, minTokensOut: 0, recipient: me, deadline: block.timestamp + 1 hours}));
+            zap.zapBuy{value: _s(0.02 ether)}(ZapRouter.ZapParams({token: rocket, tokenIn: address(0), amountIn: 0, path: path, minTokensOut: 0, recipient: me, deadline: block.timestamp + 1 hours}));
             console.log("  9 ROCKET priced in a chain token, bought with ETH through its pool", rocket);
         }
 

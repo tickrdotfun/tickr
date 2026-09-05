@@ -8,16 +8,18 @@ const multicall3 = process.env.NEXT_PUBLIC_MULTICALL3;
  */
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
 export const IS_DEVNET = CHAIN_ID !== 4663;
+/** The dress rehearsal runs the same contracts on Sepolia; wallets know that chain and its explorer differs. */
+export const IS_SEPOLIA = CHAIN_ID === 11155111;
 
 export const robinhoodChain = defineChain({
   id: CHAIN_ID,
-  name: IS_DEVNET ? "tickr devnet" : "Robinhood Chain",
+  name: IS_SEPOLIA ? "Sepolia" : IS_DEVNET ? "tickr devnet" : "Robinhood Chain",
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
   rpcUrls: {
     default: { http: [process.env.NEXT_PUBLIC_RPC_URL ?? "https://rpc.mainnet.chain.robinhood.com"] },
   },
   blockExplorers: {
-    default: { name: "Blockscout", url: "https://robinhoodchain.blockscout.com" },
+    default: { name: "Blockscout", url: IS_SEPOLIA ? "https://eth-sepolia.blockscout.com" : "https://robinhoodchain.blockscout.com" },
   },
   // Multicall3 at the canonical address is used for read batching when present.
   // Set NEXT_PUBLIC_MULTICALL3=none to force per-call reads.
@@ -31,7 +33,7 @@ export const robinhoodChain = defineChain({
         },
 });
 
-export const EXPLORER = "https://robinhoodchain.blockscout.com";
+export const EXPLORER = IS_SEPOLIA ? "https://eth-sepolia.blockscout.com" : "https://robinhoodchain.blockscout.com";
 export const explorerAddress = (a: string) => `${EXPLORER}/address/${a}`;
 export const explorerTx = (h: string) => `${EXPLORER}/tx/${h}`;
 export const explorerToken = (a: string) => `${EXPLORER}/token/${a}`;

@@ -50,12 +50,13 @@ contract LaunchDeployer is ILaunchDeployer {
     /// @dev Bounded so `name`, `symbol`, `socials()` and `contractURI()` stay readable by anyone forever.
     function _checkMetadata(TokenParams calldata p) internal pure {
         if (bytes(p.name).length == 0 || bytes(p.symbol).length == 0) revert EmptyMetadata();
-        // a name may hold any script, but not a space at either end, two spaces in a row, or a control character:
-        // the reserved list compares whole names, and those are the ways to look like one without matching it
+        // a name is printable ASCII: letters, digits, punctuation and single spaces, none at either end. no control
+        // characters and no other script, so a name cannot be dressed up with lookalike letters to read like an
+        // official asset's name. the reserved list compares whole names; this closes the ways around it
         bytes memory nm = bytes(p.name);
         if (nm[0] == 0x20 || nm[nm.length - 1] == 0x20) revert BadName();
         for (uint256 i; i < nm.length; i++) {
-            if (uint8(nm[i]) < 0x20 || nm[i] == 0x7F) revert BadName();
+            if (uint8(nm[i]) < 0x20 || uint8(nm[i]) > 0x7E) revert BadName();
             if (nm[i] == 0x20 && i + 1 < nm.length && nm[i + 1] == 0x20) revert BadName();
         }
         // a symbol is letters and digits, nothing else: no "NVDA " past the reserved list, no lookalike scripts

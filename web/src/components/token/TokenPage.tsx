@@ -96,6 +96,12 @@ export function TokenPage({ address }: { address: Address }) {
                     priced in <span className="num">{quote?.symbol ?? "a name"}</span>, a wrapped dollar a creator named. not a <span className="cap">Stock Token</span>, pays no dividend, carries no share.
                   </p>
                 )}
+                {quote?.kind === "official" && (
+                  <p className="text-[13px] text-dim mt-3">
+                    priced in <span className="num">{quote.symbol}</span>, a <span className="cap">Stock Token</span> issued by Robinhood Assets. this coin is a creator&apos;s coin, not a{" "}
+                    <span className="cap">Stock Token</span>: it pays no dividend and carries no share.
+                  </p>
+                )}
                 {meta.description && <p className="text-muted mt-3 max-w-2xl whitespace-pre-wrap break-words">{meta.description}</p>}
                 {links.length > 0 && (
                   <div className="flex flex-wrap gap-4 mt-3 text-[14px]">

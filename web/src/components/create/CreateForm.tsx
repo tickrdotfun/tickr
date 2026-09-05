@@ -374,6 +374,7 @@ export function CreateForm() {
     if (!name.trim() || !symbol.trim()) return "Name and ticker are required.";
     if (reservedSymbol.data === true) return `${coinSymbolUp} is an anchor ticker on Robinhood Chain, so a coin cannot use it.`;
     if (nameReserved) return `"${name.trim()}" is the name of an official asset, so a coin cannot use it.`;
+    if (!/^[\x20-\x7E]+$/.test(name.trim())) return "Names use plain letters, digits and punctuation. Emoji and other scripts go in the description or the image.";
     if (!logo.trim()) return "Add an image for your coin.";
     if (!description.trim()) return "Write a description for your coin.";
     if (feeWallet && !isAddress(feeWallet)) return "Fee wallet is not a valid address.";

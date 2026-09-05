@@ -47,8 +47,11 @@ export function TradePanel({ d }: { d: TokenData }) {
   const slipHigh = slipPct >= 5;
   const slipTyped = Number(slippage);
   const slipInvalid = slippage.trim() !== "" && (!Number.isFinite(slipTyped) || slipTyped < 0.05 || slipTyped > 50);
+  const amtForRoute = safeParseUnits(amount, 18);
 
-  const route = useZapRoute(launch?.token, launch?.pairToken);
+  // the route is chosen for the size being typed: several markets can reach the quote asset, and the one that
+  // pays best for this trade is not always the one with the biggest liquidity number
+  const route = useZapRoute(launch?.token, launch?.pairToken, side === "buy" ? amtForRoute : undefined, user);
   const own = route.data?.own;
   const ethPath = route.data?.path ?? null;
   // ETH is the default way in when a route exists; the quote asset is always an option on an ERC-20 pair

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildChainTokens, lastStats, type ChainToken } from "@/lib/chainTokens";
+import { ADDRESSES, isZero } from "@/lib/addresses";
 
 export type { ChainToken };
 
@@ -14,6 +15,8 @@ let memo: { at: number; data: ChainToken[] } | undefined;
  */
 export async function GET() {
   const now = Date.now();
+  // the mode is off on this deployment: nothing can be priced in these, whatever an upstream list says
+  if (isZero(ADDRESSES.marketQuoteLauncher)) return NextResponse.json({ tokens: [], at: now, stats: null, off: true }, { headers: { "Cache-Control": "s-maxage=300" } });
   const upstream = process.env.TOKENS_URL;
   if (upstream) {
     try {

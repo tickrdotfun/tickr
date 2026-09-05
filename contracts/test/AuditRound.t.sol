@@ -225,8 +225,14 @@ contract AuditRoundTest is BaseTest {
             vm.expectRevert();
             factory.launchToken{value: LAUNCH_FEE}(p, 0, address(0));
         }
+        // another script or an emoji cannot dress a name up as an official one: names are printable ASCII
+        TokenParams memory emoji = defaultParams(address(0), 0);
+        emoji.name = unicode"Bananas 🍌 on Robinhood";
+        vm.prank(creator);
+        vm.expectRevert();
+        factory.launchToken{value: LAUNCH_FEE}(emoji, 0, address(0));
         TokenParams memory ok = defaultParams(address(0), 0);
-        ok.name = unicode"Bananas 🍌 on Robinhood";
+        ok.name = "Bananas & Co. #1 (on Robinhood)";
         vm.prank(creator);
         (address t,) = factory.launchToken{value: LAUNCH_FEE}(ok, 0, address(0));
         assertTrue(factory.getLaunchedToken(t).exists);

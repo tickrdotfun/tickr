@@ -2,10 +2,11 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
-import type { Hash } from "viem";
+import { decodeErrorResult, type Abi, type Hash, type Hex } from "viem";
 import { errorMessage } from "@/lib/format";
 import { DEMO } from "@/lib/demoTransport";
 import { ADDRESSES } from "@/lib/addresses";
+import * as Abis from "@/lib/abis";
 import type { wagmiConfig } from "@/lib/wagmi";
 
 export type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
@@ -30,6 +31,54 @@ async function walletSeesFactory(getProvider: () => Promise<unknown>): Promise<b
   } catch {
     return false; // a wallet that cannot answer gets nothing to sign: the check exists to stop a wrong network
   }
+}
+
+type Client = NonNullable<ReturnType<typeof usePublicClient>>;
+
+/** Every custom error our contracts declare, plus the two that mean a pool key was taken first. */
+const KNOWN_ERRORS: Abi = [
+  ...Object.values(Abis).flatMap((a) => (Array.isArray(a) ? (a as Abi).filter((x) => x.type === "error") : [])),
+  { type: "error", name: "PoolAlreadyExists", inputs: [] },
+  { type: "error", name: "PoolAlreadyInitialized", inputs: [] },
+];
+
+/** The revert data inside a viem error, wherever it nests it. */
+function revertData(e: unknown): Hex | undefined {
+  let cur: unknown = e;
+  for (let i = 0; i < 8 && cur && typeof cur === "object"; i++) {
+    const o = cur as { data?: unknown; raw?: unknown; cause?: unknown };
+    for (const v of [o.data, o.raw]) {
+      if (typeof v === "string" && v.startsWith("0x") && v.length >= 10) return v as Hex;
+      const inner = v && typeof v === "object" ? (v as { data?: unknown }).data : undefined;
+      if (typeof inner === "string" && inner.startsWith("0x") && inner.length >= 10) return inner as Hex;
+    }
+    cur = o.cause;
+  }
+  return undefined;
+}
+
+/**
+ * A receipt says only that a transaction reverted, never why. Replaying the same call against the block it
+ * landed in reproduces the revert with its data, so a named error (a pool key taken between the simulation and
+ * the block, say) is recognised by name and can be acted on, instead of read as a plain "reverted".
+ */
+async function minedRevert(client: Client, hash: Hash, blockNumber: bigint, label: string): Promise<Error> {
+  try {
+    const t = await client.getTransaction({ hash });
+    await client.call({ account: t.from, to: t.to ?? undefined, data: t.input, value: t.value, blockNumber });
+  } catch (e) {
+    const data = revertData(e);
+    if (data) {
+      let name = data.slice(0, 10);
+      try {
+        name = decodeErrorResult({ abi: KNOWN_ERRORS, data }).errorName;
+      } catch {
+        // not one of ours: the selector is still better than nothing
+      }
+      return new Error(`${label}: reverted with ${name}`);
+    }
+  }
+  return new Error(`${label}: transaction reverted`);
 }
 
 export function useTx() {
@@ -72,7 +121,7 @@ export function useTx() {
           setStatus("confirming");
           if (client) {
             const rc = await client.waitForTransactionReceipt({ hash: h });
-            if (rc.status !== "success") throw new Error(`${s.label}: transaction reverted`);
+            if (rc.status !== "success") throw await minedRevert(client, h, rc.blockNumber, s.label);
           }
         }
         setStatus("success");

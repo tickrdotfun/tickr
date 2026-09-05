@@ -42,7 +42,7 @@ event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 am
 | `PoolAlreadyExists` | seeder | somebody opened the coin's pool key first. change the salt and launch again. |
 | `PositionNotLocked`, `NotPositionManager` | seeder, locker | the position did not land in the locker, or something other than the position manager tried to hand it one. |
 | `RefundFailed` | seeder | the input the pool did not take could not be sent back to the caller. |
-| `EmptyMetadata`, `MetadataTooLong` | deployer | name or symbol empty, or a field over its limit. |
+| `EmptyMetadata`, `MetadataTooLong`, `BadName`, `BadSymbol` | deployer | name or symbol empty, a field over its limit, a name with a space at either end, two spaces in a row or a byte outside printable ASCII, or a symbol with anything but letters and digits. |
 | `QuoteDecimals` | market quote launcher | the token has fewer than six decimals. |
 | `SymbolTooLong`, `BadSymbol` | ticker launcher | an invented name is over twelve bytes, or has a character that is not a letter or a digit. |
 | `NotAMint` | locker | somebody tried to transfer an existing position into the locker; only launch mints land there. |

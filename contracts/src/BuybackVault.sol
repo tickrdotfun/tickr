@@ -23,14 +23,18 @@ contract BuybackVault is IBuybackVault, Ownable2Step {
     }
 
     function deposit(address launchToken, address quoteAsset, uint256 amount) external payable override {
+        uint256 received = amount;
         if (quoteAsset == address(0)) {
             require(msg.value == amount, "BuybackVault: value");
         } else {
             require(msg.value == 0, "BuybackVault: no value");
+            // credit what arrived, not what was asked for: a token that takes a cut in transit is never owed the cut
+            uint256 before = IERC20(quoteAsset).balanceOf(address(this));
             IERC20(quoteAsset).safeTransferFrom(msg.sender, address(this), amount);
+            received = IERC20(quoteAsset).balanceOf(address(this)) - before;
         }
-        balance[launchToken][quoteAsset] += amount;
-        emit Deposited(launchToken, quoteAsset, amount);
+        balance[launchToken][quoteAsset] += received;
+        emit Deposited(launchToken, quoteAsset, received);
     }
 
     /// @notice Release to the strategy for a buyback. Only the configured strategy can pull.

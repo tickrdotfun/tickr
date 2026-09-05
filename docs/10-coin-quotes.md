@@ -24,14 +24,19 @@ Checked in this order by `quotePrice`, which every other entry point routes thro
 
 ## Economics
 
-`quoteEconomics` reads the quote coin's pool (`slot0` and liquidity; every pool the factory makes is
-full-range) and derives its reserves, `rCoin` of the coin and `rBase` of the base asset. The threshold is the amount
-of the quote coin that the base asset's target raise buys out of that pool at constant product:
+`quoteEconomics` reads the quote coin's pool (`slot0` and the liquidity in range at the current price) and derives
+its reserves, `rCoin` of the coin and `rBase` of the base asset. The threshold is the amount of the quote coin that
+the base asset's target raise buys out of that pool at constant product:
 
 ```
 threshold = rCoin * target / (rBase + target)   // quote-coin units, 18 decimals; target = targetRaise[baseAsset]
 phantom   = threshold * 40%
 ```
+
+The model holds that liquidity constant through the trade. The launch position, from the opening price to the end
+of the range, is exactly that; positions other people add elsewhere in the range change the real cost of the target
+a little, in either direction. The result is pinned in the preview, so a creator sees the price it gives before
+signing, and a launch whose quote pool has moved since the preview reverts.
 
 Spot, `target / price`, would be the whole reserve or more when the base reserve is near the target, which no buyer
 deep the quote's market is, and each later coin under the same quote sees a threshold sized to what is left.
