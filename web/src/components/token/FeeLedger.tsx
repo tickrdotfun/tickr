@@ -6,6 +6,7 @@ import { FeeEscrowAbi, LaunchLockerAbi } from "@/lib/abis";
 import { ADDRESSES, sameAddr } from "@/lib/addresses";
 import { fmtAmount, shortAddr, type FeeSplit, fmtUsd } from "@/lib/format";
 import { TxStatus } from "../TxStatus";
+import { MoveFees } from "./CreatorControls";
 
 /**
  * Fees, as the pipeline they are: they accrue in the locked position, anyone collects them into the escrow
@@ -136,6 +137,7 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
           </dd>
         </div>
       </dl>
+      <MoveFees d={d} />
       <p className="detail-note detail-note-tight">
         the pool&apos;s fee sits in the locked position until anyone collects it. both sides split {split ? `${Math.round(split.creatorShareBps / 100)} / ${split.clubShareBps > 0 ? `${Math.round(split.clubShareBps / 100)} / ` : ""}${Math.round(split.protocolShareBps / 100)}` : ""}: the creator&apos;s share and the tax are theirs, the rest of the coin side burns.
       </p>

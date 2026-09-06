@@ -5,6 +5,7 @@
 // Same shape as sync-deployments.mjs: the repo is the source of truth when it is present, and the copy
 // already in the tree is the fallback when it is not.
 import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { generate } from "./gen-selectors.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +19,8 @@ if (!existsSync(resolve(src, "SPEC.md"))) {
   process.exit(0);
 }
 
+// the selector tables in docs 18 come from the compiled ABIs, regenerated here so the copy below carries them
+generate();
 mkdirSync(dest, { recursive: true });
 const files = readdirSync(src).filter((f) => f.endsWith(".md"));
 for (const f of files) copyFileSync(resolve(src, f), resolve(dest, f));

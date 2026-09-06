@@ -123,6 +123,7 @@ export function useTokenData(token?: Address) {
         ? { abi: TokenAbi, address: token, functionName: "symbol" }
         : { abi: TickerLauncherAbi, address: ADDRESSES.tickerLauncher, functionName: "isTicker", args: [pair] },
       /* 18 */ { abi: FactoryAbi, address: ADDRESSES.factory, functionName: "getLaunchFeePolicy", args: [token] },
+      /* 19 */ { abi: FactoryAbi, address: ADDRESSES.factory, functionName: "ctoProposals", args: [token] },
     ];
     return c;
   }, [exists, token, pair, key, nativePair, me]);
@@ -156,6 +157,9 @@ export function useTokenData(token?: Address) {
   const pending = pendingRaw && key ? { quote: key.tokenIs0 ? pendingRaw[1] : pendingRaw[0], coin: key.tokenIs0 ? pendingRaw[0] : pendingRaw[1] } : undefined;
   const isTicker = !isZero(ADDRESSES.tickerLauncher) && g<boolean>(17) === true;
   const policy = g<{ protocolFeeRecipient: Address; creatorShareBps: number; clubShareBps: number; protocolShareBps: number; buybackBurnBps: number; hookFeeBps: number; maxInternalPriceImpactBps: number }>(18);
+  // a move of the fee wallet proposed by the owner: public for three days, then anyone may execute it for three more
+  const proposal = g<readonly [Address, bigint, bigint]>(19);
+  const takeover = proposal && !isZero(proposal[0]) ? { newRecipient: proposal[0], effectiveAt: proposal[1], expiresAt: proposal[2] } : undefined;
 
   return {
     launchQ,
@@ -195,6 +199,7 @@ export function useTokenData(token?: Address) {
       coin: g<bigint>(16),
     },
     isTicker,
+    takeover,
     refetch: () => {
       launchQ.refetch();
       reads.refetch();

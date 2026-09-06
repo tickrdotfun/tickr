@@ -48,6 +48,10 @@ Anyone may call `collectFees(token)` at any time and pays only the gas. tickr al
 
 Escrow balances are pull only. `claim()` pays the caller its ETH balance, `claimToken(token)` its balance in that token. Nothing is pushed to anyone, so a recipient that rejects transfers blocks only itself.
 
+## Moving where fees go
+
+The creator fee wallet can hand its role to another wallet with `transferCreatorFeeRecipient(token, newRecipient)`, from the wallet that holds it. Collections from then on credit the new wallet; nothing already credited moves, so claim first. It cannot be undone by anyone but the new wallet, and the coin's own exemption from the snipe tax follows it. The site shows this as one row on the fees tab, to the creator only. The owner's slower path for lost keys and stolen wallets, a public three day notice and then a three day window in which anyone may execute, is in [09 risks](./09-risks.md); while one is pending the coin's page says so.
+
 ## The ticker club
 
 Under an invented ticker, 10% of the base fee of every coin goes into that coin's pot for the current thirty day epoch, and the creators of the other coins under the same ticker claim from it in proportion to their recorded volume. Details in [05 anchors](./05-anchors.md).

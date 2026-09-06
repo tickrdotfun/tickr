@@ -27,6 +27,7 @@ function poolKeyOf(address token) view returns (PoolKey);
 function poolIdOf(address token) view returns (bytes32);
 function getLaunchFeePolicy(address token) view returns (FeePolicy);
 function creatorFeeRecipientOf(address token) view returns (address);
+function ctoProposals(address token) view returns (address newRecipient, uint256 effectiveAt, uint256 expiresAt); // an owner proposal to move the fee wallet, zero when none: public until effectiveAt, executable by anyone until expiresAt
 function launchCount() view returns (uint256);
 function launchAt(uint256 i) view returns (address);
 function launchFee() view returns (uint256);           // 0.0005 ETH

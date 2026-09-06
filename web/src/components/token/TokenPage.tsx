@@ -11,6 +11,7 @@ import { TradePanel } from "./TradePanel";
 import { TokenDetails } from "./TokenDetails";
 import { PriceChart } from "./PriceChart";
 import { LaunchGuardLine } from "./LaunchGuardLine";
+import { TakeoverNotice } from "./CreatorControls";
 import { Buyback } from "./Buyback";
 import { useMarketData } from "@/hooks/useMarketData";
 import { sameAddr } from "@/lib/addresses";
@@ -106,6 +107,7 @@ export function TokenPage({ address }: { address: Address }) {
           </Panel>
 
           <LaunchGuardLine d={d} />
+          <TakeoverNotice d={d} />
 
           {isOfficialCoin(address) && !isZero(ADDRESSES.buybackTreasury) && (
             <Panel>
