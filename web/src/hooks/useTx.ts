@@ -120,8 +120,21 @@ export function useTx() {
           setHash(h);
           setStatus("confirming");
           if (client) {
-            const rc = await client.waitForTransactionReceipt({ hash: h });
-            if (rc.status !== "success") throw await minedRevert(client, h, rc.blockNumber, s.label);
+            // a wallet can replace a pending transaction. sped up, it is the same action under a new hash; cancelled
+            // or replaced by something else, the action never happened although a transaction did mine with `success`
+            let replaced: { reason: string; hash: Hash } | undefined;
+            const rc = await client.waitForTransactionReceipt({
+              hash: h,
+              onReplaced: (r) => {
+                replaced = { reason: r.reason, hash: r.transaction.hash };
+              },
+            });
+            if (replaced) {
+              if (replaced.reason !== "repriced") throw new Error(`${s.label}: ${replaced.reason === "cancelled" ? "cancelled in the wallet" : "replaced in the wallet by another transaction"}. nothing was sent.`);
+              last = replaced.hash;
+              setHash(replaced.hash);
+            }
+            if (rc.status !== "success") throw await minedRevert(client, rc.transactionHash, rc.blockNumber, s.label);
           }
         }
         setStatus("success");

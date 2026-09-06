@@ -50,7 +50,7 @@ export function TakeoverNotice({ d }: { d: TokenData }) {
           {shortAddr(takeover.newRecipient)}
         </a>
         . {open ? `anyone can execute it until ${when(takeover.expiresAt)}.` : `anyone can execute it from ${when(takeover.effectiveAt)} until ${when(takeover.expiresAt)}.`} this path exists for lost keys and stolen
-        wallets. the coin, its pool and its supply do not change, and fees already credited stay where they are.
+        wallets. the coin, its pool and its supply do not change, and fees already credited stay where they are. a move by the creator does not cancel it.
       </p>
       {open && (
         <button className="btn btn-xs" disabled={tx.busy || !user} onClick={execute}>
@@ -124,8 +124,8 @@ export function MoveFees({ d }: { d: TokenData }) {
           {target && !same && (
             <>
               <p className="detail-note detail-note-tight">
-                from the next collection on, this coin&apos;s fees go to <span className="num">{target}</span>. this cannot be undone by you or by tickr: only that wallet can move them again.
-                {unclaimed ? " you still have fees to claim. claim them first: they do not move." : " fees already credited do not move."}
+                from the next collection on, this coin&apos;s fees go to <span className="num">{target}</span>. you cannot undo this: only that wallet can move them again, or tickr through its public three day proposal.
+                {unclaimed ? " you still have fees to claim. claim them first: they do not move." : " fees already credited do not move."} club rewards not yet claimed go to whoever holds the fee wallet when they are claimed.
               </p>
               <label className="move-fees-check">
                 <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} /> i checked the address

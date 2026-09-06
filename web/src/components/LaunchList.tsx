@@ -42,7 +42,13 @@ export function LaunchList() {
       r.launch.token.toLowerCase().includes(needle) ||
       r.quote.symbol.toLowerCase().includes(needle);
     const cmp = (a: Row, b: Row) => {
-      if (sort === "mcap") return (b.marketCapUsd ?? b.marketCap ?? 0) - (a.marketCapUsd ?? a.marketCap ?? 0);
+      if (sort === "mcap") {
+        // dollars against dollars; a launch whose quote cannot be priced ranks after every priced one, by its own units
+        if (a.marketCapUsd !== undefined && b.marketCapUsd !== undefined) return b.marketCapUsd - a.marketCapUsd;
+        if (a.marketCapUsd !== undefined) return -1;
+        if (b.marketCapUsd !== undefined) return 1;
+        return (b.marketCap ?? 0) - (a.marketCap ?? 0);
+      }
       if (sort === "volume") return b.volumeUsd - a.volumeUsd || b.volumeQuote - a.volumeQuote;
       if (sort === "buys") return Number(b.lastBuyBlock - a.lastBuyBlock) || b.buys - a.buys;
       return Number(b.createdBlock - a.createdBlock) || b.launch.index - a.launch.index;

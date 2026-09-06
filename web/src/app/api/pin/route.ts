@@ -58,16 +58,16 @@ async function overBudget(req: Request): Promise<boolean> {
     if (env.PIN_BURST && !(await env.PIN_BURST.limit({ key: ip })).success) return true;
     const base = process.env.TOKENS_URL;
     const secret = process.env.BUDGET_KEY;
-    if (base && secret) {
-      const r = await fetch(`${base}budget?key=${encodeURIComponent(ip)}&secret=${encodeURIComponent(secret)}`);
-      if (r.ok) {
-        const d = (await r.json()) as { allowed?: boolean };
-        return d.allowed === false;
-      }
-      return true; // a budget that cannot be asked is a budget that is exhausted, not one that is unlimited
+    // on Cloudflare the shared budget is the only counter that holds across instances: without it nothing is pinned
+    if (!base || !secret) return true;
+    const r = await fetch(`${base}budget?key=${encodeURIComponent(ip)}`, { headers: { "x-budget-key": secret } });
+    if (r.ok) {
+      const d = (await r.json()) as { allowed?: boolean };
+      return d.allowed === false;
     }
+    return true; // a budget that cannot be asked is a budget that is exhausted, not one that is unlimited
   } catch {
-    // not on Cloudflare
+    // not on Cloudflare: `next dev` on a laptop, where the per-process map below is the only counter there is
   }
   const recent = (hits.get(ip) ?? []).filter((t) => now - t < WINDOW_MS);
   recent.push(now);

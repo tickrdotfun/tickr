@@ -12,10 +12,13 @@ const src = process.env.DEPLOY_RECORD ? resolve(here, "..", "..", "contracts", p
 const example = resolve(here, "..", "src", "lib", "deployments.example.json");
 const dest = resolve(here, "..", "src", "lib", "deployments.json");
 
+let origin = "example";
 if (existsSync(src)) {
   copyFileSync(src, dest);
+  origin = "copied";
   console.log(`deployments: copied ${src}`);
 } else if (existsSync(dest) && JSON.parse(readFileSync(dest, "utf8")).factory !== ZERO) {
+  origin = "kept";
   // No contracts folder to read from, but the addresses already in the tree are real: this is a deploy
   // rooted at web/, so keep them rather than blanking the app. Same rule as sync-docs.mjs.
   console.log("deployments: ../contracts not found, keeping the addresses already in src/lib/deployments.json");
@@ -34,5 +37,19 @@ if (existsSync(src)) {
   if (live && missing.length) {
     console.error(`deployments: refusing a live build with zero addresses for ${missing.join(", ")}. sync the real record first.`);
     process.exit(1);
+  }
+  if (live) {
+    // the record must be the one written for this chain, read from the contracts folder now, well formed, and
+    // complete: the treasury and the genesis coin are baked into the site, so a build from before genesis or from
+    // another chain's record would ship a site that does not know its own official coin
+    const problems = [];
+    if (origin !== "copied") problems.push(`the record was not read from ${src} (${origin})`);
+    if (record.chainId !== undefined && Number(record.chainId) !== Number(chainId)) problems.push(`the record is for chain ${record.chainId}, this build is for ${chainId}`);
+    for (const k of ["buybackTreasury", "genesisToken", "genesisTicker"]) if (!record[k] || record[k] === ZERO) problems.push(`${k} is missing: run genesis and sync again`);
+    for (const [k, v] of Object.entries(record)) if (typeof v === "string" && v.startsWith("0x") && !/^0x[0-9a-fA-F]{40}$/.test(v) && !/^0x[0-9a-fA-F]{64}$/.test(v)) problems.push(`${k} is not an address: ${v}`);
+    if (problems.length) {
+      console.error(`deployments: refusing a live build: ${problems.join("; ")}.`);
+      process.exit(1);
+    }
   }
 }

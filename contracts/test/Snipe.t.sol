@@ -33,10 +33,10 @@ contract SnipeTest is BaseTest {
         pastTheBlocks(); // the launch block is closed to strangers; the tax alone from here
         assertEq(t.currentSnipeTaxBps(alice), 9_900, "the launch second");
         assertEq(t.currentSnipeTaxBps(creator), 0, "the launcher never pays");
-        uint256 out = buy(t, alice, 1 ether);
-        uint256 tax = (out * 9_900) / 10_000;
-        assertEq(t.balanceOf(alice), out - tax, "one percent arrives");
-        assertEq(t.balanceOf(DEAD_ADDR), tax, "ninety-nine percent is burned");
+        uint256 out = buy(t, alice, 1 ether); // what arrived, net of the tax
+        uint256 tax = t.balanceOf(DEAD_ADDR);
+        assertEq(t.balanceOf(alice), out, "one percent arrives");
+        assertEq(tax, ((out + tax) * 9_900) / 10_000, "ninety-nine percent of what the pool gave out is burned");
         assertEq(t.totalSupply(), SUPPLY, "the supply does not change");
     }
 
@@ -72,10 +72,10 @@ contract SnipeTest is BaseTest {
             assertEq(t.currentSnipeTaxBps(alice), bps[i], "the rate for this second");
             uint256 dead = t.balanceOf(DEAD_ADDR);
             uint256 held = t.balanceOf(alice);
-            uint256 out = buy(t, alice, 0.01 ether);
-            uint256 tax = (out * bps[i]) / 10_000;
-            assertEq(t.balanceOf(alice) - held, out - tax, "what arrives");
-            assertEq(t.balanceOf(DEAD_ADDR) - dead, tax, "what burns");
+            uint256 out = buy(t, alice, 0.01 ether); // what arrived, net of the tax
+            uint256 tax = t.balanceOf(DEAD_ADDR) - dead;
+            assertEq(t.balanceOf(alice) - held, out, "what arrives");
+            assertEq(tax, ((out + tax) * bps[i]) / 10_000, "what burns");
         }
         assertEq(t.currentSnipeTaxBps(alice), 0, "gone for good");
     }

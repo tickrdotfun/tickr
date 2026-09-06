@@ -18,14 +18,14 @@ export function StatsRow() {
     },
     {
       k: "pool volume",
-      v: d ? fmtUsd(d.totalVolumeUsd) : "-",
-      note: d && d.pricedShare < 1 ? "of priced launches" : undefined,
+      v: d ? (d.partial ? "-" : fmtUsd(d.totalVolumeUsd)) : "-",
+      note: d ? (d.partial ? "history unavailable right now" : d.pricedShare < 1 ? "of priced launches" : undefined) : undefined,
       cls: "sw-blue",
     },
     {
       k: "paid to creators",
-      v: d ? fmtUsd(d.paidToCreatorsUsd) : "-",
-      note: d && d.pricedShare < 1 ? "of priced launches" : undefined,
+      v: d ? (d.partial ? "-" : fmtUsd(d.paidToCreatorsUsd)) : "-",
+      note: d ? (d.partial ? "history unavailable right now" : d.pricedShare < 1 ? "of priced launches" : undefined) : undefined,
       cls: "sw-green",
     },
     {

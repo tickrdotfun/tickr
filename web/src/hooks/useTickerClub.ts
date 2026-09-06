@@ -82,12 +82,21 @@ export function useTickerClub(ticker?: Address, member?: Address) {
       const share = (v: bigint, t: bigint) => (t > 0n ? Number((v * 10_000n) / t) / 10_000 : 0);
       const members: ClubMember[] = rows.map((r) => ({ ...r, weight: share(w(r), totalW), lastWeight: share(lw(r), lastTotalW) }));
 
-      // what the coin on this page could claim from the window that just closed
+      // what the coin on this page could claim from the window that just closed, and from the closed windows before
+      // it: a pot is claimable for as long as it has not been taken, so the last twelve are asked
       let claimable = 0n;
-      if (member && last !== undefined && members.some((m) => sameAddr(m.token, member) && m.lastVolume > 0n)) {
-        claimable = (await client
-          .readContract({ ...launcher, functionName: "claimable", args: [member, pairs, last] })
-          .catch(() => 0n)) as bigint;
+      const claimableByEpoch: { epoch: bigint; amount: bigint }[] = [];
+      if (member && last !== undefined) {
+        const first = last >= 11n ? last - 11n : 0n;
+        const epochs: bigint[] = [];
+        for (let e = first; e <= last; e++) epochs.push(e);
+        const vols = await client.multicall({ contracts: epochs.map((e) => ({ ...launcher, functionName: "volumeOf", args: [member, e] }) as const), allowFailure: true });
+        const asked = epochs.filter((_, i) => vols[i].status === "success" && (vols[i].result as bigint) > 0n);
+        const amounts = await Promise.all(asked.map((e) => (client.readContract({ ...launcher, functionName: "claimable", args: [member, pairs, e] }).catch(() => 0n)) as Promise<bigint>));
+        asked.forEach((e, i) => {
+          if (e === last) claimable = amounts[i];
+          else if (amounts[i] > 0n) claimableByEpoch.push({ epoch: e, amount: amounts[i] });
+        });
       }
       return {
         epoch,
@@ -102,6 +111,7 @@ export function useTickerClub(ticker?: Address, member?: Address) {
         potNow: rows.reduce((s, r) => s + r.pot, 0n),
         potLast: rows.reduce((s, r) => s + r.lastPot, 0n),
         claimable,
+        claimableByEpoch,
       };
     },
   });

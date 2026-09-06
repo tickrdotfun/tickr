@@ -50,7 +50,7 @@ Escrow balances are pull only. `claim()` pays the caller its ETH balance, `claim
 
 ## Moving where fees go
 
-The creator fee wallet can hand its role to another wallet with `transferCreatorFeeRecipient(token, newRecipient)`, from the wallet that holds it. Collections from then on credit the new wallet; nothing already credited moves, so claim first. It cannot be undone by anyone but the new wallet, and the coin's own exemption from the snipe tax follows it. The site shows this as one row on the fees tab, to the creator only. The owner's slower path for lost keys and stolen wallets, a public three day notice and then a three day window in which anyone may execute, is in [09 risks](./09-risks.md); while one is pending the coin's page says so.
+The creator fee wallet can hand its role to another wallet with `transferCreatorFeeRecipient(token, newRecipient)`, from the wallet that holds it. Collections from then on credit the new wallet; nothing already credited in the escrow moves, so claim first. Club rewards the coin has earned but not yet claimed go to whoever holds the fee wallet when `claimClub` runs, since the club pays the recipient current at claim time. It cannot be undone by anyone but the new wallet, or by the owner's proposal path below, which a move by the creator does not cancel. The coin's own exemption from the snipe tax follows the new wallet. The site shows this as one row on the fees tab, to the creator only. The owner's slower path for lost keys and stolen wallets, a public three day notice and then a three day window in which anyone may execute, is in [09 risks](./09-risks.md); while one is pending the coin's page says so.
 
 ## The ticker club
 

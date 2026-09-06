@@ -559,6 +559,30 @@ export const TickerLauncherAbi = [
   },
   {
     "type": "function",
+    "name": "pairAt",
+    "inputs": [
+      {
+        "name": "ticker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "i",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "pairCount",
     "inputs": [
       {

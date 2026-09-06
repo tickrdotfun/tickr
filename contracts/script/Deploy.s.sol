@@ -80,6 +80,7 @@ contract Deploy is Script, DeployStack {
         vm.serializeAddress(j, "coinQuoteLauncher", address(s.coinQuote));
         vm.serializeAddress(j, "stockQuoteLauncher", address(s.stockQuote));
         vm.serializeAddress(j, "marketQuoteLauncher", marketQuotes ? address(s.marketQuote) : address(0)); // zero hides the mode on the site
+        vm.serializeAddress(j, "marketQuoteLauncherDeployed", address(s.marketQuote)); // the contract exists either way: ownership is accepted on it too
         vm.serializeAddress(j, "v3Factory", RH_V3_FACTORY);
         vm.serializeAddress(j, "zapRouter", address(s.zap));
         vm.serializeAddress(j, "poolManager", RH_POOL_MANAGER);

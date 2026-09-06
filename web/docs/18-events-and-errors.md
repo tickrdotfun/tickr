@@ -63,6 +63,7 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `LaunchConfigAdded(uint256)` | `0xedd96c570c6e5ef9add0378e59df53579a283889dc5dab6440ef6eca2ee6c8ce` | Factory |
 | `LaunchConfigUpdated(uint256)` | `0x2f8ba78ae68cfd0c82c7756c540eaf4eead3341aef9ccebcb91d546bff10d62b` | Factory |
 | `Launched(address,bytes32,address)` | `0x7d7973b0bce0568727967767ebffbb956d03b099cfaeb0d8e6e338d2f0a03787` | TickerLauncher |
+| `LauncherBound(address)` | `0x3ae987fd9641b8f46247990290ac31493ccf09c4e52cae5a61566983e46dc69e` | BuybackTreasury |
 | `LaunchFeeUpdated(uint256)` | `0xc799be5eb19a1a6d6ba7368d21e2bc367c8a335e4a07cd3d954482e6f714d3c5` | Factory |
 | `LaunchPositionLocked(address,uint256,int24,int24,uint128)` | `0x1699dadac90fce1f13f689ddb1cf88b07a25fd2339468d846b5ea6b22704786a` | Factory |
 | `LaunchSeeded(address,bytes32,uint256,int24,int24,uint128)` | `0xe777d7555b919fda019704ee6e89c0a5781e7bd21edb97a02a0890d6d699ef0b` | LaunchSeeder |

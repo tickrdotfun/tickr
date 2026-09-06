@@ -24,14 +24,18 @@ export function TickerClub({ d }: { d: TokenData }) {
   const me = c?.members.find((m) => sameAddr(m.token, launch.token));
   const isCreator = !!user && sameAddr(user, launch.creatorFeeRecipient);
 
-  const claim = () => {
-    if (!c || c.last === undefined) return;
+  const claimEpoch = (epoch: bigint) => {
+    if (!c) return;
     tx.run([
       {
         label: `claim club for ${meta.symbol ?? "this coin"}`,
-        request: (w) => w({ abi: TickerLauncherAbi, address: ADDRESSES.tickerLauncher, functionName: "claimClub", args: [launch.token, c.payers, c.last!] }),
+        request: (w) => w({ abi: TickerLauncherAbi, address: ADDRESSES.tickerLauncher, functionName: "claimClub", args: [launch.token, c.payers, epoch] }),
       },
     ]).then((h) => h && club.refetch());
+  };
+  const claim = () => {
+    if (!c || c.last === undefined) return;
+    claimEpoch(c.last);
   };
 
   return (
@@ -74,6 +78,19 @@ export function TickerClub({ d }: { d: TokenData }) {
                 )}
               </dd>
             </div>
+            {c.claimableByEpoch.map((e) => (
+              <div key={e.epoch.toString()} className="detail-row detail-row-action">
+                <dt>still to claim, window {e.epoch.toString()}</dt>
+                <dd>
+                  <span className="num">
+                    {fmtAmount(e.amount, qd)} {qs}
+                  </span>
+                  <button className="btn btn-xs btn-primary" disabled={tx.busy || !user} onClick={() => claimEpoch(e.epoch)}>
+                    claim
+                  </button>
+                </dd>
+              </div>
+            ))}
           </dl>
 
           <table className="club-table">

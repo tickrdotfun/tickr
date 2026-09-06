@@ -53,6 +53,8 @@ export type MarketData = {
   pricedShare: number;
   cutoffBlock: bigint;
   blockTime: number;
+  /** a swap or collection log query failed, so volume and creator totals are incomplete */
+  partial: boolean;
 };
 
 /** Window used by the grid filter, expressed in seconds. */
@@ -81,7 +83,7 @@ export function useMarketData(window: WindowKey = "all") {
     refetchInterval: POLL_MS * 2,
     queryFn: async (): Promise<MarketData> => {
       if (!client || list.length === 0) {
-        return { rows: [], tickersInvented: 0, totalVolumeUsd: 0, totalMarketCapUsd: 0, paidToCreatorsUsd: 0, coinsBurned: 0, pricedShare: 1, cutoffBlock: 0n, blockTime: 2 };
+        return { rows: [], tickersInvented: 0, totalVolumeUsd: 0, totalMarketCapUsd: 0, paidToCreatorsUsd: 0, coinsBurned: 0, pricedShare: 1, partial: false, cutoffBlock: 0n, blockTime: 2 };
       }
 
       // 1. per-launch state: the coin's metadata and its pool's price
@@ -155,9 +157,14 @@ export function useMarketData(window: WindowKey = "all") {
       const cutoffBlock = seconds === 0 ? START_BLOCK : bigMax(START_BLOCK, latest - BigInt(Math.ceil(seconds / blockTime)));
       const byPool = new Map<string, Launch>();
       for (const l of list) byPool.set(l.poolId.toLowerCase(), l);
+      // a log query the RPC refuses leaves a hole, and the hole is reported rather than shown as zero
+      let partial = false;
       const swaps = await client
         .getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: list.map((l) => l.poolId) }, fromBlock: cutoffBlock, toBlock: "latest" })
-        .catch(() => []);
+        .catch(() => {
+          partial = true;
+          return [];
+        });
       const vol = new Map<string, { quote: bigint; buys: number; lastBuy: bigint }>();
       for (const log of swaps) {
         const id = (log.args.id ?? "0x").toLowerCase();
@@ -178,7 +185,10 @@ export function useMarketData(window: WindowKey = "all") {
       // what creators have been paid in the quote, from every collection the locker ever logged, priced like volume
       const collections = await client
         .getLogs({ address: ADDRESSES.launchLocker, event: FEES_COLLECTED, args: { token: list.map((l) => l.token) }, fromBlock: START_BLOCK, toBlock: "latest" })
-        .catch(() => []);
+        .catch(() => {
+          partial = true;
+          return [];
+        });
       const creatorQuoteBy = new Map<string, bigint>();
       for (const log of collections) {
         const t = (log.args.token ?? "0x").toLowerCase();
@@ -239,6 +249,7 @@ export function useMarketData(window: WindowKey = "all") {
         coinsBurned: rows.filter((r) => (r.burnedPct ?? 0) > 0).length,
         officialBurnedPct: rows.find((r) => sameAddr(r.launch.token, OFFICIAL.token))?.burnedPct,
         pricedShare: rows.length ? priced.length / rows.length : 1,
+        partial,
         cutoffBlock,
         blockTime,
       };

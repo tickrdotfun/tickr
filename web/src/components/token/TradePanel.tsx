@@ -71,7 +71,8 @@ export function TradePanel({ d }: { d: TokenData }) {
     const id = setInterval(tick, 1_000);
     return () => clearInterval(id);
   }, []);
-  const fresh = now > 0 && !!launch && now - Number(launch.launchedAt) < 30;
+  // asked for ten minutes after launch, so a slow chain cannot outlast the reads; the guard itself ends by block number
+  const fresh = now > 0 && !!launch && now - Number(launch.launchedAt) < 600;
   const snipe = useReadContract({
     abi: TokenAbi,
     address: launch?.token,

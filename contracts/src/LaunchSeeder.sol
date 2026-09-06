@@ -180,7 +180,13 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
             IERC20(Currency.unwrap(cIn)).safeTransferFrom(msg.sender, address(this), amountIn);
         }
         uint256 owed;
-        (amountOut, owed) = _swap(key, zeroForOne, amountIn, recipient == address(0) ? msg.sender : recipient);
+        address to = recipient == address(0) ? msg.sender : recipient;
+        Currency cOut = zeroForOne ? key.currency1 : key.currency0;
+        // what the pool counts out is not always what arrives: a coin inside its launch window burns its snipe tax on
+        // the way out. the minimum, and the amount reported, are what `to` actually received
+        uint256 before = cOut.isAddressZero() ? 0 : IERC20(Currency.unwrap(cOut)).balanceOf(to);
+        (amountOut, owed) = _swap(key, zeroForOne, amountIn, to);
+        if (!cOut.isAddressZero()) amountOut = IERC20(Currency.unwrap(cOut)).balanceOf(to) - before;
         if (amountOut < minOut) revert Slippage();
         // a pool that runs out of the other side takes less than was sent: the rest goes back
         if (amountIn > owed) {

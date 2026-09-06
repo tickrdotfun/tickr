@@ -134,22 +134,29 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
         if (p.amountIn == 0) revert BadValue();
         address recipient = p.recipient == address(0) ? msg.sender : p.recipient;
 
-        IERC20(p.token).safeTransferFrom(msg.sender, address(this), p.amountIn);
-        // 1. the route starts at the coin itself: its pool is the first hop
+        // 1. the route starts at the coin itself: its pool is the first hop, and the coin goes from the seller straight
+        //    into the pool manager, never through the router
         if (p.path.length == 0 || !_isOwnPool(p.path[0], p.token)) revert BadPath();
-        (address cur, uint256 amt) = _walk(p.path, p.token, p.amountIn);
+        // 2. a final v4 hop pays an ERC-20 straight to the recipient, so a quote that is itself a coin inside its launch
+        //    window sees the real buyer; ETH and anything a v3 pool or a wrapper hands out passes through the router
+        bool direct = p.tokenOut != address(0) && p.path[p.path.length - 1].kind == HOP_V4;
+        uint256 before = direct ? IERC20(p.tokenOut).balanceOf(recipient) : 0;
+        (address cur, uint256 amt) = _walk(p.path, p.token, p.amountIn, msg.sender, direct ? recipient : address(0));
         quoteOut = 0;
         if (cur == address(weth) && p.tokenOut == address(0)) {
             weth.withdraw(amt);
             cur = address(0);
         }
         if (cur != p.tokenOut) revert BadPath();
+        if (direct) amt = IERC20(p.tokenOut).balanceOf(recipient) - before;
         if (amt < p.minOut) revert Slippage();
         amountOut = amt;
 
-        // 3. hand it over
-        if (cur == address(0)) _sendNative(recipient, amt);
-        else IERC20(cur).safeTransfer(recipient, amt);
+        // 3. hand over what the router holds, when it holds anything
+        if (!direct) {
+            if (cur == address(0)) _sendNative(recipient, amt);
+            else IERC20(cur).safeTransfer(recipient, amt);
+        }
 
         emit ZapSold(p.token, recipient, p.tokenOut, p.amountIn, quoteOut, amountOut);
     }
@@ -159,9 +166,12 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
         LaunchedToken memory l = factory.getLaunchedToken(p.token);
         if (!l.exists) revert UnknownToken();
         address recipient = p.recipient == address(0) ? msg.sender : p.recipient;
+        if (p.path.length == 0 || !_isOwnPool(p.path[p.path.length - 1], p.token)) revert BadPath();
 
-        // 1. take the input
+        // 1. take the input: ETH comes with the call. an ERC-20 goes straight from the buyer into the pool manager
+        //    when the first hop is a v4 pool that takes it, and into the router only when a v3 pool or a wrapper needs it here
         uint256 amountIn;
+        address payer;
         if (p.tokenIn == address(0)) {
             amountIn = msg.value;
             if (amountIn == 0) revert BadValue();
@@ -169,22 +179,27 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
             if (msg.value != 0) revert BadValue();
             amountIn = p.amountIn;
             if (amountIn == 0) revert BadValue();
-            IERC20(p.tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+            if (_takesDirectly(p.path[0], p.tokenIn)) payer = msg.sender;
+            else IERC20(p.tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
         }
 
-        // 2. walk the route to the coin: its own pool is the last hop, and `minTokensOut` is an absolute minimum
-        if (p.path.length == 0 || !_isOwnPool(p.path[p.path.length - 1], p.token)) revert BadPath();
-        (address c, uint256 a) = _walk(p.path, p.tokenIn, amountIn);
+        // 2. walk the route to the coin: its own pool is the last hop and pays the recipient directly, so the coin's
+        //    own rules, the snipe tax and the launch caps, see the buyer and never the router. `minTokensOut` is an
+        //    absolute minimum on what actually arrived
+        uint256 before = IERC20(p.token).balanceOf(recipient);
+        (address c,) = _walk(p.path, p.tokenIn, amountIn, payer, recipient);
         if (c != p.token) revert BadPath();
-        // what the router holds is what it forwards: inside its launch window a coin taxes the buy on its way out of
-        // the pool, so the pool's own count of the output is more than arrived here
-        a = IERC20(p.token).balanceOf(address(this));
+        uint256 a = IERC20(p.token).balanceOf(recipient) - before;
         if (a < p.minTokensOut) revert Slippage();
-        IERC20(p.token).safeTransfer(recipient, a);
         tokensOut = a;
         quoteOut = 0;
         l;
         emit Zapped(p.token, recipient, p.tokenIn, amountIn, quoteOut, tokensOut);
+    }
+
+    /// @dev A v4 first hop that takes `tokenIn` as one of its two currencies settles it from the buyer directly.
+    function _takesDirectly(Hop calldata hop, address tokenIn) internal pure returns (bool) {
+        return hop.kind == HOP_V4 && (Currency.unwrap(hop.key.currency0) == tokenIn || Currency.unwrap(hop.key.currency1) == tokenIn);
     }
 
     /// @dev Best-effort: a helper that cannot act (in band, paused, stale, empty) does nothing.
@@ -194,8 +209,10 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
         return hop.kind == HOP_V4 && PoolId.unwrap(hop.key.toId()) == factory.poolIdOf(token);
     }
 
-    /// @dev Walk the hops. Runs of v4 hops share one unlock; each v3 hop is a direct pool call.
-    function _walk(Hop[] calldata path, address cur, uint256 amt) internal returns (address, uint256) {
+    /// @dev Walk the hops. Runs of v4 hops share one unlock, settled once on the way in and taken once on the way out;
+    /// each v3 hop is a direct pool call. `payer` settles the first run's ERC-20 input from their own balance when
+    /// set; `takeTo` receives the last run's output directly when set. Both are the zero address for the router itself.
+    function _walk(Hop[] calldata path, address cur, uint256 amt, address payer, address takeTo) internal returns (address, uint256) {
         uint256 i;
         while (i < path.length) {
             if (path[i].kind == HOP_V4) {
@@ -210,7 +227,7 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
                     weth.withdraw(amt);
                     cur = address(0);
                 }
-                bytes memory res = poolManager.unlock(abi.encode(cur, amt, run));
+                bytes memory res = poolManager.unlock(abi.encode(cur, amt, run, i == 0 ? payer : address(0), j == path.length ? takeTo : address(0)));
                 (cur, amt) = abi.decode(res, (address, uint256));
                 i = j;
             } else if (path[i].kind == HOP_V3) {
@@ -286,7 +303,9 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
 
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert OnlyPoolManager();
-        (address cur, uint256 amt, PoolKey[] memory path) = abi.decode(data, (address, uint256, PoolKey[]));
+        (address cur, uint256 amt, PoolKey[] memory path, address payer, address takeTo) = abi.decode(data, (address, uint256, PoolKey[], address, address));
+        Currency cIn = Currency.wrap(cur);
+        uint256 amountIn = amt;
         for (uint256 i; i < path.length; i++) {
             PoolKey memory k = path[i];
             bool zeroForOne;
@@ -303,24 +322,23 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
                 }),
                 ""
             );
-            (Currency cIn, Currency cOut) = zeroForOne ? (k.currency0, k.currency1) : (k.currency1, k.currency0);
             (int128 dIn, int128 dOut) = zeroForOne ? (d.amount0(), d.amount1()) : (d.amount1(), d.amount0());
-            uint256 used = uint256(uint128(-dIn));
-            uint256 out = uint256(uint128(dOut));
             // hitting the price limit means the pool ran dry; a partial hop would strand the rest inside the router
-            if (used != amt) revert InsufficientLiquidity();
-
-            if (cIn.isAddressZero()) {
-                poolManager.settle{value: used}();
-            } else {
-                poolManager.sync(cIn);
-                IERC20(Currency.unwrap(cIn)).safeTransfer(address(poolManager), used);
-                poolManager.settle();
-            }
-            poolManager.take(cOut, address(this), out);
-            cur = Currency.unwrap(cOut);
-            amt = out;
+            if (uint256(uint128(-dIn)) != amt) revert InsufficientLiquidity();
+            cur = Currency.unwrap(zeroForOne ? k.currency1 : k.currency0);
+            amt = uint256(uint128(dOut));
         }
+        // one settlement for the run's input and one take for its output: the hops between net out inside the pool
+        // manager, so no intermediate currency ever leaves it and nothing is ever counted against the router
+        if (cIn.isAddressZero()) {
+            poolManager.settle{value: amountIn}();
+        } else {
+            poolManager.sync(cIn);
+            if (payer != address(0)) IERC20(Currency.unwrap(cIn)).safeTransferFrom(payer, address(poolManager), amountIn);
+            else IERC20(Currency.unwrap(cIn)).safeTransfer(address(poolManager), amountIn);
+            poolManager.settle();
+        }
+        poolManager.take(Currency.wrap(cur), takeTo == address(0) ? address(this) : takeTo, amt);
         return abi.encode(cur, amt);
     }
 

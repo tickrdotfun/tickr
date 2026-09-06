@@ -128,6 +128,11 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
         return _pairsOf[ticker].length;
     }
 
+    /// @notice The `i`th coin launched under `ticker`, oldest first; the founder's coin is at zero.
+    function pairAt(address ticker, uint256 i) external view returns (address) {
+        return _pairsOf[ticker][i];
+    }
+
     /// @inheritdoc IFeeClub
     function hasClub(address pairToken) external view override returns (bool) {
         return isTicker[pairToken];

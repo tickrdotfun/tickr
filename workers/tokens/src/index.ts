@@ -387,7 +387,8 @@ export default {
     }
     // the pin budget for the site: one counter per address, atomic. `key` is the caller's address, `secret` proves the caller is ours.
     if (url.pathname === "/budget") {
-      if (!env.BUDGET_KEY || url.searchParams.get("secret") !== env.BUDGET_KEY) return new Response("not found", { status: 404 });
+      // the secret travels in a header, never in the URL, so it cannot end up in a request log
+      if (!env.BUDGET_KEY || request.headers.get("x-budget-key") !== env.BUDGET_KEY) return new Response("not found", { status: 404 });
       const who = url.searchParams.get("key") ?? "unknown";
       const stub = env.PIN_BUDGET.get(env.PIN_BUDGET.idFromName(who));
       return stub.fetch(new Request(`https://budget/?limit=12&window=${60 * 60_000}`));

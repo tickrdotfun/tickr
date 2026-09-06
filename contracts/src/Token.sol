@@ -19,7 +19,7 @@ interface ISeederPoolManager {
 /// the pool by anyone but the launch's own wallets pays a snipe tax that starts at 99% and is gone by the fifth
 /// second, burned to the dead address like every other coin-side fee. Sells never pay it. For the launch block and the two
 /// after it, only the launch's own wallets may buy in the launch block, and every other wallet is held to 5% of supply
-/// held and 5.5% bought. After that the coin is a plain ERC-20 forever.
+/// held, by buys or by transfers, and 5.5% bought. After that the coin is a plain ERC-20 forever.
 contract Token is ERC20 {
     address public immutable factory;
     /// @notice The pool manager the coin trades in; a transfer out of it is a buy.
@@ -47,7 +47,7 @@ contract Token is ERC20 {
 
     /// @notice In the launch block only the launch's own wallets may buy.
     error LaunchBlock();
-    /// @notice A buy would leave `recipient` holding more than 5% of supply, or buying more than 5.5% in the window.
+    /// @notice A buy or a transfer would leave `recipient` holding more than 5% of supply, or a buy would take it past 5.5% bought in the window.
     error WalletCapExceeded(address recipient, uint256 held, uint256 bought);
     string private _logo;
     string private _description;
@@ -110,11 +110,16 @@ contract Token is ERC20 {
         return 0;
     }
 
-    /// @dev The launch's own wallets, the locker that collects the pool's fees, and the dead address itself.
+    /// @dev The launch's own wallets, the contracts the coin passes through on its way to and from the pool (the
+    /// factory and the seeder that place the supply, the pool manager, the locker that collects the pool's fees, the
+    /// escrow that holds the creator's coin), the protocol's fee wallet, and the dead address itself.
     function _exempt(address to) internal view returns (bool) {
-        if (to == launchLocker || to == DEAD) return true;
-        LaunchedToken memory l = IFactory(factory).getLaunchedToken(address(this));
-        return to == l.deployer || to == l.creatorFeeRecipient;
+        if (to == launchLocker || to == DEAD || to == poolManager || to == factory) return true;
+        IFactory f = IFactory(factory);
+        if (to == IFactorySeeder(factory).launchSeeder() || to == f.feeEscrow()) return true;
+        LaunchedToken memory l = f.getLaunchedToken(address(this));
+        if (to == l.deployer || to == l.creatorFeeRecipient) return true;
+        return to == f.getLaunchFeePolicy(address(this)).protocolFeeRecipient;
     }
 
     /// @notice The first block in which buys are no longer capped: the launch block plus two more.
@@ -132,7 +137,7 @@ contract Token is ERC20 {
         return bought >= cap ? 0 : cap - bought;
     }
 
-    /// @notice How much more `wallet` may hold before the hold cap stops its buys, in coins. Same rules as above.
+    /// @notice How much more `wallet` may hold before the hold cap stops what it can receive, bought or sent, in coins. Same rules as above.
     function remainingHold(address wallet) public view returns (uint256) {
         if (block.number >= protectionEndsAtBlock() || _exempt(wallet)) return type(uint256).max;
         if (block.number == launchedBlock) return 0;
@@ -143,37 +148,43 @@ contract Token is ERC20 {
 
     /// @dev A buy is a transfer out of the pool manager. Inside the snipe window the tax leaves for the dead address
     /// first; inside the protected blocks the rest is then held to the wallet caps, and in the launch block only the
-    /// launch's own wallets may buy at all. Everything else, sells and transfers between wallets, moves untouched.
+    /// launch's own wallets may buy at all. Inside the protected blocks a transfer from anywhere else is held to the
+    /// hold cap too, so a holding over it cannot be assembled from several wallets; it counts as nothing bought.
+    /// Sells, transfers into the exempt set, and everything after the window move untouched.
     function _update(address from, address to, uint256 value) internal override {
-        if (from == poolManager && value != 0) {
-            bool snipeWindow = block.timestamp < launchedAt + SNIPE_WINDOW;
+        if (value != 0 && from != address(0)) {
             bool protectedBlocks = block.number < protectionEndsAtBlock();
-            if ((snipeWindow || protectedBlocks) && !_exempt(to)) {
-                if (snipeWindow) {
-                    uint256 bps = _snipeBps(block.timestamp - launchedAt);
-                    if (bps != 0) {
-                        uint256 tax = (value * bps) / 10_000;
-                        super._update(from, DEAD, tax);
-                        emit SnipeTaxed(to, tax, bps);
-                        value -= tax;
+            if (from == poolManager) {
+                bool snipeWindow = block.timestamp < launchedAt + SNIPE_WINDOW;
+                if ((snipeWindow || protectedBlocks) && !_exempt(to)) {
+                    if (snipeWindow) {
+                        uint256 bps = _snipeBps(block.timestamp - launchedAt);
+                        if (bps != 0) {
+                            uint256 tax = (value * bps) / 10_000;
+                            super._update(from, DEAD, tax);
+                            emit SnipeTaxed(to, tax, bps);
+                            value -= tax;
+                        }
+                    }
+                    if (protectedBlocks) {
+                        if (block.number == launchedBlock) revert LaunchBlock();
+                        uint256 supply = totalSupply();
+                        uint256 held = balanceOf(to) + value;
+                        uint256 bought = boughtInWindow[to] + value;
+                        if (held > (supply * HOLD_CAP_BPS) / 10_000 || bought > (supply * BUY_CAP_BPS) / 10_000) {
+                            revert WalletCapExceeded(to, held, bought);
+                        }
+                        boughtInWindow[to] = bought;
                     }
                 }
-                if (protectedBlocks) {
-                    if (block.number == launchedBlock) revert LaunchBlock();
-                    uint256 supply = totalSupply();
-                    uint256 held = balanceOf(to) + value;
-                    uint256 bought = boughtInWindow[to] + value;
-                    if (held > (supply * HOLD_CAP_BPS) / 10_000 || bought > (supply * BUY_CAP_BPS) / 10_000) {
-                        revert WalletCapExceeded(to, held, bought);
-                    }
-                    boughtInWindow[to] = bought;
-                }
+            } else if (protectedBlocks && !_exempt(to)) {
+                uint256 held = balanceOf(to) + value;
+                if (held > (totalSupply() * HOLD_CAP_BPS) / 10_000) revert WalletCapExceeded(to, held, boughtInWindow[to]);
             }
         }
         super._update(from, to, value);
     }
 
-    /// @notice There is no owner and never was; scanners that ask get the zero address.
     function owner() external pure returns (address) {
         return address(0);
     }

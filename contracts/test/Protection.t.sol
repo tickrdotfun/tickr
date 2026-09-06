@@ -121,11 +121,11 @@ contract ProtectionTest is BaseTest {
         vm.roll(vm.getBlockNumber() + 1); // block two, still the launch second: 99% tax
         assertEq(t.currentSnipeTaxBps(alice), 9_900);
         uint256 dead = t.balanceOf(DEAD_ADDR);
-        uint256 out = buy(t, alice, 0.5 ether);
-        uint256 tax = (out * 9_900) / 10_000;
-        assertEq(t.balanceOf(DEAD_ADDR) - dead, tax, "the tax burned");
-        assertEq(t.balanceOf(alice), out - tax, "the net arrived");
-        assertEq(t.boughtInWindow(alice), out - tax, "the caps count the net, not the pool's count");
+        uint256 out = buy(t, alice, 0.5 ether); // the seeder reports what arrived, net of the tax
+        uint256 tax = t.balanceOf(DEAD_ADDR) - dead;
+        assertEq(tax, ((out + tax) * 9_900) / 10_000, "the tax burned, 99% of what the pool gave out");
+        assertEq(t.balanceOf(alice), out, "the net arrived");
+        assertEq(t.boughtInWindow(alice), out, "the caps count the net, not the pool's count");
         assertLt(_pctOfSupply(t, alice), 500, "and the net is under the cap although the gross was not");
     }
 }

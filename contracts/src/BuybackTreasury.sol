@@ -70,6 +70,8 @@ contract BuybackTreasury is ReentrancyGuard {
     /// @notice An asset the treasury cannot convert, sent whole to the team wallet.
     event Forwarded(address indexed asset, uint256 amount);
     event BoughtAndBurned(uint256 usdgIn, uint256 tickrOut, address indexed caller);
+    /// @notice The treasury fixed the ticker launcher it answers to.
+    event LauncherBound(address launcher);
 
     error TooSoon();
     error NothingEarmarked();
@@ -96,14 +98,36 @@ contract BuybackTreasury is ReentrancyGuard {
     /// @notice The official coin and its ticker, read from the chain: FUN, and the first coin launched under it.
     /// Both zero before genesis.
     function official() public view returns (address tickr, address fun) {
-        TickerLauncher tl = TickerLauncher(factory.tickerLauncher());
+        TickerLauncher tl = _launcherView();
         if (address(tl) == address(0)) return (address(0), address(0));
         fun = tl.tickerFor("FUN");
         if (fun == address(0)) return (address(0), address(0));
-        address[] memory coins = tl.pairsOf(fun);
-        if (coins.length == 0) return (address(0), fun);
-        tickr = coins[0];
+        if (tl.pairCount(fun) == 0) return (address(0), fun);
+        tickr = tl.pairAt(fun, 0);
     }
+
+    /// @dev The ticker launcher the treasury answers to. Read from the factory until the first `collect` or `buy`
+    /// after wiring, and fixed from then on, so a later `setTickerLauncher` by the owner cannot change what FUN is,
+    /// what the official coin is, or which wrappers convert.
+    function _launcherView() internal view returns (TickerLauncher) {
+        address a = launcher;
+        return TickerLauncher(a == address(0) ? factory.tickerLauncher() : a);
+    }
+
+    function _launcher() internal returns (TickerLauncher tl) {
+        address a = launcher;
+        if (a == address(0)) {
+            a = factory.tickerLauncher();
+            if (a != address(0)) {
+                launcher = a;
+                emit LauncherBound(a);
+            }
+        }
+        return TickerLauncher(a);
+    }
+
+    /// @notice The ticker launcher the treasury is bound to; zero until the first `collect` or `buy` after wiring.
+    address public launcher;
 
     /// @notice When the next buy may happen; zero until the first one.
     function nextBuyAt() public view returns (uint256) {
@@ -125,7 +149,7 @@ contract BuybackTreasury is ReentrancyGuard {
     /// pay the team its slice and everything unconvertible, and earmark the rest for buys. Anyone may call.
     function collect(address[] calldata tokens) external nonReentrant returns (uint256 usdgTotal, uint256 toTeam, uint256 earmarked) {
         if (escrow.balanceOf(address(this)) > 0) escrow.claim();
-        TickerLauncher tl = TickerLauncher(factory.tickerLauncher());
+        TickerLauncher tl = _launcher();
         for (uint256 i; i < tokens.length; i++) {
             address t = tokens[i];
             if (escrow.balanceOfToken(address(this), t) > 0) escrow.claimToken(t);
@@ -163,11 +187,14 @@ contract BuybackTreasury is ReentrancyGuard {
     function buy() external nonReentrant returns (uint256 usdgIn, uint256 tickrOut) {
         if (lastBuyAt != 0 && block.timestamp < lastBuyAt + MIN_INTERVAL) revert TooSoon();
         if (earmarkedUsdg == 0) revert NothingEarmarked();
+        _launcher();
         (address tickr, address fun) = official();
         if (tickr == address(0)) revert NotYetLaunched();
         (PoolKey memory key, bool funIs0, uint256 minOut, uint256 sized,) = _sizeBuy(tickr);
         usdgIn = sized;
         if (usdgIn == 0) revert NothingToBuy();
+        // FUN that club sweeps paid straight to the treasury is revenue waiting for `collect`, not part of this buy
+        uint256 funBefore = IERC20(fun).balanceOf(address(this));
         // dollars become FUN one for one, FUN becomes TICKR in the pool, and the TICKR lands at the dead address
         usdg.forceApprove(fun, usdgIn);
         ITickerToken(fun).mint(usdgIn, address(this));
@@ -175,7 +202,7 @@ contract BuybackTreasury is ReentrancyGuard {
         tickrOut = seeder.swapExactIn(key, funIs0, usdgIn, minOut, DEAD);
         earmarkedUsdg -= usdgIn;
         // FUN the pool did not take comes back as dollars and stays earmarked
-        uint256 left = IERC20(fun).balanceOf(address(this));
+        uint256 left = IERC20(fun).balanceOf(address(this)) - funBefore;
         if (left > 0) {
             ITickerToken(fun).redeem(left, address(this));
             earmarkedUsdg += left;

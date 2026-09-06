@@ -201,6 +201,19 @@ export const BuybackTreasuryAbi = [
   },
   {
     "type": "function",
+    "name": "launcher",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "nextBuyAt",
     "inputs": [],
     "outputs": [
@@ -378,6 +391,19 @@ export const BuybackTreasuryAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LauncherBound",
+    "inputs": [
+      {
+        "name": "launcher",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
       }
     ],
     "anonymous": false

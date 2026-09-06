@@ -26,6 +26,7 @@ const MAX_CHUNKS = 12;
 const dexScreenerEmbed = (poolId: string) => `https://dexscreener.com/robinhood/${poolId}?embed=1&theme=dark&trades=0&info=0`;
 
 type Point = { time: UTCTimestamp; value: number };
+type Series = { points: Point[]; fromBlock: bigint; complete: boolean };
 
 /**
  * The coin's price in its quote, drawn from the pool's own swaps: every Swap the pool manager logged for this
@@ -49,8 +50,8 @@ export function PriceChart({ d }: { d: TokenData }) {
     enabled: ready,
     staleTime: 15_000,
     refetchInterval: 20_000,
-    queryFn: async (): Promise<Point[]> => {
-      if (!client || !poolId || !pool.key || !launch) return [];
+    queryFn: async (): Promise<Series> => {
+      if (!client || !poolId || !pool.key || !launch) return { points: [], fromBlock: 0n, complete: true };
       const latest = await client.getBlockNumber();
       const floor = START_BLOCK > 0n ? START_BLOCK : 0n;
       const ranges: [bigint, bigint][] = [];
@@ -89,12 +90,14 @@ export function PriceChart({ d }: { d: TokenData }) {
         if ((p.time as number) <= prev) p.time = (prev + 1) as UTCTimestamp;
         prev = p.time as number;
       }
-      return points.filter((p) => Number.isFinite(p.value));
+      // what the chart covers: every block since the factory's start, or the most recent chunk of them
+      const fromBlock = ranges.length ? ranges[0][0] : latest;
+      return { points: points.filter((p) => Number.isFinite(p.value)), fromBlock, complete: fromBlock <= floor };
     },
   });
 
   const box = useRef<HTMLDivElement>(null);
-  const data = swaps.data;
+  const data = swaps.data?.points;
   useEffect(() => {
     if (view !== "pool" || !box.current || !data || data.length === 0) return;
     let disposed = false;
@@ -139,7 +142,7 @@ export function PriceChart({ d }: { d: TokenData }) {
       <div className="chart-head">
         <div className="fig-k">
           price, {quote?.symbol ?? "quote"} per {meta.symbol ?? "coin"}
-          {trades !== undefined && <span className="chart-count"> · {trades} {trades === 1 ? "trade" : "trades"} on chain</span>}
+          {trades !== undefined && <span className="chart-count"> · {trades} {trades === 1 ? "trade" : "trades"} on chain{swaps.data && !swaps.data.complete ? `, since block ${swaps.data.fromBlock.toString()}` : ""}</span>}
         </div>
         {live && (
           <div className="chart-tabs" role="tablist">

@@ -16,8 +16,7 @@ Every route ends at the coin itself: its own pool is the last hop on a buy and t
 The caller passes a route: a list of hops walked from the input asset to the coin's quote. A hop is a Uniswap
 v4 pool key, a Uniswap v3 pool address, or an invented ticker to wrap into or redeem from, one for one. Consecutive v4 hops run inside a single `PoolManager.unlock`; a v3 hop calls
 the pool directly and pays it in the swap callback. Native ETH is wrapped before a v3 hop and unwrapped before a v4
-hop that prices native ETH, so one route can mix both. The router then swaps in the coin's pool and forwards the coin, plus
-any fill-to-edge refund the coin's pool returns, to the recipient. It holds nothing between transactions and has no
+hop that prices native ETH, so one route can mix both. A run of v4 hops is one unlock: the router swaps hop by hop, settles the run's input once and takes its output once, so nothing between the two ever leaves the pool manager. The coin's own pool, the last hop, pays the recipient directly; the snipe tax and the launch caps therefore see the buyer, never the router, and the amount the zap reports is the recipient's balance change. On a sell the coin goes from the seller straight into the pool manager. It holds nothing between transactions and has no
 privileges.
 
 ```solidity

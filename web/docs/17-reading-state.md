@@ -104,7 +104,7 @@ function currentSnipeTaxBps(address recipient) view returns (uint256);   // the 
 function launchedBlock() view returns (uint64);
 function protectionEndsAtBlock() view returns (uint256);          // the launch block plus three: the first block with no caps
 function remainingBuy(address wallet) view returns (uint256);    // coins the wallet may still buy under the 5.5% cap; max when no cap applies, zero in the launch block
-function remainingHold(address wallet) view returns (uint256);   // coins the wallet may still hold under the 5% cap; same rules
+function remainingHold(address wallet) view returns (uint256);   // coins the wallet may still receive, bought or sent, under the 5% cap; same rules
 // LaunchDeployer
 function MAX_NAME() view returns (uint256);           // 64, then MAX_SYMBOL 16, MAX_LOGO 8192, MAX_DESCRIPTION 2048, MAX_SOCIAL 256
 ```
