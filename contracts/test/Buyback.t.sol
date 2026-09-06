@@ -96,7 +96,7 @@ contract BuybackTest is BaseTest {
 
         uint256 fromEth = total - 1_500e6;
         assertApproxEqRel(fromEth, 2_000e6, 0.01e18, "one ETH became about two thousand dollars through the live pool");
-        assertEq(toTeam, (total * 5_000) / 10_000, "half to the team");
+        assertEq(toTeam, (total * (10_000 - treasury.buybackShareBps())) / 10_000, "the team's share, half at the start");
         assertEq(earmarked, total - toTeam, "half earmarked");
         assertEq(usdg.balanceOf(team), toTeam, "the team holds its slice");
         assertEq(treasury.earmarkedUsdg(), earmarked);
@@ -250,5 +250,105 @@ contract BuybackTest is BaseTest {
         uint256 funBefore = escrow.balanceOfToken(address(treasury), address(fun));
         locker.collectFees(address(tickr));
         assertGt(escrow.balanceOfToken(address(treasury), address(fun)) - funBefore, 0, "TICKR's protocol share is FUN, owed to the treasury");
+    }
+
+    // ---------------------------------------------------------------- the burn share, up only
+
+    function test_share_startsAtFiftyPercent() public {
+        assertEq(treasury.buybackShareBps(), 5_000);
+        assertEq(treasury.pendingShareBps(), 0);
+        assertEq(treasury.shareEffectiveAt(), 0);
+    }
+
+    function test_share_raiseAppliesAfterThreeDays() public {
+        _genesis();
+        vm.prank(owner);
+        treasury.proposeBuybackShare(8_000);
+        uint256 at = treasury.shareEffectiveAt();
+        assertEq(at, vm.getBlockTimestamp() + 3 days);
+        assertEq(treasury.pendingShareBps(), 8_000);
+        assertEq(treasury.buybackShareBps(), 5_000, "nothing changes until it is applied");
+        vm.warp(at - 1);
+        vm.expectRevert(abi.encodeWithSelector(BuybackTreasury.TooEarly.selector, at));
+        treasury.applyBuybackShare();
+        vm.warp(at);
+        treasury.applyBuybackShare();
+        assertEq(treasury.buybackShareBps(), 8_000);
+        assertEq(treasury.pendingShareBps(), 0);
+        assertEq(treasury.shareEffectiveAt(), 0);
+        vm.expectRevert(BuybackTreasury.NothingPending.selector);
+        treasury.applyBuybackShare();
+        // the next collect splits 80/20
+        _creditUsdg(10_000e6);
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdg);
+        uint256 teamBefore = usdg.balanceOf(team);
+        (uint256 total, uint256 toTeam, uint256 earmarked) = treasury.collect(tokens);
+        assertEq(total, 10_000e6);
+        assertEq(toTeam, 2_000e6, "twenty percent to the team");
+        assertEq(earmarked, 8_000e6, "eighty percent earmarked");
+        assertEq(usdg.balanceOf(team) - teamBefore, 2_000e6);
+    }
+
+    function test_share_cannotLower() public {
+        vm.prank(owner);
+        vm.expectRevert(BuybackTreasury.ShareNotHigher.selector);
+        treasury.proposeBuybackShare(4_000);
+        vm.prank(owner);
+        vm.expectRevert(BuybackTreasury.ShareNotHigher.selector);
+        treasury.proposeBuybackShare(5_000);
+        vm.prank(owner);
+        treasury.proposeBuybackShare(8_000);
+        vm.warp(treasury.shareEffectiveAt());
+        treasury.applyBuybackShare();
+        assertEq(treasury.buybackShareBps(), 8_000);
+        vm.prank(owner);
+        vm.expectRevert(BuybackTreasury.ShareNotHigher.selector);
+        treasury.proposeBuybackShare(7_000);
+    }
+
+    function test_share_onlyFactoryOwnerMayPropose() public {
+        vm.expectRevert(BuybackTreasury.NotFactoryOwner.selector);
+        treasury.proposeBuybackShare(8_000); // the deployer of the treasury, this test
+        vm.prank(alice);
+        vm.expectRevert(BuybackTreasury.NotFactoryOwner.selector);
+        treasury.proposeBuybackShare(8_000);
+        vm.prank(owner);
+        treasury.proposeBuybackShare(8_000);
+        assertEq(treasury.pendingShareBps(), 8_000);
+    }
+
+    function test_share_replacementRestartsTheDelay() public {
+        vm.prank(owner);
+        treasury.proposeBuybackShare(6_000);
+        uint256 first = treasury.shareEffectiveAt();
+        vm.warp(first - 1 days);
+        vm.prank(owner);
+        treasury.proposeBuybackShare(9_000);
+        assertEq(treasury.pendingShareBps(), 9_000, "the newer proposal replaces the older");
+        assertEq(treasury.shareEffectiveAt(), vm.getBlockTimestamp() + 3 days, "and the delay starts again");
+        vm.warp(first);
+        vm.expectRevert(abi.encodeWithSelector(BuybackTreasury.TooEarly.selector, first + 2 days));
+        treasury.applyBuybackShare();
+        vm.warp(first + 2 days);
+        treasury.applyBuybackShare();
+        assertEq(treasury.buybackShareBps(), 9_000);
+    }
+
+    function test_share_cannotExceedTenThousand() public {
+        vm.prank(owner);
+        vm.expectRevert(BuybackTreasury.ShareTooHigh.selector);
+        treasury.proposeBuybackShare(10_001);
+        vm.prank(owner);
+        treasury.proposeBuybackShare(10_000);
+        vm.warp(treasury.shareEffectiveAt());
+        treasury.applyBuybackShare();
+        assertEq(treasury.buybackShareBps(), 10_000, "all of it may burn");
+        _creditUsdg(1_000e6);
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdg);
+        (, uint256 toTeam, uint256 earmarked) = treasury.collect(tokens);
+        assertEq(toTeam, 0);
+        assertEq(earmarked, 1_000e6);
     }
 }

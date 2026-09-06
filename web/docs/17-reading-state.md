@@ -136,7 +136,12 @@ function buy() returns (uint256 usdgIn, uint256 tickrOut);
 event Collected(uint256 usdgTotal, uint256 toTeam, uint256 earmarked);
 event Forwarded(address indexed asset, uint256 amount);       // an unconvertible asset sent whole to the team
 event BoughtAndBurned(uint256 usdgIn, uint256 tickrOut, address indexed caller);
-// constants: BUYBACK_SHARE_BPS 5000, MAX_IMPACT_BPS 300, MIN_INTERVAL 10 minutes, MAX_TRANCHE_BPS 500
+// constants: MAX_IMPACT_BPS 300, MIN_INTERVAL 10 minutes, MAX_TRANCHE_BPS 500, SHARE_DELAY 3 days
+function buybackShareBps() view returns (uint16);       // the burn share in force, 5000 at the start; only ever raised
+function pendingShareBps() view returns (uint16);       // a proposed raise waiting out its delay, zero when none
+function shareEffectiveAt() view returns (uint256);     // when the pending raise may be applied
+function proposeBuybackShare(uint16 bps);               // the factory owner only; higher than the current share, at most 10000
+function applyBuybackShare();                           // anyone, once shareEffectiveAt has passed
 // launcher(): the ticker launcher the treasury is bound to; zero until its first collect or buy
 ```
 

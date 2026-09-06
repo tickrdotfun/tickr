@@ -37,19 +37,6 @@ export const BuybackTreasuryAbi = [
   },
   {
     "type": "function",
-    "name": "BUYBACK_SHARE_BPS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "DEAD",
     "inputs": [],
     "outputs": [
@@ -102,6 +89,26 @@ export const BuybackTreasuryAbi = [
   },
   {
     "type": "function",
+    "name": "SHARE_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "applyBuybackShare",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "buy",
     "inputs": [],
     "outputs": [
@@ -117,6 +124,19 @@ export const BuybackTreasuryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "buybackShareBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -258,6 +278,19 @@ export const BuybackTreasuryAbi = [
   },
   {
     "type": "function",
+    "name": "pendingShareBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "previewBuy",
     "inputs": [],
     "outputs": [
@@ -276,6 +309,19 @@ export const BuybackTreasuryAbi = [
   },
   {
     "type": "function",
+    "name": "proposeBuybackShare",
+    "inputs": [
+      {
+        "name": "bps",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "seeder",
     "inputs": [],
     "outputs": [
@@ -283,6 +329,19 @@ export const BuybackTreasuryAbi = [
         "name": "",
         "type": "address",
         "internalType": "contract LaunchSeeder"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "shareEffectiveAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -366,6 +425,38 @@ export const BuybackTreasuryAbi = [
   },
   {
     "type": "event",
+    "name": "BuybackShareProposed",
+    "inputs": [
+      {
+        "name": "bps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
+        "name": "effectiveAt",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BuybackShareRaised",
+    "inputs": [
+      {
+        "name": "bps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Collected",
     "inputs": [
       {
@@ -423,6 +514,11 @@ export const BuybackTreasuryAbi = [
   },
   {
     "type": "error",
+    "name": "NotFactoryOwner",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotFromEscrow",
     "inputs": []
   },
@@ -434,6 +530,11 @@ export const BuybackTreasuryAbi = [
   {
     "type": "error",
     "name": "NothingEarmarked",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NothingPending",
     "inputs": []
   },
   {
@@ -454,6 +555,27 @@ export const BuybackTreasuryAbi = [
         "name": "token",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ShareNotHigher",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ShareTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooEarly",
+    "inputs": [
+      {
+        "name": "effectiveAt",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },

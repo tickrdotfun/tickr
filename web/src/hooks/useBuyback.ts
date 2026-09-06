@@ -18,6 +18,12 @@ export type BuybackState = {
   readyIn: number; // seconds until the next buy, 0 when ready
   previewIn: bigint;
   previewMin: bigint;
+  /** the burn share in force, in basis points; starts at 5000 and only ever goes up */
+  shareBps: number;
+  /** a raise the factory owner has proposed, waiting out its delay; undefined when none */
+  pendingShareBps?: number;
+  /** when the pending raise may be applied, unix seconds */
+  shareEffectiveAt?: number;
   history: BuybackBurn[];
 };
 
@@ -40,7 +46,7 @@ export function useBuyback() {
     queryFn: async (): Promise<BuybackState | null> => {
       if (!client || isZero(treasury) || isZero(tickr)) return null;
       const t = { abi: BuybackTreasuryAbi, address: treasury } as const;
-      const [earmarked, spent, burned, lastBuyAt, nextBuyAt, preview, supply] = await Promise.all([
+      const [earmarked, spent, burned, lastBuyAt, nextBuyAt, preview, supply, shareBps, pendingBps, shareAt] = await Promise.all([
         client.readContract({ ...t, functionName: "earmarkedUsdg" }) as Promise<bigint>,
         client.readContract({ ...t, functionName: "totalUsdgSpent" }) as Promise<bigint>,
         client.readContract({ ...t, functionName: "totalTickrBurned" }) as Promise<bigint>,
@@ -48,6 +54,9 @@ export function useBuyback() {
         client.readContract({ ...t, functionName: "nextBuyAt" }) as Promise<bigint>,
         client.readContract({ ...t, functionName: "previewBuy" }).catch(() => [0n, 0n] as const) as Promise<readonly [bigint, bigint]>,
         client.readContract({ abi: TokenAbi, address: tickr, functionName: "totalSupply" }).catch(() => 0n) as Promise<bigint>,
+        client.readContract({ ...t, functionName: "buybackShareBps" }) as Promise<number>,
+        client.readContract({ ...t, functionName: "pendingShareBps" }) as Promise<number>,
+        client.readContract({ ...t, functionName: "shareEffectiveAt" }) as Promise<bigint>,
       ]);
       const now = Math.floor(Date.now() / 1000);
       const next = Number(nextBuyAt);
@@ -71,6 +80,9 @@ export function useBuyback() {
         readyIn: next === 0 || now >= next ? 0 : next - now,
         previewIn: preview[0],
         previewMin: preview[1],
+        shareBps: Number(shareBps),
+        pendingShareBps: Number(pendingBps) > 0 ? Number(pendingBps) : undefined,
+        shareEffectiveAt: Number(pendingBps) > 0 ? Number(shareAt) : undefined,
         history,
       };
     },

@@ -25,8 +25,9 @@ import {LaunchSeeder} from "./LaunchSeeder.sol";
 /// @notice The protocol's fee share, put to one use. The factory names this contract as the protocol fee
 /// recipient, so every launch from the first one on credits its protocol share here, in `FeeEscrow`. Anyone may
 /// `collect`: the treasury claims what the escrow holds for it, turns what it can into dollars (invented tickers
-/// unwrap at par, ETH goes through the live ETH/USDG pool by the seeder's own swap), forwards the team's half
-/// and everything it cannot convert to the team wallet, and earmarks the rest. Anyone may then `buy`: earmarked
+/// unwrap at par, ETH goes through the live ETH/USDG pool by the seeder's own swap), forwards the team's share
+/// and everything it cannot convert to the team wallet, and earmarks the rest for burning: half at the start, and
+/// only ever more, since the share can be raised by the factory's owner after a delay and never lowered. Anyone may then `buy`: earmarked
 /// dollars become FUN one for one, FUN buys TICKR in its own pool, and the TICKR goes to the dead address.
 ///
 /// The official coin is found on chain, never set: FUN is the ticker named FUN, TICKR the first coin launched under
@@ -39,8 +40,8 @@ contract BuybackTreasury is ReentrancyGuard {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
 
-    /// @notice The share of protocol revenue that buys and burns; the rest goes to the team wallet.
-    uint256 public constant BUYBACK_SHARE_BPS = 5_000;
+    /// @notice How long a proposed raise of the burn share waits before anyone may apply it.
+    uint256 public constant SHARE_DELAY = 3 days;
     /// @notice A buy may move a pool's price by at most this much.
     uint256 public constant MAX_IMPACT_BPS = 300;
     /// @notice The least time between two buys.
@@ -60,6 +61,15 @@ contract BuybackTreasury is ReentrancyGuard {
     IERC20 public immutable usdg;
     address public immutable teamWallet;
 
+    /// @notice The share of protocol revenue that buys and burns, in basis points; the rest goes to the team wallet.
+    /// Starts at half. It only ever goes up: the factory's owner proposes a higher share, and after `SHARE_DELAY`
+    /// anyone may apply it. Nothing lowers it and nothing cancels a proposal except a higher one.
+    uint16 public buybackShareBps;
+    /// @notice A proposed raise waiting out its delay; zero when none.
+    uint16 public pendingShareBps;
+    /// @notice When the pending raise may be applied.
+    uint256 public shareEffectiveAt;
+
     /// @notice Dollars set aside for buys, held here until spent.
     uint256 public earmarkedUsdg;
     uint256 public totalUsdgSpent;
@@ -72,8 +82,17 @@ contract BuybackTreasury is ReentrancyGuard {
     event BoughtAndBurned(uint256 usdgIn, uint256 tickrOut, address indexed caller);
     /// @notice The treasury fixed the ticker launcher it answers to.
     event LauncherBound(address launcher);
+    /// @notice The factory's owner proposed a higher burn share; it may be applied from `effectiveAt`.
+    event BuybackShareProposed(uint16 bps, uint256 effectiveAt);
+    /// @notice The burn share went up.
+    event BuybackShareRaised(uint16 bps);
 
     error TooSoon();
+    error NotFactoryOwner();
+    error ShareNotHigher();
+    error ShareTooHigh();
+    error NothingPending();
+    error TooEarly(uint256 effectiveAt);
     error NothingEarmarked();
     error NotYetLaunched();
     error NothingToBuy();
@@ -86,6 +105,31 @@ contract BuybackTreasury is ReentrancyGuard {
         seeder = seeder_;
         usdg = usdg_;
         teamWallet = teamWallet_;
+        buybackShareBps = 5_000;
+    }
+
+    // ---------------------------------------------------------------- the burn share, up only
+
+    /// @notice Propose a higher burn share. Only the factory's owner, only upward, never above all of it. A newer
+    /// proposal replaces the pending one and the delay starts again.
+    function proposeBuybackShare(uint16 bps) external {
+        if (msg.sender != factory.owner()) revert NotFactoryOwner();
+        if (bps <= buybackShareBps) revert ShareNotHigher();
+        if (bps > BPS) revert ShareTooHigh();
+        pendingShareBps = bps;
+        shareEffectiveAt = block.timestamp + SHARE_DELAY;
+        emit BuybackShareProposed(bps, shareEffectiveAt);
+    }
+
+    /// @notice Apply the pending raise once its delay has passed. Anyone may call.
+    function applyBuybackShare() external {
+        uint16 bps = pendingShareBps;
+        if (bps == 0) revert NothingPending();
+        if (block.timestamp < shareEffectiveAt) revert TooEarly(shareEffectiveAt);
+        buybackShareBps = bps;
+        pendingShareBps = 0;
+        shareEffectiveAt = 0;
+        emit BuybackShareRaised(bps);
     }
 
     /// @dev Launch fees arrive as ETH from the escrow; a swap that takes less than it was sent gives the rest back.
@@ -181,7 +225,7 @@ contract BuybackTreasury is ReentrancyGuard {
         }
         uint256 have = usdg.balanceOf(address(this));
         usdgTotal = have - earmarkedUsdg;
-        toTeam = (usdgTotal * (BPS - BUYBACK_SHARE_BPS)) / BPS;
+        toTeam = (usdgTotal * (BPS - buybackShareBps)) / BPS;
         earmarked = usdgTotal - toTeam;
         if (toTeam > 0) usdg.safeTransfer(teamWallet, toTeam);
         earmarkedUsdg += earmarked;

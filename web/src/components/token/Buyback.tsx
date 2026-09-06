@@ -33,8 +33,14 @@ export function Buyback({ d }: { d: TokenData }) {
     <div className="buyback">
       <div className="fig-k">buyback and burn</div>
       <p className="detail-note" style={{ marginTop: 8 }}>
-        half of protocol revenue buys {ts} here and burns it. anyone can trigger a buy every ten minutes. burning does not guarantee a higher price.
+        {shareLabel(s.shareBps)} of protocol revenue buys {ts} here and burns it. anyone can trigger a buy every ten minutes. burning does not guarantee a higher price. the share can be raised
+        by the owner after a three day delay and never lowered.
       </p>
+      {s.pendingShareBps !== undefined && s.shareEffectiveAt !== undefined && (
+        <p className="detail-note detail-note-tight">
+          a raise to {shareLabel(s.pendingShareBps)} is proposed and can be applied by anyone from {new Date(s.shareEffectiveAt * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}.
+        </p>
+      )}
 
       <div className="fact-grid" style={{ marginTop: 20 }}>
         <Fact k="burned" v={`${fmtAmount(s.burned, td, { sig: 4 })} ${ts}`} sub={s.burnedPct !== undefined ? `${pct(s.burnedPct, 2)} of supply` : "sent to the dead address"} />
@@ -87,6 +93,11 @@ export function Buyback({ d }: { d: TokenData }) {
       )}
     </div>
   );
+}
+
+/** "half" for the starting share, otherwise the percentage. */
+function shareLabel(bps: number): string {
+  return bps === 5_000 ? "half" : bps === 10_000 ? "all" : `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
 }
 
 function Fact({ k, v, sub }: { k: string; v: string; sub: string }) {

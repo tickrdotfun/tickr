@@ -22,6 +22,9 @@ event FeesCollected(address indexed token, uint256 quoteCollected, uint256 coinC
 event FirstBuy(address indexed token, uint256 quoteIn, uint256 tokensOut);
 event TickerCreated(address indexed ticker, string symbol, address indexed by);
 event Launched(address indexed token, bytes32 indexed poolId, address indexed ticker);
+// BuybackTreasury: the burn share only goes up. a proposal by the factory owner, then anyone applies it after the delay
+event BuybackShareProposed(uint16 bps, uint256 effectiveAt);
+event BuybackShareRaised(uint16 bps);
 // PoolManager, filtered by poolId: the input currency is negative and includes the fee, the output positive
 event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee);
 ```
@@ -41,6 +44,8 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `AnchorStatus(address,bool)` | `0xc7eeae902570c875dbc35081a2294ff8d21360be748b671052bd3751a6ee3a83` | AnchorRegistry |
 | `Approval(address,address,uint256)` | `0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925` | Token, TickerToken |
 | `BoughtAndBurned(uint256,uint256,address)` | `0x1b6fe3d614107093562b62b9236e265cac820f430060c5eb674a70824a7435db` | BuybackTreasury |
+| `BuybackShareProposed(uint16,uint256)` | `0x25f0057b4f4e56b85281b097467926d4f104d1721347d3edc384a4e251d94f9b` | BuybackTreasury |
+| `BuybackShareRaised(uint16)` | `0x3c027b913b338f2a029e8d3b9d6afcfc378bededed0ea3e00035157028840b91` | BuybackTreasury |
 | `Claimed(address,uint256)` | `0xd8138f8a3f377c5259ca548e70e4c2de94f129f5a11036a15b69513cba2b426a` | FeeEscrow |
 | `ClaimedToken(address,address,uint256)` | `0xdbc1ea3a8459e4c7e11fb385b52bbb5cc8c8ab85eec5d883ac9aa78c171f5141` | FeeEscrow |
 | `ClubClaimed(address,uint256,address,address,uint256)` | `0x659005b82109aa113441f2c563c06b60aa77aa7ffb11627b095cc2c247564623` | TickerLauncher |
@@ -130,10 +135,12 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `NotAMint()` | `0x98bc7fb5` | LaunchLocker |
 | `NoTargetRaise()` | `0x899d778d` | StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher |
 | `NotCreatorFeeRecipient()` | `0xb9f93944` | Factory |
+| `NotFactoryOwner()` | `0x428e0b92` | BuybackTreasury |
 | `NotFeeSource()` | `0x70154a5e` | TickerLauncher |
 | `NotFromEscrow()` | `0xbe81426f` | BuybackTreasury |
 | `NothingEarmarked()` | `0xdbded5a4` | BuybackTreasury |
 | `NothingLocked(address)` | `0xd9e7f38a` | LaunchLocker |
+| `NothingPending()` | `0x175c1aea` | BuybackTreasury |
 | `NothingToBuy()` | `0xb2f53681` | BuybackTreasury |
 | `NothingToSweep()` | `0x351261fc` | TickerLauncher |
 | `NotHook()` | `0xc72cfc38` | TickerLauncher |
@@ -169,12 +176,15 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `ReentrancyGuardReentrantCall()` | `0x3ee5aeb5` | Factory, LaunchSeeder, LaunchLocker, FeeEscrow, LaunchAndBuyRouter, TickerLauncher, TickerToken, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, ZapRouter, BuybackTreasury |
 | `RefundFailed()` | `0xf0c49d44` | LaunchSeeder |
 | `SafeERC20FailedOperation(address)` | `0x5274afe7` | Factory, LaunchDeployer, LaunchSeeder, LaunchLocker, FeeEscrow, LaunchAndBuyRouter, TickerLauncher, TickerToken, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, ZapRouter, BuybackTreasury, BuybackVault |
+| `ShareNotHigher()` | `0xe4354168` | BuybackTreasury |
+| `ShareTooHigh()` | `0x2a07fc4c` | BuybackTreasury |
 | `Slippage()` | `0x7dd37f70` | LaunchSeeder, ZapRouter |
 | `StalePrice()` | `0x19abf40e` | StockQuoteLauncher |
 | `SymbolTooLong()` | `0x1124f78b` | TickerLauncher |
 | `TickerReserved()` | `0x8bf25255` | Factory, TickerLauncher |
 | `TimelockExpired()` | `0x7a6fcaa6` | Factory |
 | `TimelockNotElapsed()` | `0x6677a596` | Factory |
+| `TooEarly(uint256)` | `0x2a35a324` | BuybackTreasury |
 | `TooSoon()` | `0x6fed7d85` | BuybackTreasury |
 | `UnknownLaunchConfig()` | `0x67905872` | Factory |
 | `UnknownToken()` | `0x8698bf37` | Factory, ZapRouter |
