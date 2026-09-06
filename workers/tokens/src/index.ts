@@ -143,40 +143,6 @@ async function marketsFromLauncher(client: PublicClient, env: Env, cands: Candid
   return best;
 }
 
-/**
- * Before the launcher exists, the floors are checked against what DexScreener reports each pool holds. It gives
- * the pool address and its two sides, so no chain call is needed for the estimate; the launcher itself is the
- * authority once it is deployed, and the contract checks again at launch either way.
- */
-function marketsFromPairs(env: Env, cands: Candidate[], dex: Map<string, DexPair[]>, ethUsd: number) {
-  const weth = addr(env.WETH);
-  const usdg = addr(env.USDG);
-  const floors = { WETH: 5, USDG: 15_000 };
-  const best = new Map<string, Market>();
-  for (const c of cands) {
-    for (const p of dex.get(c.address.toLowerCase()) ?? []) {
-      if (p.dexId !== "uniswap" || !(p.labels ?? []).includes("v3")) continue;
-      if (!/^0x[0-9a-fA-F]{40}$/.test(p.pairAddress ?? "")) continue;
-      const baseIsOurs = same(p.baseToken.address, c.address);
-      const other = baseIsOurs ? p.quoteToken.address : p.baseToken.address;
-      const counter: "WETH" | "USDG" | undefined = same(other, weth) ? "WETH" : same(other, usdg) ? "USDG" : undefined;
-      if (!counter) continue;
-      // the counter side of the pool, in whole units, as DexScreener reports it
-      const held = baseIsOurs ? p.liquidity?.quote : p.liquidity?.base;
-      if (held === undefined || held < floors[counter]) continue;
-      const depthEth = counter === "WETH" ? held : ethUsd > 0 ? held / ethUsd : 0;
-      const key = c.address.toLowerCase();
-      const cur = best.get(key);
-      if (cur) {
-        if (cur.counter === "WETH" && counter === "USDG") continue;
-        if (cur.counter === counter && cur.depthEth >= depthEth) continue;
-      }
-      best.set(key, { counter, pool: addr(p.pairAddress), fee: 0, depth: 0n, depthEth });
-    }
-  }
-  return best;
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -342,7 +308,7 @@ async function refresh(env: Env) {
   const out = await build(env);
   if (out.tokens.length > 0) {
     await env.TICKR_KV.put(KEY, JSON.stringify({ ...out, at: Date.now() }));
-    return { ...out, stored: true };
+    return { ...out, stored: true, keeping: out.tokens.length };
   }
   const kept = await env.TICKR_KV.get(KEY);
   return { ...out, stored: false, keeping: kept ? (JSON.parse(kept) as { tokens: unknown[] }).tokens.length : 0 };
@@ -388,7 +354,7 @@ export default {
     // the pin budget for the site: one counter per address, atomic. `key` is the caller's address, `secret` proves the caller is ours.
     if (url.pathname === "/budget") {
       // the secret travels in a header, never in the URL, so it cannot end up in a request log
-      if (!env.BUDGET_KEY || request.headers.get("x-budget-key") !== env.BUDGET_KEY) return new Response("not found", { status: 404 });
+      if (!env.BUDGET_KEY || req.headers.get("x-budget-key") !== env.BUDGET_KEY) return new Response("not found", { status: 404 });
       const who = url.searchParams.get("key") ?? "unknown";
       const stub = env.PIN_BUDGET.get(env.PIN_BUDGET.idFromName(who));
       return stub.fetch(new Request(`https://budget/?limit=12&window=${60 * 60_000}`));

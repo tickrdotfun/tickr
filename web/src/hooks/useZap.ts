@@ -63,7 +63,8 @@ export function useZapPreview(token: Address | undefined, path: Hop[] | null | u
   const client = usePublicClient();
   const enabled = !!client && !!token && !!path && !!valueWei && valueWei > 0n && !isZero(ADDRESSES.zapRouter);
   return useQuery({
-    queryKey: ["zapPreview", token, valueWei?.toString(), path?.map(hopId).join("|")],
+    // the account is part of the quote: the coin taxes and caps by recipient, and the preview simulates as `from`
+    queryKey: ["zapPreview", token, valueWei?.toString(), path?.map(hopId).join("|"), from],
     enabled,
     refetchInterval: 5_000,
     queryFn: async (): Promise<ZapPreview | null> => {
@@ -71,6 +72,30 @@ export function useZapPreview(token: Address | undefined, path: Hop[] | null | u
       return previewZapOnce(client, token, path, valueWei, from);
     },
   });
+}
+
+/** One quote of a sell, simulated with an allowance the seller may not have granted yet. */
+export async function previewZapSellOnce(client: Client, token: Address, path: Hop[], amountIn: bigint, from: Address, tokenOut: Address = ZERO): Promise<ZapSellPreview | null> {
+  try {
+    await client.simulateContract({
+      abi: ZapRouterAbi,
+      address: ADDRESSES.zapRouter,
+      functionName: "previewZapSell",
+      args: [zapSellParams(token, amountIn, path, from, 0n, tokenOut)],
+      account: from,
+      stateOverride: [{ address: token, stateDiff: [{ slot: allowanceSlot(from, ADDRESSES.zapRouter), value: toHex(maxUint256, { size: 32 }) }] }],
+    });
+    return null;
+  } catch (e) {
+    if (e instanceof BaseError) {
+      const revert = e.walk((err) => err instanceof ContractFunctionRevertedError);
+      if (revert instanceof ContractFunctionRevertedError && revert.data?.errorName === "Preview") {
+        const [quoteOut, amountOut] = revert.data.args as readonly [bigint, bigint];
+        return { quoteOut, amountOut };
+      }
+    }
+    throw e;
+  }
 }
 
 /** A sell: `path` starts with the coin's own pool and ends where `tokenOut` is (ETH by default). */
@@ -112,26 +137,7 @@ export function useZapSellPreview(
     refetchInterval: 5_000,
     queryFn: async (): Promise<ZapSellPreview | null> => {
       if (!client || !token || !path || !amountIn || !from) return null;
-      try {
-        await client.simulateContract({
-          abi: ZapRouterAbi,
-          address: ADDRESSES.zapRouter,
-          functionName: "previewZapSell",
-          args: [zapSellParams(token, amountIn, path, from, 0n, tokenOut)],
-          account: from,
-          stateOverride: [{ address: token, stateDiff: [{ slot: allowanceSlot(from, ADDRESSES.zapRouter), value: toHex(maxUint256, { size: 32 }) }] }],
-        });
-        return null;
-      } catch (e) {
-        if (e instanceof BaseError) {
-          const revert = e.walk((err) => err instanceof ContractFunctionRevertedError);
-          if (revert instanceof ContractFunctionRevertedError && revert.data?.errorName === "Preview") {
-            const [quoteOut, amountOut] = revert.data.args as readonly [bigint, bigint];
-            return { quoteOut, amountOut };
-          }
-        }
-        throw e;
-      }
+      return previewZapSellOnce(client, token, path, amountIn, from, tokenOut);
     },
   });
 }

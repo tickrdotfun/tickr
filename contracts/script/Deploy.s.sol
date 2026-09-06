@@ -84,6 +84,7 @@ contract Deploy is Script, DeployStack {
         vm.serializeAddress(j, "v3Factory", RH_V3_FACTORY);
         vm.serializeAddress(j, "zapRouter", address(s.zap));
         vm.serializeAddress(j, "poolManager", RH_POOL_MANAGER);
+        vm.serializeAddress(j, "v4Quoter", RH_V4_QUOTER);
         vm.serializeAddress(j, "positionManager", RH_POSITION_MANAGER);
         vm.serializeAddress(j, "permit2", PERMIT2);
         vm.serializeAddress(j, "usdg", RH_USDG);

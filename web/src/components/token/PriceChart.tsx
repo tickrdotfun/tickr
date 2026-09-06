@@ -26,7 +26,7 @@ const MAX_CHUNKS = 12;
 const dexScreenerEmbed = (poolId: string) => `https://dexscreener.com/robinhood/${poolId}?embed=1&theme=dark&trades=0&info=0`;
 
 type Point = { time: UTCTimestamp; value: number };
-type Series = { points: Point[]; fromBlock: bigint; complete: boolean };
+type Series = { points: Point[]; fromBlock: bigint; complete: boolean; swaps: number; interpolated: boolean };
 
 /**
  * The coin's price in its quote, drawn from the pool's own swaps: every Swap the pool manager logged for this
@@ -51,7 +51,7 @@ export function PriceChart({ d }: { d: TokenData }) {
     staleTime: 15_000,
     refetchInterval: 20_000,
     queryFn: async (): Promise<Series> => {
-      if (!client || !poolId || !pool.key || !launch) return { points: [], fromBlock: 0n, complete: true };
+      if (!client || !poolId || !pool.key || !launch) return { points: [], fromBlock: 0n, complete: true, swaps: 0, interpolated: false };
       const latest = await client.getBlockNumber();
       const floor = START_BLOCK > 0n ? START_BLOCK : 0n;
       const ranges: [bigint, bigint][] = [];
@@ -70,29 +70,47 @@ export function PriceChart({ d }: { d: TokenData }) {
       // the opening price, from the launch itself: what the pool held against the whole supply
       const opening = Number(launch.phantomQuote) / 10 ** qd / (Number(meta.totalSupply ?? 0n) / 10 ** td);
       const points: Point[] = [{ time: Number(launch.launchedAt ?? 0n) as UTCTimestamp, value: opening }];
+      const fromBlock = ranges.length ? ranges[0][0] : latest; // what the chart covers: since the factory's start, or the most recent chunk
+      let interpolated = false;
       if (logs.length) {
-        // two block reads give the line its clock; blocks between them are spaced evenly
-        const b0 = logs[0].blockNumber!;
-        const b1 = logs[logs.length - 1].blockNumber!;
-        const [blk0, blk1] = await Promise.all([client.getBlock({ blockNumber: b0 }), b1 === b0 ? Promise.resolve(undefined) : client.getBlock({ blockNumber: b1 })]);
-        const t0 = Number(blk0.timestamp);
-        const t1 = blk1 ? Number(blk1.timestamp) : t0;
-        const at = (b: bigint) => (b1 === b0 ? t0 : t0 + (Number(b - b0) * (t1 - t0)) / Number(b1 - b0));
+        // the clock comes from the blocks themselves: every block with a swap is read when there are few of them,
+        // otherwise forty anchors spread across them, and a block between two anchors sits on the line between
+        const blocks = [...new Set(logs.map((l) => l.blockNumber!))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+        const anchors = blocks.length <= 40 ? blocks : [...new Set(Array.from({ length: 40 }, (_, i) => blocks[Math.round((i * (blocks.length - 1)) / 39)]))];
+        interpolated = anchors.length < blocks.length;
+        const stamps = new Map<bigint, number>();
+        const read = await Promise.all(anchors.map((b) => client.getBlock({ blockNumber: b }).then((blk) => [b, Number(blk.timestamp)] as const)));
+        for (const [b, t] of read) stamps.set(b, t);
+        const at = (b: bigint): number => {
+          const hit = stamps.get(b);
+          if (hit !== undefined) return hit;
+          let lo = anchors[0];
+          let hi = anchors[anchors.length - 1];
+          for (const a of anchors) {
+            if (a <= b) lo = a;
+            if (a >= b) {
+              hi = a;
+              break;
+            }
+          }
+          const tl = stamps.get(lo)!;
+          const th = stamps.get(hi)!;
+          return hi === lo ? tl : tl + (Number(b - lo) * (th - tl)) / Number(hi - lo);
+        };
         for (const l of logs) {
           const sqrtP = l.args.sqrtPriceX96;
           if (!sqrtP) continue;
           points.push({ time: Math.floor(at(l.blockNumber!)) as UTCTimestamp, value: tokenPriceInQuote(sqrtP, pool.key.tokenIs0, td, qd) });
         }
+        // the opening point is the launch itself; when the history shown starts later, the line starts where it starts
+        if (fromBlock > floor && points.length > 1) points.shift();
       }
-      // strictly increasing times, as the chart requires; swaps in one block keep their order a second apart
-      let prev = -Infinity;
-      for (const p of points) {
-        if ((p.time as number) <= prev) p.time = (prev + 1) as UTCTimestamp;
-        prev = p.time as number;
-      }
-      // what the chart covers: every block since the factory's start, or the most recent chunk of them
-      const fromBlock = ranges.length ? ranges[0][0] : latest;
-      return { points: points.filter((p) => Number.isFinite(p.value)), fromBlock, complete: fromBlock <= floor };
+      // one point per second, the last price of that second: the chart wants strictly increasing times, and two
+      // swaps in one block are one observation, not two a second apart
+      const bySecond = new Map<number, Point>();
+      for (const q of points) bySecond.set(q.time as number, q);
+      const series = [...bySecond.values()].sort((a, b) => (a.time as number) - (b.time as number)).filter((q) => Number.isFinite(q.value));
+      return { points: series, fromBlock, complete: fromBlock <= floor, swaps: logs.length, interpolated };
     },
   });
 
@@ -136,13 +154,18 @@ export function PriceChart({ d }: { d: TokenData }) {
   }, [view, data]);
 
   if (!poolId) return null;
-  const trades = data ? Math.max(0, data.length - 1) : undefined;
+  const trades = swaps.data?.swaps; // the swaps in the window shown, counted from the logs, not from the points drawn
   return (
     <Panel>
       <div className="chart-head">
         <div className="fig-k">
           price, {quote?.symbol ?? "quote"} per {meta.symbol ?? "coin"}
-          {trades !== undefined && <span className="chart-count"> · {trades} {trades === 1 ? "trade" : "trades"} on chain{swaps.data && !swaps.data.complete ? `, since block ${swaps.data.fromBlock.toString()}` : ""}</span>}
+          {trades !== undefined && (
+            <span className="chart-count">
+              {" "}· {swaps.data && !swaps.data.complete ? `${trades} ${trades === 1 ? "trade" : "trades"} since block ${swaps.data.fromBlock.toString()}` : `${trades} ${trades === 1 ? "trade" : "trades"} on chain`}
+              {swaps.data?.interpolated ? ", times between anchors estimated" : ""}
+            </span>
+          )}
         </div>
         {live && (
           <div className="chart-tabs" role="tablist">

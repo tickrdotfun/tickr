@@ -28,6 +28,7 @@ type Deployments = {
   genesisTicker?: string;
   genesisPool?: string;
   chartGuardHook?: string;
+  v4Quoter?: string;
 };
 
 const d = deployments as Deployments;
@@ -72,6 +73,8 @@ export const ADDRESSES = {
   usdg: pick(d.usdg, process.env.NEXT_PUBLIC_USDG, "0x5fc5360D0400A0Fd4f2af552ADD042D716F1d168"),
   weth: pick(d.weth, process.env.NEXT_PUBLIC_WETH, "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73"),
   v3Factory: pick(d.v3Factory, process.env.NEXT_PUBLIC_V3_FACTORY, "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA"),
+  /** Uniswap's v4 quoter, for executable quotes of a buy paid in the quote asset; zero where none is wired, and the site estimates */
+  v4Quoter: pick(d.v4Quoter, process.env.NEXT_PUBLIC_V4_QUOTER),
 } as const;
 
 export const START_BLOCK: bigint = BigInt(

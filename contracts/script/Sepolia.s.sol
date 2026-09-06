@@ -162,9 +162,11 @@ contract Sepolia is Script, DeployStack {
         vm.serializeAddress(j, "coinQuoteLauncher", address(s.coinQuote));
         vm.serializeAddress(j, "stockQuoteLauncher", address(s.stockQuote));
         vm.serializeAddress(j, "marketQuoteLauncher", marketQuotes ? address(s.marketQuote) : address(0)); // zero hides the mode on the site
+        vm.serializeAddress(j, "marketQuoteLauncherDeployed", address(s.marketQuote)); // the contract exists either way: ownership is accepted on it too
         vm.serializeAddress(j, "v3Factory", SEP_V3_FACTORY);
         vm.serializeAddress(j, "zapRouter", address(s.zap));
         vm.serializeAddress(j, "poolManager", SEP_POOL_MANAGER);
+        vm.serializeAddress(j, "v4Quoter", address(0)); // no quoter wired on the testnet: the site falls back to its own estimate
         vm.serializeAddress(j, "positionManager", SEP_POSITION_MANAGER);
         vm.serializeAddress(j, "permit2", PERMIT2);
         vm.serializeAddress(j, "usdg", address(usdg));

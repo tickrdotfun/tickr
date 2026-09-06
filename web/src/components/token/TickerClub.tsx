@@ -78,6 +78,15 @@ export function TickerClub({ d }: { d: TokenData }) {
                 )}
               </dd>
             </div>
+            {(c.historyPartial || c.historyOlder) && (
+              <div className="detail-row">
+                <dt>earlier windows</dt>
+                <dd className="text-dim">
+                  {c.historyPartial ? "some windows could not be read just now. " : ""}
+                  {c.historyOlder ? "windows older than sixty are still claimable on the contract, with claimClub." : ""}
+                </dd>
+              </div>
+            )}
             {c.claimableByEpoch.map((e) => (
               <div key={e.epoch.toString()} className="detail-row detail-row-action">
                 <dt>still to claim, window {e.epoch.toString()}</dt>

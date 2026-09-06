@@ -7,7 +7,8 @@ import { FactoryAbi, TickerLauncherAbi } from "@/lib/abis";
 import { poolManagerAbi as PoolManagerAbi, v3FactoryAbi, v3PoolAbi } from "@/lib/extraAbis";
 import { ADDRESSES, ZERO, isZero, sameAddr } from "@/lib/addresses";
 import { FEE_TIERS, V3_FEES, ethUsdgKey, idOf, keyOf, liquiditySlot, v3Hop, v4Hop, wrapHop, type Hop, type V4Key } from "@/lib/route";
-import { previewZapOnce } from "@/hooks/useZap";
+import { previewZapOnce, previewZapSellOnce } from "@/hooks/useZap";
+import { reverseRoute } from "@/lib/route";
 
 /** The trade size routes are compared at when the box is still empty. */
 const DEFAULT_PROBE_WEI = 10_000_000_000_000_000n; // 0.01 ETH
@@ -28,13 +29,15 @@ export type ZapRoute = {
  * a pool's liquidity number says nothing about the price it gives for a size, since liquidity can sit far from
  * the price. The previous route stays on screen while a new size is quoted.
  */
-export function useZapRoute(token?: Address, pairToken?: Address, probeWei?: bigint, from?: Address) {
+export function useZapRoute(token?: Address, pairToken?: Address, probeWei?: bigint, from?: Address, side: "buy" | "sell" = "buy", sellAmount?: bigint) {
   const client = usePublicClient();
   const enabled = !!client && !!token && !!pairToken && !isZero(ADDRESSES.zapRouter);
   const probe = probeWei && probeWei > 0n ? probeWei : DEFAULT_PROBE_WEI;
+  // a sell is compared at the coins being sold, in its own direction; without an amount or a wallet the buy probe stands in
+  const sellProbe = side === "sell" && sellAmount && sellAmount > 0n && from ? sellAmount : undefined;
 
   return useQuery({
-    queryKey: ["zapRoute", token, pairToken, probe.toString(), from],
+    queryKey: ["zapRoute", token, pairToken, probe.toString(), from, sellProbe?.toString() ?? ""],
     enabled,
     staleTime: 60_000,
     placeholderData: keepPreviousData,
@@ -43,10 +46,27 @@ export function useZapRoute(token?: Address, pairToken?: Address, probeWei?: big
       const own = v4Hop(await ownPoolKey(client, token));
       const toQuote = await routesToAsset(client, pairToken);
       if (!toQuote || toQuote.paths.length === 0) return { path: null, own, label: "no route from ETH" };
-      const path = toQuote.paths.length === 1 ? toQuote.paths[0] : await bestByQuote(client, token, own, toQuote.paths, probe, from);
+      let path: Hop[];
+      if (toQuote.paths.length === 1) path = toQuote.paths[0];
+      else if (sellProbe && from) path = await bestBySellQuote(client, token, own, toQuote.paths, sellProbe, from);
+      else path = await bestByQuote(client, token, own, toQuote.paths, probe, from);
       return { path: [...path, own], own, label: `${toQuote.label} → coin` };
     },
   });
+}
+
+/** Among several ways out to ETH, the one that pays the most ETH for these coins, quoted for real as a sell. */
+async function bestBySellQuote(client: Client, token: Address, own: Hop, paths: Hop[][], amountIn: bigint, from: Address): Promise<Hop[]> {
+  const quotes = await Promise.all(paths.map((p) => previewZapSellOnce(client, token, reverseRoute([...p, own]), amountIn, from, ZERO).catch(() => null)));
+  let best = -1;
+  let bestOut = -1n;
+  quotes.forEach((q, i) => {
+    if (q && q.amountOut > bestOut) {
+      bestOut = q.amountOut;
+      best = i;
+    }
+  });
+  return best >= 0 ? paths[best] : paths[0];
 }
 
 /**
@@ -125,15 +145,16 @@ async function routesToAsset(client: Client, pair: Address): Promise<{ paths: Ho
     const l = r.result as bigint;
     if (l > 0n) ways.push({ hop: v3Hop(pools[i]), l });
   });
-  if (ways.length) return { paths: ways.sort((a, b) => (b.l > a.l ? 1 : b.l < a.l ? -1 : 0)).map((w) => [w.hop]), label: "ETH → asset" };
-  // no ETH market: a v3 pool against USDG, reached through the canonical ETH/USDG pool
-  if (isZero(ADDRESSES.v3Factory)) return null;
+  const direct = ways.sort((a, b) => (b.l > a.l ? 1 : b.l < a.l ? -1 : 0)).map((w) => [w.hop]);
+  // the ways through USDG are candidates too, quoted against the direct ones: a v3 pool against USDG, reached
+  // through the canonical ETH/USDG pool. only when there is no ETH pool at all are they the only ways
+  if (isZero(ADDRESSES.v3Factory)) return direct.length ? { paths: direct, label: "ETH → asset" } : null;
   const usdgPools = await client.multicall({
     contracts: V3_FEES.map((fee) => ({ abi: v3FactoryAbi, address: ADDRESSES.v3Factory, functionName: "getPool", args: [ADDRESSES.usdg, pair, fee] }) as const),
     allowFailure: true,
   });
   const up = usdgPools.map((r) => (r.status === "success" ? (r.result as Address) : ZERO)).filter((a) => !isZero(a));
-  if (up.length === 0) return null;
+  if (up.length === 0) return direct.length ? { paths: direct, label: "ETH → asset" } : null;
   const upLiq = await client.multicall({ contracts: up.map((a) => ({ abi: v3PoolAbi, address: a, functionName: "liquidity" }) as const), allowFailure: true });
   const viaUsdg: { pool: Address; l: bigint }[] = [];
   upLiq.forEach((r, i) => {
@@ -141,6 +162,8 @@ async function routesToAsset(client: Client, pair: Address): Promise<{ paths: Ho
     const l = r.result as bigint;
     if (l > 0n) viaUsdg.push({ pool: up[i], l });
   });
-  if (viaUsdg.length === 0) return null;
-  return { paths: viaUsdg.sort((a, b) => (b.l > a.l ? 1 : b.l < a.l ? -1 : 0)).map((w) => [v4Hop(ethUsdgKey()), v3Hop(w.pool)]), label: "ETH → USDG → asset" };
+  const viaPaths = viaUsdg.sort((a, b) => (b.l > a.l ? 1 : b.l < a.l ? -1 : 0)).map((w) => [v4Hop(ethUsdgKey()), v3Hop(w.pool)]);
+  if (direct.length === 0 && viaPaths.length === 0) return null;
+  if (direct.length === 0) return { paths: viaPaths, label: "ETH → USDG → asset" };
+  return { paths: [...direct, ...viaPaths], label: viaPaths.length ? "ETH → asset, or through USDG" : "ETH → asset" };
 }

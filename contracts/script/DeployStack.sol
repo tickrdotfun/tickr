@@ -38,6 +38,8 @@ abstract contract DeployStack {
 
     // Robinhood Chain (4663) canonical addresses, verified live against the chain.
     address internal constant RH_POOL_MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
+    /// @dev Uniswap's v4 quoter on Robinhood Chain: the site asks it for executable quotes; nothing on chain depends on it.
+    address internal constant RH_V4_QUOTER = 0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94;
     address internal constant RH_POSITION_MANAGER = 0x58daec3116aae6D93017bAAea7749052E8a04fA7;
     address internal constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     address internal constant RH_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;

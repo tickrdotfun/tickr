@@ -128,6 +128,8 @@ contract BuybackTreasury is ReentrancyGuard {
 
     /// @notice The ticker launcher the treasury is bound to; zero until the first `collect` or `buy` after wiring.
     address public launcher;
+    /// @notice When ETH was last turned into dollars; the next conversion waits `MIN_INTERVAL` from here.
+    uint256 public lastEthAt;
 
     /// @notice When the next buy may happen; zero until the first one.
     function nextBuyAt() public view returns (uint256) {
@@ -140,7 +142,7 @@ contract BuybackTreasury is ReentrancyGuard {
         if (earmarkedUsdg == 0) return (0, 0);
         (address tickr,) = official();
         if (tickr == address(0)) return (0, 0);
-        (,, minTickrOut, usdgIn,) = _sizeBuy(tickr);
+        (,, minTickrOut, usdgIn,,) = _sizeBuy(tickr);
     }
 
     // ---------------------------------------------------------------- collect
@@ -169,8 +171,13 @@ contract BuybackTreasury is ReentrancyGuard {
         uint256 eth = address(this).balance;
         if (eth > 0) {
             PoolKey memory key = _ethUsdgKey();
-            (uint256 ethIn, uint256 minOut) = _bounded(key, true, eth, 0, 0);
-            if (ethIn > 0) seeder.swapExactIn{value: ethIn}(key, true, ethIn, minOut, address(this));
+            (uint256 ethIn, uint256 minOut, uint160 limit) = _bounded(key, true, eth, 0, 0);
+            // the pool stops at the bound; ETH it did not take comes back and waits for the next collect. one conversion
+            // per interval, like a buy, so a caller cannot run collect again and again against a price of their making
+            if (ethIn > 0 && (lastEthAt == 0 || block.timestamp >= lastEthAt + MIN_INTERVAL)) {
+                seeder.swapExactInBounded{value: ethIn}(key, true, ethIn, minOut, address(this), limit);
+                lastEthAt = block.timestamp;
+            }
         }
         uint256 have = usdg.balanceOf(address(this));
         usdgTotal = have - earmarkedUsdg;
@@ -190,7 +197,7 @@ contract BuybackTreasury is ReentrancyGuard {
         _launcher();
         (address tickr, address fun) = official();
         if (tickr == address(0)) revert NotYetLaunched();
-        (PoolKey memory key, bool funIs0, uint256 minOut, uint256 sized,) = _sizeBuy(tickr);
+        (PoolKey memory key, bool funIs0, uint256 minOut, uint256 sized,, uint160 limit) = _sizeBuy(tickr);
         usdgIn = sized;
         if (usdgIn == 0) revert NothingToBuy();
         // FUN that club sweeps paid straight to the treasury is revenue waiting for `collect`, not part of this buy
@@ -199,7 +206,8 @@ contract BuybackTreasury is ReentrancyGuard {
         usdg.forceApprove(fun, usdgIn);
         ITickerToken(fun).mint(usdgIn, address(this));
         IERC20(fun).forceApprove(address(seeder), usdgIn);
-        tickrOut = seeder.swapExactIn(key, funIs0, usdgIn, minOut, DEAD);
+        // the pool stops at the bound whatever its liquidity turns out to be; FUN it did not take comes back below
+        tickrOut = seeder.swapExactInBounded(key, funIs0, usdgIn, minOut, DEAD, limit);
         earmarkedUsdg -= usdgIn;
         // FUN the pool did not take comes back as dollars and stays earmarked
         uint256 left = IERC20(fun).balanceOf(address(this)) - funBefore;
@@ -225,29 +233,29 @@ contract BuybackTreasury is ReentrancyGuard {
     /// @dev The next buy, sized against TICKR's pool. Before the first trade the launch position is not yet in range,
     /// so the pool reports no liquidity at the price; the position's own liquidity and its edge stand in, which
     /// is exactly what the swap meets once the price reaches it.
-    function _sizeBuy(address tickr) internal view returns (PoolKey memory key, bool funIs0, uint256 minOut, uint256 usdgIn, LaunchedToken memory l) {
+    function _sizeBuy(address tickr) internal view returns (PoolKey memory key, bool funIs0, uint256 minOut, uint256 usdgIn, LaunchedToken memory l, uint160 limit) {
         l = factory.getLaunchedToken(tickr);
         key = factory.poolKeyOf(tickr);
         funIs0 = Currency.unwrap(key.currency0) != tickr;
         uint160 edge = funIs0 ? TickMath.getSqrtPriceAtTick(l.tickUpper) : TickMath.getSqrtPriceAtTick(l.tickLower);
-        (usdgIn, minOut) = _bounded(key, funIs0, _tranche(), l.liquidity, edge);
+        (usdgIn, minOut, limit) = _bounded(key, funIs0, _tranche(), l.liquidity, edge);
     }
 
     function _ethUsdgKey() internal view returns (PoolKey memory) {
         return PoolKey(Currency.wrap(address(0)), Currency.wrap(address(usdg)), ETH_USDG_FEE, ETH_USDG_TICK_SPACING, IHooks(address(0)));
     }
 
-    /// @dev The most of `available` that moves `key`'s price by no more than MAX_IMPACT_BPS, and the least the swap
-    /// must return for it, priced where the move ends. Liquidity is taken as constant across the move: exact for a
-    /// launch position, and a floor otherwise, since a thinner range past the bound only makes the real swap fall
-    /// short of `minOut` and revert rather than overpay.
+    /// @dev The most of `available` that moves `key`'s price by no more than MAX_IMPACT_BPS at the liquidity in range
+    /// now, the least the swap must return for it, priced where the move ends, and that end itself as the swap's own
+    /// price limit. The limit is what makes the bound hold whatever the liquidity turns out to be: a thinner range past
+    /// it stops the swap at the bound with the rest of the input refunded, a thicker one just makes the buy cheaper.
     /// @param fallbackLiquidity liquidity waiting past `edge` when the pool has none at its price: a launch position
     /// before its first trade; zero when there is no such thing
     /// @param edge the sqrt price where that liquidity begins, in the direction of the trade
     function _bounded(PoolKey memory key, bool zeroForOne, uint256 available, uint128 fallbackLiquidity, uint160 edge)
         internal
         view
-        returns (uint256 amountIn, uint256 minOut)
+        returns (uint256 amountIn, uint256 minOut, uint160 limit)
     {
         IPoolManager pm = seeder.poolManager();
         (uint160 s0,,,) = pm.getSlot0(key.toId());
@@ -260,15 +268,16 @@ contract BuybackTreasury is ReentrancyGuard {
                 liquidity = fallbackLiquidity;
             }
         }
-        if (s0 == 0 || liquidity == 0 || available == 0) return (0, 0);
+        if (s0 == 0 || liquidity == 0 || available == 0) return (0, 0, 0);
         // the pool's price is currency1 per currency0: it falls when currency0 goes in, rises when currency1 does
         uint160 s1 = zeroForOne ? PriceMath.scaleSqrtPrice(s0, BPS, BPS + MAX_IMPACT_BPS) : PriceMath.scaleSqrtPrice(s0, BPS + MAX_IMPACT_BPS, BPS);
+        limit = s1;
         uint256 net = zeroForOne
             ? FullMath.mulDiv(FullMath.mulDiv(liquidity, FixedPoint96.Q96, s1), s0 - s1, s0) // L * (s0 - s1) * Q96 / (s0 * s1)
             : FullMath.mulDiv(liquidity, s1 - s0, FixedPoint96.Q96); // L * (s1 - s0) / Q96
         uint256 gross = FullMath.mulDiv(net, PIPS, PIPS - key.fee);
         amountIn = gross < available ? gross : available;
-        if (amountIn == 0) return (0, 0);
+        if (amountIn == 0) return (0, 0, 0);
         uint256 netIn = FullMath.mulDiv(amountIn, PIPS - key.fee, PIPS);
         minOut = zeroForOne
             ? FullMath.mulDiv(FullMath.mulDiv(netIn, s1, FixedPoint96.Q96), s1, FixedPoint96.Q96) // at price s1^2 / Q96^2

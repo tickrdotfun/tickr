@@ -4,8 +4,13 @@
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
-    "run-once": "wrangler dev --test-scheduled"
+    "run-once": "wrangler dev --test-scheduled",
+    "typecheck": "node ../../web/node_modules/typescript/bin/tsc -p tsconfig.json"
   },
-  "dependencies": { "viem": "^2.56.3" },
-  "devDependencies": { "wrangler": "^4.129.0" }
+  "dependencies": {
+    "viem": "^2.56.3"
+  },
+  "devDependencies": {
+    "wrangler": "^4.129.0"
+  }
 }

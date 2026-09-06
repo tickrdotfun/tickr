@@ -141,8 +141,8 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
         //    window sees the real buyer; ETH and anything a v3 pool or a wrapper hands out passes through the router
         bool direct = p.tokenOut != address(0) && p.path[p.path.length - 1].kind == HOP_V4;
         uint256 before = direct ? IERC20(p.tokenOut).balanceOf(recipient) : 0;
-        (address cur, uint256 amt) = _walk(p.path, p.token, p.amountIn, msg.sender, direct ? recipient : address(0));
-        quoteOut = 0;
+        (address cur, uint256 amt,, uint256 outOfPool) = _walkFull(p.path, p.token, p.amountIn, msg.sender, direct ? recipient : address(0));
+        quoteOut = outOfPool; // the quote the coin's own pool paid out, before any further hop
         if (cur == address(weth) && p.tokenOut == address(0)) {
             weth.withdraw(amt);
             cur = address(0);
@@ -187,12 +187,12 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
         //    own rules, the snipe tax and the launch caps, see the buyer and never the router. `minTokensOut` is an
         //    absolute minimum on what actually arrived
         uint256 before = IERC20(p.token).balanceOf(recipient);
-        (address c,) = _walk(p.path, p.tokenIn, amountIn, payer, recipient);
+        (address c,, uint256 intoPool,) = _walkFull(p.path, p.tokenIn, amountIn, payer, recipient);
         if (c != p.token) revert BadPath();
         uint256 a = IERC20(p.token).balanceOf(recipient) - before;
         if (a < p.minTokensOut) revert Slippage();
         tokensOut = a;
-        quoteOut = 0;
+        quoteOut = intoPool; // the quote that entered the coin's own pool, for the preview's breakdown
         l;
         emit Zapped(p.token, recipient, p.tokenIn, amountIn, quoteOut, tokensOut);
     }
@@ -213,6 +213,15 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
     /// each v3 hop is a direct pool call. `payer` settles the first run's ERC-20 input from their own balance when
     /// set; `takeTo` receives the last run's output directly when set. Both are the zero address for the router itself.
     function _walk(Hop[] calldata path, address cur, uint256 amt, address payer, address takeTo) internal returns (address, uint256) {
+        (address c, uint256 a,,) = _walkFull(path, cur, amt, payer, takeTo);
+        return (c, a);
+    }
+
+    /// @dev `_walk` that also reports what entered the last hop and what left the first, for the previews.
+    function _walkFull(Hop[] calldata path, address cur, uint256 amt, address payer, address takeTo)
+        internal
+        returns (address, uint256, uint256 lastIn, uint256 firstOut)
+    {
         uint256 i;
         while (i < path.length) {
             if (path[i].kind == HOP_V4) {
@@ -228,23 +237,30 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
                     cur = address(0);
                 }
                 bytes memory res = poolManager.unlock(abi.encode(cur, amt, run, i == 0 ? payer : address(0), j == path.length ? takeTo : address(0)));
-                (cur, amt) = abi.decode(res, (address, uint256));
+                (uint256 runLastIn, uint256 runFirstOut) = (0, 0);
+                (cur, amt, runLastIn, runFirstOut) = abi.decode(res, (address, uint256, uint256, uint256));
+                if (i == 0) firstOut = runFirstOut;
+                if (j == path.length) lastIn = runLastIn;
                 i = j;
             } else if (path[i].kind == HOP_V3) {
                 if (cur == address(0)) {
                     weth.deposit{value: amt}();
                     cur = address(weth);
                 }
+                if (i + 1 == path.length) lastIn = amt;
                 (cur, amt) = _swapV3(path[i].pool, cur, amt);
+                if (i == 0) firstOut = amt;
                 i++;
             } else if (path[i].kind == HOP_WRAP) {
+                if (i + 1 == path.length) lastIn = amt;
                 (cur, amt) = _wrapHop(path[i].pool, cur, amt);
+                if (i == 0) firstOut = amt;
                 i++;
             } else {
                 revert BadPath();
             }
         }
-        return (cur, amt);
+        return (cur, amt, lastIn, firstOut);
     }
 
     /// @dev One for one either way, so the amount never changes: holding the counter mints the wrapper, holding
@@ -306,6 +322,8 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
         (address cur, uint256 amt, PoolKey[] memory path, address payer, address takeTo) = abi.decode(data, (address, uint256, PoolKey[], address, address));
         Currency cIn = Currency.wrap(cur);
         uint256 amountIn = amt;
+        uint256 firstOut;
+        uint256 lastIn;
         for (uint256 i; i < path.length; i++) {
             PoolKey memory k = path[i];
             bool zeroForOne;
@@ -325,8 +343,10 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
             (int128 dIn, int128 dOut) = zeroForOne ? (d.amount0(), d.amount1()) : (d.amount1(), d.amount0());
             // hitting the price limit means the pool ran dry; a partial hop would strand the rest inside the router
             if (uint256(uint128(-dIn)) != amt) revert InsufficientLiquidity();
+            if (i + 1 == path.length) lastIn = amt;
             cur = Currency.unwrap(zeroForOne ? k.currency1 : k.currency0);
             amt = uint256(uint128(dOut));
+            if (i == 0) firstOut = amt;
         }
         // one settlement for the run's input and one take for its output: the hops between net out inside the pool
         // manager, so no intermediate currency ever leaves it and nothing is ever counted against the router
@@ -339,7 +359,7 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
             poolManager.settle();
         }
         poolManager.take(Currency.wrap(cur), takeTo == address(0) ? address(this) : takeTo, amt);
-        return abi.encode(cur, amt);
+        return abi.encode(cur, amt, lastIn, firstOut);
     }
 
     function _sendNative(address to, uint256 amount) internal {

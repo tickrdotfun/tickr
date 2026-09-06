@@ -85,18 +85,30 @@ export function useTickerClub(ticker?: Address, member?: Address) {
       // what the coin on this page could claim from the window that just closed, and from the closed windows before
       // it: a pot is claimable for as long as it has not been taken, so the last twelve are asked
       let claimable = 0n;
+      let historyPartial = false;
+      let historyOlder = false;
       const claimableByEpoch: { epoch: bigint; amount: bigint }[] = [];
       if (member && last !== undefined) {
-        const first = last >= 11n ? last - 11n : 0n;
+        // from the window the coin launched in, so nothing it earned is ever out of reach; capped at sixty windows
+        const born = await client.readContract({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "getLaunchedToken", args: [member] }).catch(() => undefined);
+        const bornEpoch = born && epochLen > 0n ? BigInt(born.launchedAt) / epochLen : 0n;
+        const first = last - bornEpoch > 59n ? last - 59n : bornEpoch;
         const epochs: bigint[] = [];
         for (let e = first; e <= last; e++) epochs.push(e);
         const vols = await client.multicall({ contracts: epochs.map((e) => ({ ...launcher, functionName: "volumeOf", args: [member, e] }) as const), allowFailure: true });
         const asked = epochs.filter((_, i) => vols[i].status === "success" && (vols[i].result as bigint) > 0n);
-        const amounts = await Promise.all(asked.map((e) => (client.readContract({ ...launcher, functionName: "claimable", args: [member, pairs, e] }).catch(() => 0n)) as Promise<bigint>));
+        const amounts = await Promise.all(asked.map((e) => (client.readContract({ ...launcher, functionName: "claimable", args: [member, pairs, e] }).catch(() => undefined)) as Promise<bigint | undefined>));
         asked.forEach((e, i) => {
-          if (e === last) claimable = amounts[i];
-          else if (amounts[i] > 0n) claimableByEpoch.push({ epoch: e, amount: amounts[i] });
+          const a = amounts[i];
+          if (a === undefined) {
+            historyPartial = true; // a window that could not be read is not a window with nothing owed
+            return;
+          }
+          if (e === last) claimable = a;
+          else if (a > 0n) claimableByEpoch.push({ epoch: e, amount: a });
         });
+        if (vols.some((v) => v.status !== "success")) historyPartial = true;
+        if (bornEpoch < first) historyOlder = true; // windows before the sixty asked are still claimable on the contract
       }
       return {
         epoch,
@@ -112,6 +124,8 @@ export function useTickerClub(ticker?: Address, member?: Address) {
         potLast: rows.reduce((s, r) => s + r.lastPot, 0n),
         claimable,
         claimableByEpoch,
+        historyPartial,
+        historyOlder,
       };
     },
   });

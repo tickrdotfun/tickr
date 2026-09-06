@@ -19,7 +19,17 @@ interface ILaunchSeeder {
     function seedDollarPool(address wrapper) external payable;
 
     /// @notice One pool, exact input. Send value for a native input; approve for an ERC-20 input.
+    /// A fill the pool cuts short, because it ran dry, must still deliver `minOut` or it reverts whole and nothing moves.
     function swapExactIn(PoolKey calldata key, bool zeroForOne, uint256 amountIn, uint256 minOut, address recipient)
+        external
+        payable
+        returns (uint256 amountOut);
+
+    /// @notice `swapExactIn` that stops at `sqrtPriceLimitX96`: the pool takes input only until its price reaches the
+    /// limit, and whatever it did not take goes back to the caller. Calling it is consent to a fill that stops short:
+    /// `minOut` is the least for all of `amountIn` and is held pro rata on the part the pool took, so it is a price,
+    /// where `swapExactIn`'s `minOut` is a quantity that a cut-short fill cannot satisfy.
+    function swapExactInBounded(PoolKey calldata key, bool zeroForOne, uint256 amountIn, uint256 minOut, address recipient, uint160 sqrtPriceLimitX96)
         external
         payable
         returns (uint256 amountOut);

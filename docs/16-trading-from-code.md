@@ -9,6 +9,9 @@ Every tickr pool is a Uniswap v4 pool with no hook. Uniswap's Universal Router, 
 ```solidity
 // LaunchSeeder: exact input on one pool. value = amountIn for a native input; approve the seeder for an ERC-20 input.
 function swapExactIn(PoolKey key, bool zeroForOne, uint256 amountIn, uint256 minOut, address recipient) payable returns (uint256 amountOut); // amountOut is what `recipient` received: for a coin inside its window, net of the snipe tax
+function swapExactInBounded(PoolKey key, bool zeroForOne, uint256 amountIn, uint256 minOut, address recipient, uint160 sqrtPriceLimitX96) payable returns (uint256 amountOut); // the same, stopping at a price: the pool takes input only until it reaches the limit, the rest comes back
+// two minimums: `swapExactIn`'s is a quantity, and a fill the pool cuts short because it ran dry must still deliver it or the call reverts whole.
+// `swapExactInBounded`'s is a price: calling it is consent to a fill that stops at the limit, and its `minOut` is held pro rata on the part the pool took, with the rest refunded
 ```
 
 A buy is `zeroForOne = true` when the pair is currency0, which is always the case for ETH, since address zero sorts first.

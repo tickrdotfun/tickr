@@ -5,6 +5,7 @@ import { useBalance, useBlockNumber, useReadContract, useReadContracts } from "w
 import { erc20Abi } from "viem";
 import type { TokenData } from "@/hooks/useTokenData";
 import { useTx, type WriteFn } from "@/hooks/useTx";
+import { useQuoterQuote } from "@/hooks/useQuoterQuote";
 import { useZapPreview, useZapSellPreview, zapParams, zapSellParams } from "@/hooks/useZap";
 import { useZapRoute } from "@/hooks/useZapRoute";
 import { TokenAbi, ZapRouterAbi } from "@/lib/abis";
@@ -51,7 +52,7 @@ export function TradePanel({ d }: { d: TokenData }) {
 
   // the route is chosen for the size being typed: several markets can reach the quote asset, and the one that
   // pays best for this trade is not always the one with the biggest liquidity number
-  const route = useZapRoute(launch?.token, launch?.pairToken, side === "buy" ? amtForRoute : undefined, user);
+  const route = useZapRoute(launch?.token, launch?.pairToken, side === "buy" ? amtForRoute : undefined, user, side, side === "sell" ? safeParseUnits(amount, td) : undefined);
   const own = route.data?.own;
   const ethPath = route.data?.path ?? null;
   // ETH is the default way in when a route exists; the quote asset is always an option on an ERC-20 pair
@@ -71,8 +72,7 @@ export function TradePanel({ d }: { d: TokenData }) {
     const id = setInterval(tick, 1_000);
     return () => clearInterval(id);
   }, []);
-  // asked for ten minutes after launch, so a slow chain cannot outlast the reads; the guard itself ends by block number
-  const fresh = now > 0 && !!launch && now - Number(launch.launchedAt) < 600;
+  const fresh = now > 0 && !!launch && now - Number(launch.launchedAt) < 30;
   const snipe = useReadContract({
     abi: TokenAbi,
     address: launch?.token,
@@ -81,24 +81,27 @@ export function TradePanel({ d }: { d: TokenData }) {
     query: { enabled: fresh && !!launch, refetchInterval: 1_000 },
   });
   const snipeBps = fresh ? Number(snipe.data ?? 0n) : 0;
-  // launch protection, in blocks: the coin says where this wallet stands; asked only while a launch is fresh
-  const blockNo = useBlockNumber({ watch: fresh, query: { enabled: fresh } });
+  // launch protection, in blocks: the end block is a constant of the coin, the current block is watched until it is
+  // past, and the wallet's own room is asked every second while the window is open. no clock decides any of it
+  const endsQ = useReadContract({ abi: TokenAbi, address: launch?.token, functionName: "protectionEndsAtBlock", query: { enabled: !!launch, staleTime: Infinity } });
+  const endsAt = endsQ.data;
+  const blockNo = useBlockNumber({
+    query: { enabled: !!launch && endsAt !== undefined, refetchInterval: (q) => (endsAt !== undefined && q.state.data !== undefined && q.state.data >= endsAt ? false : 1_000) },
+  });
+  const blockNow = blockNo.data;
+  const guarded = endsAt !== undefined && blockNow !== undefined && blockNow < endsAt;
   const guard = useReadContracts({
     contracts: [
-      { abi: TokenAbi, address: launch?.token, functionName: "protectionEndsAtBlock" },
       { abi: TokenAbi, address: launch?.token, functionName: "launchedBlock" },
       { abi: TokenAbi, address: launch?.token, functionName: "remainingBuy", args: [user ?? ZERO] },
       { abi: TokenAbi, address: launch?.token, functionName: "remainingHold", args: [user ?? ZERO] },
     ],
-    query: { enabled: fresh && !!launch, refetchInterval: 1_000 },
+    query: { enabled: guarded && !!launch, refetchInterval: 1_000 },
   });
   const g = (i: number) => (guard.data?.[i]?.status === "success" ? (guard.data[i].result as bigint) : undefined);
-  const endsAt = g(0);
-  const launchedBlock = g(1);
-  const remainingBuy = g(2);
-  const remainingHold = g(3);
-  const blockNow = blockNo.data;
-  const guarded = fresh && endsAt !== undefined && blockNow !== undefined && blockNow < endsAt;
+  const launchedBlock = g(0);
+  const remainingBuy = g(1);
+  const remainingHold = g(2);
   const launchBlock = guarded && launchedBlock !== undefined && blockNow === launchedBlock;
   const unlimited = (v?: bigint) => v === undefined || v === (2n ** 256n - 1n);
   const allowance = guarded && !unlimited(remainingBuy) && !unlimited(remainingHold) ? (remainingBuy! < remainingHold! ? remainingBuy! : remainingHold!) : undefined;
@@ -106,12 +109,17 @@ export function TradePanel({ d }: { d: TokenData }) {
   // buys: ETH through the route, or the quote through the one pool
   const buyPath = inEth ? (nativePair && own ? [own] : ethPath) : own ? [own] : null;
   const zp = useZapPreview(side === "buy" && inEth ? launch?.token : undefined, buyPath, side === "buy" && inEth ? amt : undefined, user);
+  // a buy paid in the quote asset goes straight through the coin's own pool: the quoter runs that swap across every
+  // position the pool has, where one is wired; the local arithmetic, exact for the pool's one launch position, stands in
+  const quoter = useQuoterQuote(side === "buy" && !inEth && pool.key ? pool.key : undefined, pool.key ? !pool.key.tokenIs0 : undefined, side === "buy" && !inEth ? amt : undefined);
   const localBuy = useMemo(() => {
     if (side !== "buy" || inEth || !amt || !launch || !pool.key || pool.liquidity === undefined || !pool.sqrtP) return undefined;
     return quoteExactIn({ amountIn: amt, liquidity: pool.liquidity, sqrtPriceX96: pool.sqrtP, feePips: Number(launch.poolFee), zeroForOne: !pool.key.tokenIs0 });
   }, [side, inEth, amt, launch, pool.key, pool.liquidity, pool.sqrtP]);
-  // the zap's preview already reports what the buyer keeps; a buy paid in the quote goes straight through the pool
-  const buyOut = inEth ? zp.data?.tokensOut : localBuy !== undefined && snipeBps > 0 ? localBuy - (localBuy * BigInt(snipeBps)) / 10_000n : localBuy;
+  const quotedBuy = quoter.data ?? localBuy;
+  const buyIsEstimate = side === "buy" && !inEth && quotedBuy !== undefined && !quoter.data;
+  // the zap's preview already reports what the buyer keeps; the quoter and the local arithmetic report the pool's count
+  const buyOut = inEth ? zp.data?.tokensOut : quotedBuy !== undefined && snipeBps > 0 ? quotedBuy - (quotedBuy * BigInt(snipeBps)) / 10_000n : quotedBuy;
 
   // sells: the own pool first, then the route backwards to ETH, or the quote straight out of the one pool
   const sellPath = inEth ? (nativePair && own ? [own] : ethPath ? reverseRoute(ethPath) : null) : own ? [own] : null;
@@ -286,6 +294,7 @@ export function TradePanel({ d }: { d: TokenData }) {
               <details className="trade-more">
                 <summary>breakdown</summary>
                 <Row k="Route" v={inEth ? (route.data?.label ?? "") : `${qs} → coin`} />
+                {!inEth && <Row k="Quote" v={buyIsEstimate ? "estimate from the pool's one position" : "the quoter, across every position"} />}
                 {inEth && !nativePair && <Row k={`Swapped to ${qs}`} v={zp.data ? `${fmtAmount(zp.data.quoteOut, qd)} ${qs}` : "-"} />}
                 <Row k="Pool fee" v={poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"} />
               </details>

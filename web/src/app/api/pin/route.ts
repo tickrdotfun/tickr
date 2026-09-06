@@ -47,33 +47,66 @@ function sameSite(req: Request): boolean {
 async function overBudget(req: Request): Promise<boolean> {
   const ip = (req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
   const now = Date.now();
+  // on Cloudflare the shared budget in the tokens Worker is the only counter that holds across instances. anything
+  // that goes wrong on the way to it, a missing binding, a failed fetch, an answer that is not an explicit yes,
+  // denies the upload: a budget that cannot be asked is a budget that is exhausted, never one that is unlimited
+  let cf: { env: Record<string, unknown> } | undefined;
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    const env = getCloudflareContext().env as {
-      NEXT_INC_CACHE_KV?: { get(k: string): Promise<string | null>; put(k: string, v: string, o?: { expirationTtl?: number }): Promise<void> };
-      PIN_BURST?: { limit(o: { key: string }): Promise<{ success: boolean }> };
-    };
-    // the hourly count is kept by one object per address in the tokens Worker: single-threaded, so twenty
-    // requests at once are twenty increments, not twenty reads of zero. the edge burst limit sits in front of it.
-    if (env.PIN_BURST && !(await env.PIN_BURST.limit({ key: ip })).success) return true;
-    const base = process.env.TOKENS_URL;
-    const secret = process.env.BUDGET_KEY;
-    // on Cloudflare the shared budget is the only counter that holds across instances: without it nothing is pinned
-    if (!base || !secret) return true;
-    const r = await fetch(`${base}budget?key=${encodeURIComponent(ip)}`, { headers: { "x-budget-key": secret } });
-    if (r.ok) {
-      const d = (await r.json()) as { allowed?: boolean };
-      return d.allowed === false;
-    }
-    return true; // a budget that cannot be asked is a budget that is exhausted, not one that is unlimited
+    cf = getCloudflareContext() as unknown as { env: Record<string, unknown> };
   } catch {
-    // not on Cloudflare: `next dev` on a laptop, where the per-process map below is the only counter there is
+    cf = undefined; // not on Cloudflare: `next dev` on a laptop, where the per-process map below is the only counter there is
+  }
+  // a production build that cannot reach its Cloudflare context is misconfigured, not a laptop: nothing is pinned
+  if (!cf && process.env.NODE_ENV === "production") return true;
+  if (cf) {
+    try {
+      const env = cf.env as {
+        PIN_BURST?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+      };
+      // the edge burst limit sits in front of the hourly count
+      if (env.PIN_BURST && !(await env.PIN_BURST.limit({ key: ip })).success) return true;
+      const base = process.env.TOKENS_URL;
+      const secret = process.env.BUDGET_KEY;
+      if (!base || !secret) return true;
+      const r = await fetch(`${base}budget?key=${encodeURIComponent(ip)}`, { headers: { "x-budget-key": secret } });
+      if (!r.ok) return true;
+      const d = (await r.json()) as { allowed?: unknown };
+      return d.allowed !== true;
+    } catch {
+      return true;
+    }
   }
   const recent = (hits.get(ip) ?? []).filter((t) => now - t < WINDOW_MS);
   recent.push(now);
   hits.set(ip, recent);
   if (hits.size > 5_000) hits.clear();
   return recent.length > PER_WINDOW;
+}
+
+/** The request body up to `max` bytes; undefined once it runs over, with the rest never read. */
+async function readCapped(req: Request, max: number): Promise<ArrayBuffer | undefined> {
+  const reader = req.body?.getReader();
+  if (!reader) return new ArrayBuffer(0);
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return undefined;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(new ArrayBuffer(size));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.byteLength;
+  }
+  return out.buffer as ArrayBuffer;
 }
 
 /** Which controls this deployment has, so an operator can check a deploy without uploading anything. */
@@ -112,7 +145,10 @@ export async function POST(req: Request) {
   const jwt = process.env.PINATA_JWT;
   if (!jwt) return NextResponse.json({ error: "pinning is not configured on this deployment yet. paste an image link instead." }, { status: 503 });
   try {
-    const form = await req.formData();
+    // the body is read with a byte count and cut off at the limit before any of it is parsed, whatever the header said
+    const body = await readCapped(req, MAX_BYTES + 64 * 1024);
+    if (!body) return NextResponse.json({ error: "up to 4 MB." }, { status: 413 });
+    const form = await new Request(req.url, { method: "POST", headers: req.headers, body }).formData();
     const file = form.get("file");
     const metadata = form.get("metadata");
     let image: string | undefined;

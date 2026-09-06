@@ -32,6 +32,7 @@ export function LaunchList() {
   const [q, setQ] = useState("");
   const market = useMarketData(window);
 
+  const partial = market.data?.partial ?? false;
   const rows = useMemo(() => {
     const all = market.data?.rows ?? [];
     const needle = q.trim().toLowerCase();
@@ -47,14 +48,16 @@ export function LaunchList() {
         if (a.marketCapUsd !== undefined && b.marketCapUsd !== undefined) return b.marketCapUsd - a.marketCapUsd;
         if (a.marketCapUsd !== undefined) return -1;
         if (b.marketCapUsd !== undefined) return 1;
-        return (b.marketCap ?? 0) - (a.marketCap ?? 0);
+        // two unpriced launches are in different units: newest first, no comparison pretended
+        return Number(b.createdBlock - a.createdBlock) || b.launch.index - a.launch.index;
       }
-      if (sort === "volume") return b.volumeUsd - a.volumeUsd || b.volumeQuote - a.volumeQuote;
-      if (sort === "buys") return Number(b.lastBuyBlock - a.lastBuyBlock) || b.buys - a.buys;
+      // with the swap history missing, volume and buys are unknown, not zero: fall back to newest
+      if (sort === "volume" && !partial) return b.volumeUsd - a.volumeUsd || b.volumeQuote - a.volumeQuote;
+      if (sort === "buys" && !partial) return Number(b.lastBuyBlock - a.lastBuyBlock) || b.buys - a.buys;
       return Number(b.createdBlock - a.createdBlock) || b.launch.index - a.launch.index;
     };
     return all.filter(match).sort(cmp);
-  }, [market.data, q, sort]);
+  }, [market.data, q, sort, partial]);
 
   if (!DEPLOYED) return <div className="text-muted">nothing to show until the factory is deployed.</div>;
   if (market.isLoading)
@@ -68,6 +71,7 @@ export function LaunchList() {
 
   return (
     <div>
+      {partial && <p className="detail-note detail-note-tight">the swap history did not load, so volume and buys are unknown right now; the list is newest first.</p>}
       <div className="grid-controls">
         <input className="grid-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="search name, ticker or address" aria-label="Search launches" />
         <div className="seg" role="group" aria-label="Sort">
@@ -109,7 +113,7 @@ export function LaunchList() {
       {rows.length > 0 && (
         <Section title="live" count={rows.length}>
           {rows.map((r) => (
-            <LaunchCard key={r.launch.token} r={r} window={window} />
+            <LaunchCard key={r.launch.token} r={r} window={window} partial={partial} />
           ))}
         </Section>
       )}
@@ -129,7 +133,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
   );
 }
 
-function LaunchCard({ r, window }: { r: Row; window: WindowKey }) {
+function LaunchCard({ r, window, partial }: { r: Row; window: WindowKey; partial: boolean }) {
   const mcap = r.marketCapUsd !== undefined ? fmtUsd(r.marketCapUsd) : r.marketCap !== undefined ? `${fmtNumber(r.marketCap, { sig: 3 })} ${r.quote.symbol}` : "-";
   const vol = r.volumeUsd > 0 ? fmtUsd(r.volumeUsd) : r.volumeQuote > 0 ? `${fmtNumber(r.volumeQuote, { sig: 3 })} ${r.quote.symbol}` : "-";
   return (
@@ -156,8 +160,8 @@ function LaunchCard({ r, window }: { r: Row; window: WindowKey }) {
           </span>
         </div>
         <div className="coin-foot num">
-          liquidity locked · {r.buys} buy{r.buys === 1 ? "" : "s"}
-          {window === "all" ? "" : ` in ${window}`}
+          liquidity locked · {partial ? "buys unknown" : `${r.buys} buy${r.buys === 1 ? "" : "s"}`}
+          {window === "all" || partial ? "" : ` in ${window}`}
           {r.burnedPct !== undefined && r.burnedPct > 0 ? ` · ${r.burnedPct.toFixed(2)}% burned` : ""}
         </div>
       </div>

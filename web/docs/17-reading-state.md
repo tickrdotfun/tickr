@@ -136,7 +136,8 @@ function buy() returns (uint256 usdgIn, uint256 tickrOut);
 event Collected(uint256 usdgTotal, uint256 toTeam, uint256 earmarked);
 event Forwarded(address indexed asset, uint256 amount);       // an unconvertible asset sent whole to the team
 event BoughtAndBurned(uint256 usdgIn, uint256 tickrOut, address indexed caller);
-// constants: BUYBACK_SHARE_BPS 8000, MAX_IMPACT_BPS 300, MIN_INTERVAL 10 minutes, MAX_TRANCHE_BPS 500
+// constants: BUYBACK_SHARE_BPS 5000, MAX_IMPACT_BPS 300, MIN_INTERVAL 10 minutes, MAX_TRANCHE_BPS 500
+// launcher(): the ticker launcher the treasury is bound to; zero until its first collect or buy
 ```
 
 ## The site's own endpoints

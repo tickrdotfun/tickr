@@ -157,14 +157,30 @@ export function useMarketData(window: WindowKey = "all") {
       const cutoffBlock = seconds === 0 ? START_BLOCK : bigMax(START_BLOCK, latest - BigInt(Math.ceil(seconds / blockTime)));
       const byPool = new Map<string, Launch>();
       for (const l of list) byPool.set(l.poolId.toLowerCase(), l);
-      // a log query the RPC refuses leaves a hole, and the hole is reported rather than shown as zero
+      // logs are read in bounded ranges, since the public RPC refuses a wide window; a range it still refuses leaves a
+      // hole, and the hole is reported rather than shown as zero
       let partial = false;
-      const swaps = await client
-        .getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: list.map((l) => l.poolId) }, fromBlock: cutoffBlock, toBlock: "latest" })
-        .catch(() => {
-          partial = true;
-          return [];
-        });
+      const chunked = async <T,>(read: (from: bigint, to: bigint) => Promise<T[]>, from: bigint, to: bigint): Promise<T[]> => {
+        const out: T[] = [];
+        const span = 50_000n;
+        const jobs: Promise<void>[] = [];
+        for (let a = from; a <= to; a += span) {
+          const b = a + span - 1n < to ? a + span - 1n : to;
+          jobs.push(
+            read(a, b).then(
+              (r) => {
+                out.push(...r);
+              },
+              () => {
+                partial = true;
+              },
+            ),
+          );
+        }
+        await Promise.all(jobs);
+        return out;
+      };
+      const swaps = await chunked((a, b) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: list.map((l) => l.poolId) }, fromBlock: a, toBlock: b }), cutoffBlock, latest);
       const vol = new Map<string, { quote: bigint; buys: number; lastBuy: bigint }>();
       for (const log of swaps) {
         const id = (log.args.id ?? "0x").toLowerCase();
@@ -183,12 +199,7 @@ export function useMarketData(window: WindowKey = "all") {
       }
 
       // what creators have been paid in the quote, from every collection the locker ever logged, priced like volume
-      const collections = await client
-        .getLogs({ address: ADDRESSES.launchLocker, event: FEES_COLLECTED, args: { token: list.map((l) => l.token) }, fromBlock: START_BLOCK, toBlock: "latest" })
-        .catch(() => {
-          partial = true;
-          return [];
-        });
+      const collections = await chunked((a, b) => client.getLogs({ address: ADDRESSES.launchLocker, event: FEES_COLLECTED, args: { token: list.map((l) => l.token) }, fromBlock: a, toBlock: b }), START_BLOCK, latest);
       const creatorQuoteBy = new Map<string, bigint>();
       for (const log of collections) {
         const t = (log.args.token ?? "0x").toLowerCase();

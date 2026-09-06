@@ -137,10 +137,11 @@ contract Token is ERC20 {
         return bought >= cap ? 0 : cap - bought;
     }
 
-    /// @notice How much more `wallet` may hold before the hold cap stops what it can receive, bought or sent, in coins. Same rules as above.
+    /// @notice How much more `wallet` may hold before the hold cap stops what it can receive, bought or sent, in coins.
+    /// Unlimited after the window and for the exempt set; in the launch block it says what a transfer may still bring,
+    /// since buys are closed there anyway (`remainingBuy` is zero then).
     function remainingHold(address wallet) public view returns (uint256) {
         if (block.number >= protectionEndsAtBlock() || _exempt(wallet)) return type(uint256).max;
-        if (block.number == launchedBlock) return 0;
         uint256 cap = (totalSupply() * HOLD_CAP_BPS) / 10_000;
         uint256 held = balanceOf(wallet);
         return held >= cap ? 0 : cap - held;
@@ -177,7 +178,7 @@ contract Token is ERC20 {
                         boughtInWindow[to] = bought;
                     }
                 }
-            } else if (protectedBlocks && !_exempt(to)) {
+            } else if (protectedBlocks && from != to && !_exempt(to)) {
                 uint256 held = balanceOf(to) + value;
                 if (held > (totalSupply() * HOLD_CAP_BPS) / 10_000) revert WalletCapExceeded(to, held, boughtInWindow[to]);
             }

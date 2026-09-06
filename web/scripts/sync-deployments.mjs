@@ -44,9 +44,28 @@ if (existsSync(src)) {
     // another chain's record would ship a site that does not know its own official coin
     const problems = [];
     if (origin !== "copied") problems.push(`the record was not read from ${src} (${origin})`);
-    if (record.chainId !== undefined && Number(record.chainId) !== Number(chainId)) problems.push(`the record is for chain ${record.chainId}, this build is for ${chainId}`);
+    if (record.chainId === undefined) problems.push("the record has no chainId");
+    else if (Number(record.chainId) !== Number(chainId)) problems.push(`the record is for chain ${record.chainId}, this build is for ${chainId}`);
     for (const k of ["buybackTreasury", "genesisToken", "genesisTicker"]) if (!record[k] || record[k] === ZERO) problems.push(`${k} is missing: run genesis and sync again`);
-    for (const [k, v] of Object.entries(record)) if (typeof v === "string" && v.startsWith("0x") && !/^0x[0-9a-fA-F]{40}$/.test(v) && !/^0x[0-9a-fA-F]{64}$/.test(v)) problems.push(`${k} is not an address: ${v}`);
+    // every field by name: the record is a fixed schema, and a field it does not know is a mistake
+    const ADDRESSES = new Set(["factory", "chartGuardHook", "feeEscrow", "launchLocker", "launchDeployer", "launchSeeder", "buybackVault", "buybackTreasury", "anchorRegistry", "launchAndBuyRouter", "tickerLauncher", "coinQuoteLauncher", "stockQuoteLauncher", "marketQuoteLauncher", "marketQuoteLauncherDeployed", "v3Factory", "zapRouter", "poolManager", "positionManager", "permit2", "usdg", "weth", "v4Quoter", "genesisToken", "genesisTicker", "stockAAPL", "stockF", "stockNVDA"]);
+    const HASHES = new Set(["genesisPool"]);
+    const NUMBERS = new Set(["chainId", "startBlock"]);
+    const BOOLEANS = new Set(["sepolia"]);
+    const isAddr = (v) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);
+    for (const [k, v] of Object.entries(record)) {
+      if (NUMBERS.has(k)) { if (!Number.isInteger(Number(v)) || Number(v) < 0) problems.push(`${k} is not a whole number: ${v}`); continue; }
+      if (HASHES.has(k)) { if (typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)) problems.push(`${k} is not a 32 byte hash: ${v}`); continue; }
+      if (BOOLEANS.has(k)) { if (typeof v !== "boolean") problems.push(`${k} is not a boolean: ${v}`); continue; }
+      if (ADDRESSES.has(k)) { if (!isAddr(v)) problems.push(`${k} is not an address: ${v}`); continue; }
+      problems.push(`${k} is not a field of the deployment record`);
+    }
+    if (record.sepolia === true) problems.push("the record is a Sepolia rehearsal record");
+    // the effective configuration is what the site reads: every override addresses.ts knows must be well formed too
+    const OVERRIDES = ["NEXT_PUBLIC_FACTORY", "NEXT_PUBLIC_LAUNCH_DEPLOYER", "NEXT_PUBLIC_LAUNCH_SEEDER", "NEXT_PUBLIC_FEE_ESCROW", "NEXT_PUBLIC_LAUNCH_LOCKER", "NEXT_PUBLIC_LAUNCH_AND_BUY_ROUTER", "NEXT_PUBLIC_ANCHOR_REGISTRY", "NEXT_PUBLIC_TICKER_LAUNCHER", "NEXT_PUBLIC_COIN_QUOTE_LAUNCHER", "NEXT_PUBLIC_STOCK_QUOTE_LAUNCHER", "NEXT_PUBLIC_MARKET_QUOTE_LAUNCHER", "NEXT_PUBLIC_ZAP_ROUTER", "NEXT_PUBLIC_CHART_GUARD_HOOK", "NEXT_PUBLIC_BUYBACK_TREASURY", "NEXT_PUBLIC_POOL_MANAGER", "NEXT_PUBLIC_POSITION_MANAGER", "NEXT_PUBLIC_USDG", "NEXT_PUBLIC_WETH", "NEXT_PUBLIC_V3_FACTORY", "NEXT_PUBLIC_V4_QUOTER", "NEXT_PUBLIC_GENESIS_TOKEN", "NEXT_PUBLIC_GENESIS_TICKER"];
+    for (const env of OVERRIDES) { const v = process.env[env]; if (v !== undefined && !isAddr(v)) problems.push(`${env} is not an address: ${v}`); }
+    if (process.env.NEXT_PUBLIC_GENESIS_POOL !== undefined && !/^0x[0-9a-fA-F]{64}$/.test(process.env.NEXT_PUBLIC_GENESIS_POOL)) problems.push("NEXT_PUBLIC_GENESIS_POOL is not a 32 byte hash");
+    if (process.env.NEXT_PUBLIC_START_BLOCK !== undefined && !/^\d+$/.test(process.env.NEXT_PUBLIC_START_BLOCK)) problems.push("NEXT_PUBLIC_START_BLOCK is not a whole number");
     if (problems.length) {
       console.error(`deployments: refusing a live build: ${problems.join("; ")}.`);
       process.exit(1);

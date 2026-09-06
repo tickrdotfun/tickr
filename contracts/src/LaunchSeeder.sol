@@ -14,6 +14,7 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
+import {FullMath} from "v4-core/src/libraries/FullMath.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
@@ -141,7 +142,7 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         if (msg.sender != IFactory(factory).tickerLauncher()) revert OnlyTickerLauncher();
         if (msg.value == 0) revert BadValue();
         // the ticker fee becomes dollars through the live ETH/USDG pool
-        (uint256 got,) = _swap(ethUsdgKey, true, msg.value, address(this));
+        (uint256 got,) = _swap(ethUsdgKey, true, msg.value, address(this), TickMath.MIN_SQRT_PRICE + 1);
         // one part in two hundred stays for the listing swap; of the rest, half becomes the wrapper
         uint256 dust = got / 200;
         uint256 pool = got - dust;
@@ -156,7 +157,7 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         (uint256 b0, uint256 b1) = wrapperIs0 ? (w, u) : (u, w);
         (uint256 tokenId,,) = V4Seeder.seedRange(positionManager, permit2, key, SQRT_ONE, -CHART_BAND, CHART_BAND, b0, b1, locker);
         // one small trade, dollars into the wrapper, so indexers that wait for a swap list the pair
-        _swap(key, !wrapperIs0, dust, locker);
+        _swap(key, !wrapperIs0, dust, locker, !wrapperIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1);
         _flush(Currency.wrap(usdg), locker);
         _flush(Currency.wrap(wrapper), locker);
         emit DollarPoolSeeded(wrapper, PoolId.unwrap(key.toId()), u, w, tokenId);
@@ -172,6 +173,27 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         nonReentrant
         returns (uint256 amountOut)
     {
+        return _swapExactIn(key, zeroForOne, amountIn, minOut, recipient, zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1, false);
+    }
+
+    /// @inheritdoc ILaunchSeeder
+    function swapExactInBounded(PoolKey calldata key, bool zeroForOne, uint256 amountIn, uint256 minOut, address recipient, uint160 sqrtPriceLimitX96)
+        external
+        payable
+        override
+        nonReentrant
+        returns (uint256 amountOut)
+    {
+        return _swapExactIn(key, zeroForOne, amountIn, minOut, recipient, sqrtPriceLimitX96, true);
+    }
+
+    /// @dev Exact input up to `limit`: the pool stops there and whatever it did not take goes back to the caller.
+    /// `proRata` is the bounded swap's consent to a cut-short fill: its minimum is a price, held on the part the pool
+    /// took. The plain swap's minimum is a quantity, and a fill that falls short of it reverts whole.
+    function _swapExactIn(PoolKey calldata key, bool zeroForOne, uint256 amountIn, uint256 minOut, address recipient, uint160 limit, bool proRata)
+        internal
+        returns (uint256 amountOut)
+    {
         Currency cIn = zeroForOne ? key.currency0 : key.currency1;
         if (cIn.isAddressZero()) {
             if (msg.value != amountIn) revert BadValue();
@@ -185,9 +207,12 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         // what the pool counts out is not always what arrives: a coin inside its launch window burns its snipe tax on
         // the way out. the minimum, and the amount reported, are what `to` actually received
         uint256 before = cOut.isAddressZero() ? 0 : IERC20(Currency.unwrap(cOut)).balanceOf(to);
-        (amountOut, owed) = _swap(key, zeroForOne, amountIn, to);
+        (amountOut, owed) = _swap(key, zeroForOne, amountIn, to, limit);
         if (!cOut.isAddressZero()) amountOut = IERC20(Currency.unwrap(cOut)).balanceOf(to) - before;
-        if (amountOut < minOut) revert Slippage();
+        // the plain swap insists on `minOut` coins whatever the pool took; the bounded swap, whose caller asked for a
+        // fill that may stop short, is held to the same price on the part the pool took. the rest is refunded below
+        uint256 need = proRata && owed != amountIn ? FullMath.mulDiv(minOut, owed, amountIn) : minOut;
+        if (amountOut < need) revert Slippage();
         // a pool that runs out of the other side takes less than was sent: the rest goes back
         if (amountIn > owed) {
             uint256 back = amountIn - owed;
@@ -200,26 +225,18 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         }
     }
 
-    function _swap(PoolKey memory key, bool zeroForOne, uint256 amountIn, address to) internal returns (uint256 amountOut, uint256 owed) {
-        bytes memory res = poolManager.unlock(abi.encode(key, zeroForOne, amountIn, to));
+    function _swap(PoolKey memory key, bool zeroForOne, uint256 amountIn, address to, uint160 limit) internal returns (uint256 amountOut, uint256 owed) {
+        bytes memory res = poolManager.unlock(abi.encode(key, zeroForOne, amountIn, to, limit));
         (amountOut, owed) = abi.decode(res, (uint256, uint256));
     }
 
     /// @dev Exact input of `amountIn` of the input currency, settled from this contract's balance, output to `to`.
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert OnlyPoolManager();
-        (PoolKey memory key, bool zeroForOne, uint256 amount, address to) = abi.decode(data, (PoolKey, bool, uint256, address));
+        (PoolKey memory key, bool zeroForOne, uint256 amount, address to, uint160 limit) = abi.decode(data, (PoolKey, bool, uint256, address, uint160));
         Currency cIn = zeroForOne ? key.currency0 : key.currency1;
         Currency cOut = zeroForOne ? key.currency1 : key.currency0;
-        BalanceDelta d = poolManager.swap(
-            key,
-            SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: -int256(amount),
-                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
-            }),
-            ""
-        );
+        BalanceDelta d = poolManager.swap(key, SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(amount), sqrtPriceLimitX96: limit}), "");
         int128 dIn = zeroForOne ? d.amount0() : d.amount1();
         int128 dOut = zeroForOne ? d.amount1() : d.amount0();
         uint256 owed;

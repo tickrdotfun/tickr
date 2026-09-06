@@ -34,16 +34,17 @@ phantom   = threshold * 40%
 ```
 
 The model holds that liquidity constant through the trade. The launch position, from the opening price to the end
-of the range, is exactly that; positions other people add elsewhere in the range change the real cost of the target
-a little, in either direction. The result is pinned in the preview, so a creator sees the price it gives before
+of the range, is exactly that; positions other people add or remove change what an actual buy of the target would
+cost, in either direction and by however much they add or remove. The threshold is a sizing convention for the
+opening market cap of the new coin, pinned at launch; it is not a quote anyone trades at and it promises nothing
+about the executable value of the quote coin. The result is pinned in the preview, so a creator sees the price it gives before
 signing, and a launch whose quote pool has moved since the preview reverts.
 
-Spot, `target / price`, would be the whole reserve or more when the base reserve is near the target, which no buyer
-deep the quote's market is, and each later coin under the same quote sees a threshold sized to what is left.
+Spot alone, `target / price`, would ask for the whole reserve or more whenever the base reserve is near the target, which no buyer could ever fill. Sizing the threshold as a buy out of the reserve keeps it to what the quote's market can actually deliver, however deep or shallow that market is, and each later coin under the same quote sees a threshold sized to what is left.
 `previewLaunch` also returns the spot price from `quotePrice` (`priceX18`, base-asset units per `1e18` of the coin,
 inverted when the coin is `currency1`) for display.
 
-`targetRaise` is set per base asset by the owner, so a launch priced in any coin costs a comparable amount of real
+`targetRaise` is set per base asset by the owner, so a launch priced in any coin costs a comparable amount of real money to move, whichever coin it is priced in.
 
 ## Calling it
 
@@ -51,9 +52,12 @@ inverted when the coin is `currency1`) for display.
 (bytes32 expectedEconomics, PairEconomics memory econ, address baseAsset, uint256 priceX18)
     = coinQuoteLauncher.previewLaunch(launchConfigId, quoteCoin);
 
-// params.expectedEconomics = expectedEconomics
-coinQuoteLauncher.launchWithCoinQuote{value: factory.launchFee()}(
-);
+// params.expectedEconomics = expectedEconomics, so the launch reverts if the quote pool moved since the preview
+(address token, bytes32 poolId) = coinQuoteLauncher.launchWithCoinQuote{value: factory.launchFee()}(params, launchConfigId, quoteCoin);
+
+// or with the creator's first buy in the same transaction: `coinIn` of the quote coin, approved to the launcher first
+(address token2, bytes32 poolId2, uint256 tokensOut) =
+    coinQuoteLauncher.launchWithCoinQuoteAndBuy{value: factory.launchFee()}(params, launchConfigId, quoteCoin, coinIn, minTokensOut);
 ```
 
 Event: `CoinQuoteLaunched(token, poolId, quoteCoin, baseAsset, quotePriceX18, phantomQuote)`.
@@ -62,7 +66,7 @@ For a first buy in the same transaction, use `launchWithCoinQuoteAndBuy`, descri
 
 ## What it inherits
 
-and the creator is paid in the coin their launch trades against, like every other mode. `CoinQuoteLauncher` holds no
+Everything the factory gives every launch: the same pool, the same locked position, the same fee split and the same snipe tax and launch protection, and the creator is paid in the coin their launch trades against, like every other mode. `CoinQuoteLauncher` holds no
 funds and has no privilege beyond being a registrar on the factory.
 
 ## Risks
