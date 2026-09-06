@@ -43,6 +43,8 @@ event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 am
 | `QuoteIsAnchor`, `QuoteLaunchedHere`, `NoMarket`, `QuotePriceUnavailable`, `NoTargetRaise` | market quote launcher | the token is an anchor or a tickr coin (use that path), has no v3 pool over the floor, or its price cannot be read. |
 | `PoolAlreadyExists` | seeder | somebody opened the coin's pool key first. change the salt and launch again. |
 | `SnipeTaxed(to, amount, bps)` | the coin | a buy inside the first five seconds paid its snipe tax to the dead address. an event, not an error. |
+| `LaunchBlock` | the coin | a buy out of the pool in the launch block by a wallet that is not the launch's own. buying opens next block. |
+| `WalletCapExceeded(recipient, held, bought)` | the coin | inside the two blocks after the launch block, the buy would leave the wallet above 5% of supply held or 5.5% bought. nothing partial. |
 | `PositionNotLocked`, `NotPositionManager` | seeder, locker | the position did not land in the locker, or something other than the position manager tried to hand it one. |
 | `RefundFailed` | seeder | the input the pool did not take could not be sent back to the caller. |
 | `EmptyMetadata`, `MetadataTooLong`, `BadName`, `BadSymbol` | deployer | name or symbol empty, a field over its limit, a name with a space at either end, two spaces in a row or a byte outside printable ASCII, or a symbol with anything but letters and digits. |

@@ -19,7 +19,7 @@ Read this before launching, buying, or integrating. Nothing here is advice.
 
 ## Third party liquidity and other pools
 
-A tickr pool is a plain Uniswap v4 pool. Anyone may add liquidity to it and remove their own again, and anyone may open another pool for the same two tokens at another fee or price. Neither touches the locked launch position, and a pool nobody trades in prices nothing. Snipe protection is a tax, not a gate: a buy out of the pool in the coin's first five seconds pays 99% in the launch second, 25% one second in, 3% at two, then dust, then nothing, all of it burned to the dead address. The launcher and its fee wallet are exempt, sells are never taxed, and from the fifth second the coin is a plain ERC-20. Bots can still buy in the block after a launch, at that price.
+A tickr pool is a plain Uniswap v4 pool. Anyone may add liquidity to it and remove their own again, and anyone may open another pool for the same two tokens at another fee or price. Neither touches the locked launch position, and a pool nobody trades in prices nothing. Snipe protection is a tax, not a gate: a buy out of the pool in the coin's first five seconds pays 99% in the launch second, 25% one second in, 3% at two, then dust, then nothing, all of it burned to the dead address. The launcher and its fee wallet are exempt, sells are never taxed, and from the fifth second the tax is gone. Launch protection sits beside it, counted in blocks: nobody but the launch's own wallets may buy in the launch block, and for the next two blocks every other wallet is held to 5% of supply held and 5.5% bought. From the fourth block the coin is a plain ERC-20. Bots can still buy from the second block on, at that price and under those caps.
 
 ## Liquidity is locked forever
 

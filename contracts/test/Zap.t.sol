@@ -46,6 +46,7 @@ contract ZapTest is BaseTest {
         uint256 value = LAUNCH_FEE + tickers.NEW_TICKER_FEE();
         vm.prank(creator);
         (address banana, address bread,) = tickers.launch{value: value}("BANANA", p, 0);
+        pastTheWindow();
         // ETH -> USDG (the live pool) -> BANANA (wrap, one for one) -> BREAD (its pool)
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](3);
         path[0] = _v4(ethUsdgKey);
@@ -127,6 +128,7 @@ contract ZapTest is BaseTest {
         uint256 value = LAUNCH_FEE + tickers.NEW_TICKER_FEE();
         vm.prank(creator);
         (address banana,,) = tickers.launch{value: value}("BANANA", p, 0);
+        pastTheWindow();
         // launch coins under BANANA until one sorts after the wrapper
         address coin;
         for (uint256 i; i < 12 && coin == address(0); i++) {
@@ -136,6 +138,7 @@ contract ZapTest is BaseTest {
             q.salt = keccak256(abi.encodePacked("c1-hunt", i));
             vm.prank(alice);
             (, address t,) = tickers.launch{value: LAUNCH_FEE}("BANANA", q, 0);
+        pastTheWindow();
             if (t > banana) coin = t;
         }
         assertTrue(coin != address(0), "found a coin that is currency1");

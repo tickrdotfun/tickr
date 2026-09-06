@@ -76,6 +76,7 @@ contract FeesTest is BaseTest {
         TokenParams memory p = defaultParams(address(0), 200); // 2% tax on top of the 1% base
         vm.prank(creator);
         (address t,) = factory.launchToken{value: LAUNCH_FEE}(p, 0, address(0));
+        pastTheWindow();
         assertEq(factory.getLaunchedToken(t).poolFee, 30_000, "3% pool fee");
         buy(Token(t), alice, 1 ether);
         (uint256 a0,) = locker.pendingFees(t);
@@ -96,6 +97,7 @@ contract FeesTest is BaseTest {
         uint256 value = LAUNCH_FEE + tickers.NEW_TICKER_FEE(); // read before the prank: a view call would consume it
         vm.prank(creator);
         (address banana, address bread,) = tickers.launch{value: value}("BANANA", p, 0);
+        pastTheWindow();
         // alice buys BREAD with dollars wrapped into BANANA
         vm.startPrank(alice);
         usdg.approve(banana, 1_000e6);

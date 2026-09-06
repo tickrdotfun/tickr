@@ -241,9 +241,16 @@ abstract contract BaseTest is Test, DeployPermit2 {
         });
     }
 
-    /// the coin's first five seconds tax every buy but the launcher's own; most tests want the plain coin after that
+    /// the coin's first five seconds tax every buy but the launcher's own, and its first three blocks cap every
+    /// wallet but the launcher's; most tests want the plain coin after both
     function pastTheWindow() internal {
         vm.warp(vm.getBlockTimestamp() + 6);
+        vm.roll(vm.getBlockNumber() + 3);
+    }
+
+    /// past the protected blocks but still inside the snipe window's first second: the tax alone
+    function pastTheBlocks() internal {
+        vm.roll(vm.getBlockNumber() + 3);
     }
 
     function launchNative(address who) internal returns (Token token, bytes32 poolId) {

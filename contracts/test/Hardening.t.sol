@@ -98,6 +98,7 @@ contract HardeningTest is BaseTest {
         p.expectedEconomics = expected;
         vm.prank(creator);
         (address ticker, address t,) = tickers.launch{value: fee}("CLUB", p, 0);
+        pastTheWindow();
         assertEq(factory.getLaunchFeePolicy(t).club, address(tickers), "the club is written into the policy");
         // the owner points the factory at an EOA afterwards
         vm.prank(owner);
@@ -133,6 +134,7 @@ contract HardeningTest is BaseTest {
             if ((coinIs0 && did0) || (!coinIs0 && did1)) continue;
             vm.prank(creator);
             (address t,) = factory.launchToken{value: LAUNCH_FEE}(p, 0, address(usdg));
+            pastTheWindow();
             LaunchedToken memory l = factory.getLaunchedToken(t);
             assertGt(l.liquidity, 0);
             assertEq(l.phantomQuote, 1e6);

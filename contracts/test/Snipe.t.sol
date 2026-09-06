@@ -30,6 +30,7 @@ contract SnipeTest is BaseTest {
 
     function test_snipe_aStrangerPaysNinetyNinePercentInTheLaunchSecond() public {
         Token t = _launchNow(creator);
+        pastTheBlocks(); // the launch block is closed to strangers; the tax alone from here
         assertEq(t.currentSnipeTaxBps(alice), 9_900, "the launch second");
         assertEq(t.currentSnipeTaxBps(creator), 0, "the launcher never pays");
         uint256 out = buy(t, alice, 1 ether);
@@ -64,6 +65,7 @@ contract SnipeTest is BaseTest {
 
     function test_snipe_decaysBySecondAndEnds() public {
         Token t = _launchNow(creator);
+        pastTheBlocks();
         uint256[6] memory bps = [uint256(9_900), 2_500, 300, 50, 10, 0];
         for (uint256 i; i < 6; i++) {
             vm.warp(uint256(t.launchedAt()) + i);
@@ -80,6 +82,7 @@ contract SnipeTest is BaseTest {
 
     function test_snipe_zapBuyPaysAndItsQuoteMatches() public {
         Token t = _launchNow(creator);
+        pastTheBlocks();
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](1);
         path[0] = ZapRouter.Hop({kind: zap.HOP_V4(), key: factory.poolKeyOf(address(t)), pool: address(0)});
         ZapRouter.ZapParams memory p = ZapRouter.ZapParams({token: address(t), tokenIn: address(0), amountIn: 0, path: path, minTokensOut: 0, recipient: bob, deadline: block.timestamp + 60});
@@ -103,6 +106,7 @@ contract SnipeTest is BaseTest {
 
     function test_snipe_sellsAndFeeCollectionAreUntaxed() public {
         Token t = _launchNow(creator);
+        pastTheBlocks();
         buy(t, alice, 1 ether);
         uint256 kept = t.balanceOf(alice);
         uint256 deadBefore = t.balanceOf(DEAD_ADDR);

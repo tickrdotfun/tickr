@@ -10,6 +10,7 @@ import { Panel, Spinner } from "../ui";
 import { TradePanel } from "./TradePanel";
 import { TokenDetails } from "./TokenDetails";
 import { PriceChart } from "./PriceChart";
+import { LaunchGuardLine } from "./LaunchGuardLine";
 import { Buyback } from "./Buyback";
 import { useMarketData } from "@/hooks/useMarketData";
 import { sameAddr } from "@/lib/addresses";
@@ -103,6 +104,8 @@ export function TokenPage({ address }: { address: Address }) {
               <Figure hue="pink" label="burned" n={fmtAmount(fees.burned ?? 0n, meta.decimals, { sig: 4 })} unit={meta.symbol ?? ""} sub={`${burnedPct !== undefined ? `${burnedPct}% of supply` : "dead address balance"}${burnedUsd !== undefined && burnedUsd > 0 ? `, about ${fmtUsd(burnedUsd)}` : ""}`} />
             </div>
           </Panel>
+
+          <LaunchGuardLine d={d} />
 
           {isOfficialCoin(address) && !isZero(ADDRESSES.buybackTreasury) && (
             <Panel>

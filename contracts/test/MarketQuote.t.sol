@@ -105,6 +105,7 @@ contract MarketQuoteTest is BaseTest {
         p.expectedEconomics = expected;
         vm.prank(creator);
         (address t,) = marketQuote.launchWithMarketQuote{value: LAUNCH_FEE}(p, 0, address(wild));
+        pastTheWindow();
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](2);
         PoolKey memory empty;
         path[0] = ZapRouter.Hop({kind: 1, key: empty, pool: address(wildPool)});

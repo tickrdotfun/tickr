@@ -65,6 +65,7 @@ contract RobinhoodForkTest is Test, DeployStack {
         bytes32 expected = s.factory.previewLaunchEconomics(0, address(0)); // before the prank: a view call would consume it
         vm.prank(creator);
         (address t, bytes32 poolId) = s.factory.launchToken{value: LAUNCH_FEE}(_params("Fork Meme", "FORK", expected, "fork"), 0, address(0));
+        vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         LaunchedToken memory l = s.factory.getLaunchedToken(t);
         assertEq(IERC721(RH_POSITION_MANAGER).ownerOf(l.lpTokenId), address(s.locker), "LP NFT in locker");
         PoolKey memory key = s.factory.poolKeyOf(t);
@@ -96,6 +97,7 @@ contract RobinhoodForkTest is Test, DeployStack {
         uint256 value = LAUNCH_FEE + s.tickers.NEW_TICKER_FEE();
         vm.prank(creator);
         (address banana, address bread,) = s.tickers.launch{value: value}("BANANA", _params("Fork Bread", "BREAD", expected, "fork-bread"), 0);
+        vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         assertTrue(s.seeder.hasChartPool(banana), "BANANA/USDG exists on the canonical pool manager");
         PoolKey memory key = s.seeder.chartKey(banana);
         (uint160 sqrtP, int24 tick,,) = IPoolManager(RH_POOL_MANAGER).getSlot0(key.toId());
@@ -134,6 +136,7 @@ contract RobinhoodForkTest is Test, DeployStack {
         TokenParams memory p = _params("Fork Chip", "CHIP", s.factory.previewLaunchEconomicsWithPair(0, NVDA, econ), "fork-nvda");
         vm.prank(creator);
         (address t,) = s.stockQuote.launchWithStockQuote{value: LAUNCH_FEE}(p, 0, NVDA);
+        vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](2);
         PoolKey memory empty;
         path[0] = ZapRouter.Hop({kind: 1, key: empty, pool: V3_WETH_NVDA_500});
@@ -156,6 +159,7 @@ contract RobinhoodForkTest is Test, DeployStack {
         TokenParams memory p = _params("Fork Live", "LIVE", expected, "fork-live");
         vm.prank(creator);
         (address t,) = s.marketQuote.launchWithMarketQuote{value: LAUNCH_FEE}(p, 0, LIVE_TOKEN);
+        vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         assertEq(s.factory.getLaunchedToken(t).pairToken, LIVE_TOKEN);
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](2);
         PoolKey memory empty;
@@ -176,6 +180,7 @@ contract RobinhoodForkTest is Test, DeployStack {
         (,, bytes32 expected,) = s.tickers.previewLaunch("FRZN", 0);
         vm.prank(creator);
         (address ticker, address t,) = s.tickers.launch{value: fee}("FRZN", _params("Frozen", "FRZN", expected, "fork-frozen"), 0);
+        vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         assertEq(s.factory.getLaunchFeePolicy(t).club, address(s.tickers), "club written into the policy");
         s.factory.setFeeClub(bob); // the owner here is the test contract; bob is an EOA
         // dollars for alice from the live ETH/USDG pool, wrapped into the ticker, spent in the coin's pool
@@ -236,6 +241,7 @@ contract RobinhoodForkTest is Test, DeployStack {
             if ((coinIs0 && did0) || (!coinIs0 && did1)) continue;
             vm.prank(creator);
             (address t,) = s.factory.launchToken{value: LAUNCH_FEE}(p, 0, RH_USDG);
+            vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
             LaunchedToken memory l = s.factory.getLaunchedToken(t);
             emit log_named_address(coinIs0 ? "PROOF3 coin as currency0" : "PROOF3 coin as currency1", t);
             emit log_named_uint("PROOF3 liquidity", l.liquidity);
@@ -253,6 +259,7 @@ contract RobinhoodForkTest is Test, DeployStack {
         bytes32 expected = s.factory.previewLaunchEconomics(0, address(0));
         vm.prank(creator);
         (address t,) = s.factory.launchToken{value: LAUNCH_FEE}(_params("Fork Burn", "BURN", expected, "fork-burn"), 0, address(0));
+        vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         PoolKey memory key = s.factory.poolKeyOf(t);
         vm.prank(alice);
         uint256 got = s.seeder.swapExactIn{value: 0.5 ether}(key, true, 0.5 ether, 0, alice);
@@ -282,6 +289,7 @@ contract RobinhoodForkTest is Test, DeployStack {
         uint256 value = LAUNCH_FEE + s.tickers.NEW_TICKER_FEE();
         vm.prank(creator);
         (address peel, address coin,) = s.tickers.launch{value: value}("PEEL", _params("Fork Peel Coin", "PEELC", expected, "fork-peel"), 0);
+        vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         PoolKey memory ethUsdg = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(RH_USDG), fee: 100, tickSpacing: 1, hooks: IHooks(address(0))});
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](3);
         PoolKey memory none;

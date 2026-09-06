@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useBalance, useReadContract } from "wagmi";
+import { useBalance, useBlockNumber, useReadContract, useReadContracts } from "wagmi";
 import { erc20Abi } from "viem";
 import type { TokenData } from "@/hooks/useTokenData";
 import { useTx, type WriteFn } from "@/hooks/useTx";
@@ -80,6 +80,27 @@ export function TradePanel({ d }: { d: TokenData }) {
     query: { enabled: fresh && !!launch, refetchInterval: 1_000 },
   });
   const snipeBps = fresh ? Number(snipe.data ?? 0n) : 0;
+  // launch protection, in blocks: the coin says where this wallet stands; asked only while a launch is fresh
+  const blockNo = useBlockNumber({ watch: fresh, query: { enabled: fresh } });
+  const guard = useReadContracts({
+    contracts: [
+      { abi: TokenAbi, address: launch?.token, functionName: "protectionEndsAtBlock" },
+      { abi: TokenAbi, address: launch?.token, functionName: "launchedBlock" },
+      { abi: TokenAbi, address: launch?.token, functionName: "remainingBuy", args: [user ?? ZERO] },
+      { abi: TokenAbi, address: launch?.token, functionName: "remainingHold", args: [user ?? ZERO] },
+    ],
+    query: { enabled: fresh && !!launch, refetchInterval: 1_000 },
+  });
+  const g = (i: number) => (guard.data?.[i]?.status === "success" ? (guard.data[i].result as bigint) : undefined);
+  const endsAt = g(0);
+  const launchedBlock = g(1);
+  const remainingBuy = g(2);
+  const remainingHold = g(3);
+  const blockNow = blockNo.data;
+  const guarded = fresh && endsAt !== undefined && blockNow !== undefined && blockNow < endsAt;
+  const launchBlock = guarded && launchedBlock !== undefined && blockNow === launchedBlock;
+  const unlimited = (v?: bigint) => v === undefined || v === (2n ** 256n - 1n);
+  const allowance = guarded && !unlimited(remainingBuy) && !unlimited(remainingHold) ? (remainingBuy! < remainingHold! ? remainingBuy! : remainingHold!) : undefined;
 
   // buys: ETH through the route, or the quote through the one pool
   const buyPath = inEth ? (nativePair && own ? [own] : ethPath) : own ? [own] : null;
@@ -101,12 +122,23 @@ export function TradePanel({ d }: { d: TokenData }) {
   const insufficient = side === "buy" ? amt !== undefined && quoteBal !== undefined && amt > quoteBal : amt !== undefined && tokenBal !== undefined && amt > tokenBal;
   const routePending = !route.data;
 
+  // the buy would break a launch cap, or it is the launch block: say so instead of letting it revert
+  const guardReason =
+    side === "buy" && guarded
+      ? launchBlock && !unlimited(remainingBuy)
+        ? "buying opens next block"
+        : allowance !== undefined && buyOut !== undefined && buyOut > allowance
+          ? "over the 5% wallet cap for these blocks"
+          : undefined
+      : undefined;
+  const guardBlocks = !!guardReason;
   const canSubmit =
     !!user &&
     !!launch &&
     !!amt &&
     amt > 0n &&
     !insufficient &&
+    !guardBlocks &&
     !tx.busy &&
     !routePending &&
     (side === "buy" ? !!buyPath && buyOut !== undefined && buyOut > 0n : !!sellPath && !!zs.data && zs.data.amountOut > 0n);
@@ -239,6 +271,12 @@ export function TradePanel({ d }: { d: TokenData }) {
               <Row k={`Receive (${ts})`} v={buyOut !== undefined ? fmtAmount(buyOut, td) : amt && zp.isFetching ? "quoting" : "-"} />
               <Row k="Min. after slippage" v={buyOut !== undefined ? `${fmtAmount(applySlippage(buyOut, slipBps), td)} ${ts}` : "-"} />
               {inEth && zp.isError && <div className="text-[13px] text-signal">no quote at this size. try a smaller amount{nativePair ? "" : `, or pay in ${qs}`}.</div>}
+              {guarded && (
+                <div className="text-[13px] text-signal">
+                  first two blocks: 5% per wallet.{" "}
+                  {launchBlock ? "buying opens next block." : allowance !== undefined ? `you may still buy ${fmtAmount(allowance, td, { sig: 4 })} ${ts}.` : ""}
+                </div>
+              )}
               {snipeBps > 0 && (
                 <div className="text-[13px] text-signal">
                   launch window: a buy this second pays a {(snipeBps / 100).toFixed(snipeBps % 100 === 0 ? 0 : 1)}% snipe tax, burned. it is gone within five seconds of launch.
@@ -311,6 +349,8 @@ export function TradePanel({ d }: { d: TokenData }) {
               ) : (
                 "no route to this pool"
               )
+            ) : guardReason ? (
+              guardReason
             ) : insufficient ? (
               "Insufficient balance"
             ) : (

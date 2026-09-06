@@ -66,6 +66,7 @@ contract LaunchTest is BaseTest {
             p.salt = keccak256(abi.encodePacked("order", i));
             vm.prank(creator);
             (address t,) = factory.launchToken{value: LAUNCH_FEE}(p, 0, address(usdg));
+            pastTheWindow();
             LaunchedToken memory l = factory.getLaunchedToken(t);
             assertGt(l.liquidity, 0);
             // a buy works and moves the price up in USDG terms
