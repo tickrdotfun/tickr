@@ -157,30 +157,25 @@ export function useMarketData(window: WindowKey = "all") {
       const cutoffBlock = seconds === 0 ? START_BLOCK : bigMax(START_BLOCK, latest - BigInt(Math.ceil(seconds / blockTime)));
       const byPool = new Map<string, Launch>();
       for (const l of list) byPool.set(l.poolId.toLowerCase(), l);
-      // logs are read in bounded ranges, since the public RPC refuses a wide window; a range it still refuses leaves a
-      // hole, and the hole is reported rather than shown as zero
+      // one read for the whole window first, which the public RPC answers for a handful of pool ids; a range it refuses
+      // is split in two and each half tried again, a few levels deep. a range it still refuses leaves a hole, and
+      // the hole is reported rather than shown as zero. block numbers are not a measure of size on this chain, so the
+      // split follows the RPC's answer, never a fixed span
       let partial = false;
-      const chunked = async <T,>(read: (from: bigint, to: bigint) => Promise<T[]>, from: bigint, to: bigint): Promise<T[]> => {
-        const out: T[] = [];
-        const span = 50_000n;
-        const jobs: Promise<void>[] = [];
-        for (let a = from; a <= to; a += span) {
-          const b = a + span - 1n < to ? a + span - 1n : to;
-          jobs.push(
-            read(a, b).then(
-              (r) => {
-                out.push(...r);
-              },
-              () => {
-                partial = true;
-              },
-            ),
-          );
+      const adaptive = async <T,>(read: (from: bigint, to: bigint) => Promise<T[]>, from: bigint, to: bigint, depth = 0): Promise<T[]> => {
+        try {
+          return await read(from, to);
+        } catch {
+          if (depth >= 4 || to <= from) {
+            partial = true;
+            return [];
+          }
+          const mid = from + (to - from) / 2n;
+          const [a, b] = await Promise.all([adaptive(read, from, mid, depth + 1), adaptive(read, mid + 1n, to, depth + 1)]);
+          return [...a, ...b];
         }
-        await Promise.all(jobs);
-        return out;
       };
-      const swaps = await chunked((a, b) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: list.map((l) => l.poolId) }, fromBlock: a, toBlock: b }), cutoffBlock, latest);
+      const swaps = await adaptive((a, b) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: list.map((l) => l.poolId) }, fromBlock: a, toBlock: b }), cutoffBlock, latest);
       const vol = new Map<string, { quote: bigint; buys: number; lastBuy: bigint }>();
       for (const log of swaps) {
         const id = (log.args.id ?? "0x").toLowerCase();
@@ -199,7 +194,7 @@ export function useMarketData(window: WindowKey = "all") {
       }
 
       // what creators have been paid in the quote, from every collection the locker ever logged, priced like volume
-      const collections = await chunked((a, b) => client.getLogs({ address: ADDRESSES.launchLocker, event: FEES_COLLECTED, args: { token: list.map((l) => l.token) }, fromBlock: a, toBlock: b }), START_BLOCK, latest);
+      const collections = await adaptive((a, b) => client.getLogs({ address: ADDRESSES.launchLocker, event: FEES_COLLECTED, args: { token: list.map((l) => l.token) }, fromBlock: a, toBlock: b }), START_BLOCK, latest);
       const creatorQuoteBy = new Map<string, bigint>();
       for (const log of collections) {
         const t = (log.args.token ?? "0x").toLowerCase();
