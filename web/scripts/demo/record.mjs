@@ -41,7 +41,7 @@ const clickByText = async (pg, sel, text, wait = 3500) => {
 {
   const pg = await b.newPage({ viewport: { width: 1440, height: 1400 } });
   attach(pg);
-  await pg.goto("http://localhost:3000/create", { waitUntil: "networkidle" });
+  await pg.goto("http://localhost:3000/create", { waitUntil: "load" });
   await pg.waitForTimeout(5000);
   for (const opt of ["stock tokens", "usdg", "eth", "another coin", "anything"]) {
     const hit = await clickByText(pg, ".seg-item, .tab", opt, 5000);
@@ -81,7 +81,7 @@ const clickByText = async (pg, sel, text, wait = 3500) => {
 {
   const pg = await b.newPage({ viewport: { width: 1440, height: 1400 } });
   attach(pg);
-  await pg.goto("http://localhost:3000/terms", { waitUntil: "networkidle" });
+  await pg.goto("http://localhost:3000/terms", { waitUntil: "load" });
   await pg.waitForTimeout(1500);
   await pg.close();
 }
@@ -90,7 +90,7 @@ const clickByText = async (pg, sel, text, wait = 3500) => {
 {
   const pg = await b.newPage({ viewport: { width: 1440, height: 1400 } });
   attach(pg);
-  await pg.goto("http://localhost:3000/", { waitUntil: "networkidle" });
+  await pg.goto("http://localhost:3000/", { waitUntil: "load" });
   await pg.waitForTimeout(5000);
   for (const t of ["market cap", "volume", "recent buys", "newest", "24h", "7d", "all time"]) {
     await clickByText(pg, "button, a", t, 2200);
@@ -104,7 +104,7 @@ const clickByText = async (pg, sel, text, wait = 3500) => {
   for (const href of [...new Set(links)]) {
     const tp = await b.newPage({ viewport: { width: 1440, height: 1400 } });
     attach(tp);
-    await tp.goto(`http://localhost:3000${href}`, { waitUntil: "networkidle" });
+    await tp.goto(`http://localhost:3000${href}`, { waitUntil: "load" });
     await tp.waitForTimeout(5000);
     for (const el of await tp.$$(".detail-tab")) { await el.click().catch(() => {}); await tp.waitForTimeout(2200); }
     for (const t of ["sell", "buy"]) await clickByText(tp, ".tab", t, 2200);

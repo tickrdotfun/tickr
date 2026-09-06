@@ -25,14 +25,14 @@ const clickByText = async (sel, text, wait = 2500) => {
   return false;
 };
 
-await pg.goto(`${base}/`, { waitUntil: "networkidle" });
+await pg.goto(`${base}/`, { waitUntil: "load" });
 await pg.waitForTimeout(2500);
 await misses("home");
 const hrefs = await pg.$$eval('a[href^="/t/"]', (as) => [...new Set(as.map((a) => a.getAttribute("href")))].slice(0, 6));
 let captainSeen = false;
 let clubSeen = false;
 for (const href of hrefs) {
-  await pg.goto(`${base}${href}`, { waitUntil: "networkidle" });
+  await pg.goto(`${base}${href}`, { waitUntil: "load" });
   await pg.waitForTimeout(2500);
   // every detail tab, the club among them, then both trade sides
   for (const el of await pg.$$(".detail-tab")) {
@@ -45,7 +45,7 @@ for (const href of hrefs) {
   for (const t of ["sell", "buy"]) await clickByText(".tab", t, 1500);
   await misses(`token ${href}`);
 }
-await pg.goto(`${base}/create`, { waitUntil: "networkidle" });
+await pg.goto(`${base}/create`, { waitUntil: "load" });
 await pg.waitForTimeout(2500);
 await misses("create");
 await b.close();
