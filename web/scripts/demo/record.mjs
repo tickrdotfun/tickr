@@ -92,12 +92,21 @@ const clickByText = async (pg, sel, text, wait = 3500) => {
   attach(pg);
   await pg.goto("http://localhost:3000/", { waitUntil: "load" });
   await pg.waitForTimeout(5000);
+  // every coin the home page can show under any sort or window: the list is capped, and the cap shows a different
+  // set for each ordering, so the links are gathered after every click and the union is what gets recorded
+  const found = new Set();
+  const gather = async () => {
+    for (const h of await pg.evaluate(() => [...document.querySelectorAll('a[href^="/t/"]')].map((a) => a.getAttribute("href")))) found.add(h);
+  };
+  await gather();
   for (const t of ["market cap", "volume", "recent buys", "newest", "24h", "7d", "all time"]) {
     await clickByText(pg, "button, a", t, 2200);
+    await gather();
   }
   await pg.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await pg.waitForTimeout(3000);
-  const links = await pg.evaluate(() => [...document.querySelectorAll('a[href^="/t/"]')].map((a) => a.getAttribute("href")));
+  await gather();
+  const links = [...found];
   await pg.close();
 
   // ---- every token page, every detail tab, both trade sides
