@@ -140,7 +140,7 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
       <MoveFees d={d} />
       <p className="detail-note detail-note-tight">
         the pool&apos;s fee sits in the locked position until anyone collects it. both sides split {split ? `${Math.round(split.creatorShareBps / 100)} / ${split.clubShareBps > 0 ? `${Math.round(split.clubShareBps / 100)} / ` : ""}${Math.round(split.protocolShareBps / 100)}` : ""}: the creator&apos;s share and the tax are theirs, the rest of the coin side burns.
-      </p>
+       on the coin side, what sells pay, the protocol&apos;s and the club&apos;s parts are burned; the creator&apos;s part and tax are credited in the coin.</p>
       <TxStatus {...tx} />
     </div>
   );

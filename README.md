@@ -24,7 +24,7 @@ cd web && pnpm install && pnpm dev
 
 ## how a launch works
 
-`Factory._launch` checks the gate, the fee, the reserved names and the pinned economics, deploys the coin with CREATE2 (`LaunchDeployer`), opens a hookless Uniswap v4 pool at the opening price and has `LaunchSeeder` mint one position holding the entire supply, owned by `LaunchLocker`, which has no withdraw. `LaunchLocker.collectFees` is permissionless: the quote side goes to `FeeEscrow` for the creator and the protocol (and the ticker club under an invented name); the coin side splits the same way, the creator's share to the escrow and the rest burned. The protocol's recipient is `BuybackTreasury`, which pays the team half and buys and burns TICKR with the rest; `Token` taxes buys in its first five seconds. Read `docs/SPEC.md` first, then `docs/02-lifecycle.md` and `docs/06-fees.md`.
+`Factory._launch` checks the gate, the fee, the reserved names and the pinned economics, deploys the coin with CREATE2 (`LaunchDeployer`), opens a hookless Uniswap v4 pool at the opening price and has `LaunchSeeder` mint one position holding the entire supply, owned by `LaunchLocker`, which has no withdraw. `LaunchLocker.collectFees` is permissionless: the quote side goes to `FeeEscrow` for the creator and the protocol (and the ticker club under an invented name); the coin side splits the same way, the creator's share and tax to the escrow in the coin, the protocol's and the club's shares burned. The protocol's recipient is `BuybackTreasury`, which pays the team half and buys and burns TICKR with the rest; `Token` taxes buys in its first five seconds. Read `docs/SPEC.md` first, then `docs/02-lifecycle.md` and `docs/06-fees.md`.
 
 ## licence
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {VmSafe} from "forge-std/Vm.sol";
 import {Script, console} from "forge-std/Script.sol";
 import {GenesisSizer} from "./lib/GenesisSizer.sol";
 import {stdJson} from "forge-std/StdJson.sol";
@@ -155,10 +156,15 @@ contract Genesis is Script {
         factory.setWhitelistedLauncher(me, false);
         vm.stopBroadcast();
 
-        vm.writeJson(vm.toString(tickr), path, ".genesisToken");
-        vm.writeJson(vm.toString(fun), path, ".genesisTicker");
-        vm.writeJson(vm.toString(poolId), path, ".genesisPool");
-        vm.writeJson(activated ? "true" : "false", path, ".genesisActivated");
+        // a dry run must never mark the record as launched: written under a broadcast only, or when asked for with WRITE_RECORD=true
+        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.envOr("WRITE_RECORD", false)) {
+            vm.writeJson(vm.toString(tickr), path, ".genesisToken");
+            vm.writeJson(vm.toString(fun), path, ".genesisTicker");
+            vm.writeJson(vm.toString(poolId), path, ".genesisPool");
+            vm.writeJson(activated ? "true" : "false", path, ".genesisActivated");
+        } else {
+            console.log("  record not written: no broadcast (set WRITE_RECORD=true to write from a dry run)");
+        }
         console.log("  genesis launches open; recorded in", path);
     }
 

@@ -17,12 +17,12 @@ verify() { # name path address
   echo "== $1 $a"
   # Blockscout rate-limits verification requests from one address (seen on Sepolia: "Too many requests"), so
   # each contract gets up to four tries with a pause, and a pause between contracts
-  local out try
+  local out try pause; pause="${VERIFY_PAUSE:-8}" # seconds between contracts; Sepolia's Blockscout wants more than Robinhood Chain's
   for try in 1 2 3 4; do
     out=$(forge verify-contract "$a" "$2" --chain-id "$CHAIN" --rpc-url "$RPC" --verifier blockscout --verifier-url "$URL" --guess-constructor-args --watch 2>&1)
-    if echo "$out" | grep -qE "Contract successfully verified|already verified"; then echo "$out" | grep -E "successfully verified|already verified" | head -1; sleep 8; return; fi
-    if echo "$out" | grep -q "Too many requests"; then sleep $((30 * try)); continue; fi
-    echo "$out" | grep -E "Error|error|Warning" | head -3; sleep 8; return
+    if echo "$out" | grep -qE "Contract successfully verified|already verified"; then echo "$out" | grep -E "successfully verified|already verified" | head -1; sleep "$pause"; return; fi
+    if echo "$out" | grep -q "Too many requests"; then sleep $((pause * 2 * try)); continue; fi
+    echo "$out" | grep -E "Error|error|Warning" | head -3; sleep "$pause"; return
   done
   echo "gave up after four tries: $1 (rate limited)"
 }

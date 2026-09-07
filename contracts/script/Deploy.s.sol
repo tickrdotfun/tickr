@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {VmSafe} from "forge-std/Vm.sol";
 import {Script, console} from "forge-std/Script.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
@@ -91,7 +92,12 @@ contract Deploy is Script, DeployStack {
         vm.serializeAddress(j, "permit2", PERMIT2);
         vm.serializeAddress(j, "usdg", RH_USDG);
         string memory out = vm.serializeAddress(j, "weth", RH_WETH);
-        vm.writeJson(out, vm.envOr("DEPLOY_RECORD", string.concat("deployments/", vm.toString(block.chainid), ".json")));
+        // a dry run must never replace a real record: written under a broadcast only, or when asked for with WRITE_RECORD=true
+        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.envOr("WRITE_RECORD", false)) {
+            vm.writeJson(out, vm.envOr("DEPLOY_RECORD", string.concat("deployments/", vm.toString(block.chainid), ".json")));
+        } else {
+            console.log("  record not written: no broadcast (set WRITE_RECORD=true to write from a dry run)");
+        }
         console.log("factory", address(s.factory));
         console.log("router", address(s.router));
         console.log("tickers", address(s.tickers));

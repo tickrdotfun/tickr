@@ -32,10 +32,11 @@ const FIXED: [string, string, string?][] = [
   ["new ticker fee", "0.0015 ETH", "on top of the launch fee, only when the name is new. it opens the name's dollar pool"],
   ["pool fee", "1%", "the pool's own lp fee, plus the creator tax"],
   ["of that, to the creator", "50%", "60% on any pair that is not an invented ticker, where there is no club"],
-  ["to the ticker club", "10%", "the other coins under the same ticker, by the buy volume their fee collections book over 30 days"],
+  ["to the ticker club", "10%", "of the base fee on the quote side, under an invented ticker only: a pot for the other coins under the same ticker, by the buy volume their fee collections book over 30 days. the coin side's club share is burned"],
   ["to the protocol", "40%", "4,000 bps, on every pair; half of it buys and burns TICKR"],
   ["creator tax ceiling", "2%", "at launch. the owner can raise that ceiling for later launches, never above 10%. all of it is the creator's"],
-  ["buyback and burn", "0%", "off, and frozen off per launch"],
+  ["buyback vault route", "0%", "off, and frozen off per launch. a separate mechanism from the treasury below"],
+  ["treasury buyback and burn", "half", "of the protocol's 40%, in USDG the treasury can convert; it buys and burns TICKR, and the share can only rise. on from the first launch"],
   ["opens at, priced in ETH", "1.68 ETH", "market cap at the first block"],
   ["opens at, priced in USDG", "3,236 USDG", "the same for every invented ticker, which is USDG one for one"],
 ];
@@ -51,7 +52,7 @@ const STEPS: [number, string, string][] = [
   [
     4,
     "the fees",
-    "the pool fee lands in the locked position. anyone can collect it; the split frozen at launch sends the quote side to the escrow for the creator, the club and the protocol's buyback treasury, and burns the coin side in full. a buy in a coin's first five seconds pays a snipe tax, burned too.",
+    "the pool fee lands in the locked position. anyone can collect it; the split frozen at launch sends the quote side to the escrow for the creator, the club and the protocol's buyback treasury. the coin side, what sells pay, splits the same way: the creator's share and tax go to the creator's escrow in the coin, the protocol's and the club's shares are burned. a buy in a coin's first five seconds pays a snipe tax, burned too.",
   ],
 ];
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {VmSafe} from "forge-std/Vm.sol";
 import {Script, console} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PoolManager} from "v4-core/src/PoolManager.sol";
@@ -175,7 +176,12 @@ contract Devnet is Script, DeployStack {
         vm.serializeAddress(j, "usdg", address(usdg));
         vm.serializeBool(j, "devnet", true);
         string memory out = vm.serializeAddress(j, "weth", address(weth));
-        vm.writeJson(out, vm.envOr("DEPLOY_RECORD", string.concat("deployments/", vm.toString(block.chainid), ".json")));
+        // a dry run must never replace a real record: written under a broadcast only, or when asked for with WRITE_RECORD=true
+        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.envOr("WRITE_RECORD", false)) {
+            vm.writeJson(out, vm.envOr("DEPLOY_RECORD", string.concat("deployments/", vm.toString(block.chainid), ".json")));
+        } else {
+            console.log("  record not written: no broadcast (set WRITE_RECORD=true to write from a dry run)");
+        }
         console.log("  devnet factory", address(s.factory));
         console.log("  devnet tickers", address(s.tickers));
         console.log("  devnet usdg   ", address(usdg));

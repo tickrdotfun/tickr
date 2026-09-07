@@ -41,7 +41,7 @@ export function TickerClub({ d }: { d: TokenData }) {
   return (
     <div className="club">
       <p className="detail-note detail-note-tight">
-        10% of every fee under {qs} is shared by the creators of the other coins under it, by the buy volume their fee collections stand for, over the same thirty days. the founder&apos;s coin is captain and counts double while it trades.
+        10% of the base fee on buys under {qs}, the quote side, goes to a pot shared by the creators of the other coins under it, by the buy volume their fee collections stand for, over the same thirty days. the coin side&apos;s club share is burned, not shared. the founder&apos;s coin is captain and counts double while it trades.
       </p>
 
       {!c ? (

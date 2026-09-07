@@ -20,7 +20,7 @@ struct FeePolicy {
     uint16 creatorShareBps;       // of the base fee: 5000 under an invented ticker, 6000 elsewhere
     uint16 clubShareBps;          // 1000 under an invented ticker, 0 elsewhere; the three always sum to 10000
     uint16 protocolShareBps;      // 4000
-    uint16 buybackBurnBps;        // 0 at launch; reserved for a later buyback policy
+    uint16 buybackBurnBps;        // 0 at launch: the vault route is off. the treasury's buyback and burn of TICKR is a separate mechanism, and on
     uint16 hookFeeBps;            // the base fee in bps, 100, copied from the config at launch
     uint16 maxInternalPriceImpactBps; // unused in this version
 }
@@ -54,8 +54,8 @@ The creator fee wallet can hand its role to another wallet with `transferCreator
 
 ## The ticker club
 
-Under an invented ticker, 10% of the base fee of every coin goes into that coin's pot for the current thirty day epoch, and the creators of the other coins under the same ticker claim from it in proportion to their booked volume: when a coin's fees are collected, the locker books the quote fees collected divided by the pool fee rate as that coin's volume for the window of the collection. so it stands for buy volume in the quote, since only buys pay fees in the quote, and a coin's weight for a window depends on when someone collected. Details in [05 anchors](./05-anchors.md).
+Under an invented ticker, 10% of the base fee on the quote side of every coin, what buys pay, goes into that coin's pot for the current thirty day epoch (the coin side's club share is burned, not pooled), and the creators of the other coins under the same ticker claim from it in proportion to their booked volume: when a coin's fees are collected, the locker books the quote fees collected divided by the pool fee rate as that coin's volume for the window of the collection. so it stands for buy volume in the quote, since only buys pay fees in the quote, and a coin's weight for a window depends on when someone collected. Details in [05 anchors](./05-anchors.md).
 
 ## BuybackVault
 
-`buybackBurnBps` is zero in the policy at launch, so no buyback is taken. The vault exists so a future policy can route a share of new launches' fees into it; the owner's only power over it is to set the strategy that may release what it holds.
+`buybackBurnBps` is zero in the policy at launch, so nothing is routed to the vault. That is one mechanism; the treasury's buyback and burn of TICKR, half of the protocol's share, is another and is on from the first launch, see [13 the official coin](./13-official-coin.md). The vault exists so a future policy can route a share of new launches' fees into it; the owner's only power over it is to set the strategy that may release what it holds.

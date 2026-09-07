@@ -64,8 +64,8 @@ export default function TermsPage() {
           <li>a launch fee in ETH, paid once at creation. it is read live from the factory, so the figure in the form is the figure you pay.</li>
           <li>
             a 1% pool fee, charged inside every swap. it is split at launch and frozen: under an invented ticker, 50% to the coin&apos;s creator,
-            10% to the ticker club and 40% to the protocol. on any other pair, 60% to the creator and 40% to the protocol. the coin side of
-            every sell splits the same way: the creator&apos;s share is theirs, the rest is burned.
+            10% to the ticker club (its quote side; the coin side&apos;s club share is burned) and 40% to the protocol. on any other pair, 60% to the creator and 40% to the protocol. the coin side of
+            every sell splits the same way: the creator&apos;s share and tax are theirs, in the coin; the protocol&apos;s and the club&apos;s shares are burned.
           </li>
           <li>an optional creator tax, chosen by the creator at launch, up to 2% at launch; the owner can raise that ceiling for later launches, never above 10%. it goes entirely to the creator&apos;s fee wallet.</li>
           <li>
