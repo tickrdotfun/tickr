@@ -227,8 +227,11 @@ export function useActivationSignals(token?: Address, ticker?: Address, own?: { 
       // the name: a swap on its pool whose transaction handed the name to an ordinary wallet
       const bridgeId = poolId(managedKey(ticker));
       const nameSwaps = await adaptiveLogs((a, b) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: bridgeId }, fromBlock: a, toBlock: b }), from, latest);
-      let name: boolean | null = nameSwaps.partial ? null : false;
-      for (const l of nameSwaps.logs.slice(-12).reverse()) {
+      // the scan looks at the latest few receipts: when there are more than it looks at and none of those qualify,
+      // an earlier one might, so the answer is unknown, never "no"
+      const SCAN = 12;
+      let name: boolean | null = nameSwaps.partial ? null : nameSwaps.logs.length > SCAN ? null : false;
+      for (const l of nameSwaps.logs.slice(-SCAN).reverse()) {
         if (!l.transactionHash) continue;
         const rc = await client.getTransactionReceipt({ hash: l.transactionHash }).catch(() => null);
         if (!rc) {
@@ -248,19 +251,22 @@ export function useActivationSignals(token?: Address, ticker?: Address, own?: { 
       const inits = await client.getLogs({ address: ADDRESSES.poolManager, event: INITIALIZE, args: { id: own.id }, fromBlock: from, toBlock: latest }).catch(() => null);
       const launchTx = inits?.[0]?.transactionHash?.toLowerCase();
       const coinSwaps = await adaptiveLogs((a, b) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: own.id }, fromBlock: a, toBlock: b }), from, latest);
-      let coin: boolean | null = coinSwaps.partial || !launchTx ? null : false;
+      const later = coinSwaps.logs.filter((l) => !!l.transactionHash && l.transactionHash.toLowerCase() !== launchTx);
+      let coin: boolean | null = coinSwaps.partial || !launchTx ? null : later.length > SCAN ? null : false;
       if (launchTx) {
-        for (const l of coinSwaps.logs.slice(-12).reverse()) {
-          if (!l.transactionHash || l.transactionHash.toLowerCase() === launchTx) continue;
-          const rc = await client.getTransactionReceipt({ hash: l.transactionHash }).catch(() => null);
+        for (const l of later.slice(-SCAN).reverse()) {
+          const rc = await client.getTransactionReceipt({ hash: l.transactionHash! }).catch(() => null);
           if (!rc) {
             coin = null;
             continue;
           }
-          if (deliveredTo(rc, token).length > 0) {
-            coin = true;
-            break;
+          for (const to of deliveredTo(rc, token)) {
+            const w = await isWallet(to);
+            if (w === null) coin = null;
+            else if (w) coin = true;
+            if (coin === true) break;
           }
+          if (coin === true) break;
         }
       }
       const activated = name === true && coin === true ? true : name === null || coin === null ? null : false;

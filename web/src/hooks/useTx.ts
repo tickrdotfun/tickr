@@ -7,11 +7,12 @@ import { errorMessage } from "@/lib/format";
 import { DEMO } from "@/lib/demoTransport";
 import { ADDRESSES } from "@/lib/addresses";
 import * as Abis from "@/lib/abis";
+import { settleStep, type Replacement } from "@/lib/txSteps";
 import type { wagmiConfig } from "@/lib/wagmi";
 
 export type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
 export type WriteFn = ReturnType<typeof useWriteContract<typeof wagmiConfig>>["writeContractAsync"];
-export type TxStep = { label: string; request: (write: WriteFn) => Promise<Hash>; /** called with the hash the moment the wallet returns it, before any wait */ onHash?: (hash: Hash) => void };
+export type TxStep = { label: string; request: (write: WriteFn) => Promise<Hash>; /** called with the hash the moment the wallet returns it, before any wait */ onHash?: (hash: Hash) => void; /** called with a repricing's identity so the caller can verify and adopt it, or refuse */ onReplaced?: (replacement: Replacement) => void };
 
 /**
  * Imperative multi-step transaction runner (e.g. approve then buy).
@@ -125,36 +126,33 @@ export function useTx() {
           const h = await s.request(writeContractAsync);
           last = h;
           lastHash.current = h;
-          try {
-            s.onHash?.(h);
-          } catch {
-            // a caller's own bookkeeping must not stop the wait
-          }
           setHash(h);
           setStatus("confirming");
           if (client) {
-            // a wallet can replace a pending transaction. sped up, it is the same action under a new hash; cancelled
-            // or replaced by something else, the action never happened although a transaction did mine with `success`
-            let replaced: { reason: string; hash: Hash } | undefined;
-            const rc = await client.waitForTransactionReceipt({
-              hash: h,
-              onReplaced: (r) => {
-                replaced = { reason: r.reason, hash: r.transaction.hash };
-              },
-            });
-            if (replaced) {
-              if (replaced.reason !== "repriced") throw new Error(`${s.label}: ${replaced.reason === "cancelled" ? "cancelled in the wallet" : "replaced in the wallet by another transaction"}. nothing was sent.`);
-              last = replaced.hash;
-              lastHash.current = replaced.hash;
-              try {
-                s.onHash?.(replaced.hash);
-              } catch {
-                // as above
-              }
-              setHash(replaced.hash);
-            }
+            // a wallet can replace a pending transaction. sped up, it is the same action under a new hash, which the
+            // caller is told about and may refuse; cancelled or replaced by something else, the action never happened
+            const c = client;
+            const { hash: finalHash, receipt: rc } = await settleStep(
+              h,
+              { onHash: s.onHash, onReplaced: s.onReplaced },
+              (hash, onReplaced) =>
+                c.waitForTransactionReceipt({
+                  hash,
+                  onReplaced: (r) => onReplaced({ reason: r.reason, hash: r.transaction.hash, from: r.transaction.from, to: r.transaction.to, input: r.transaction.input, nonce: r.transaction.nonce, value: r.transaction.value, chainId: r.transaction.chainId }),
+                }),
+              s.label,
+            );
+            last = finalHash;
+            lastHash.current = finalHash;
+            setHash(finalHash);
             receipts.current.set(rc.transactionHash, rc);
             if (rc.status !== "success") throw await minedRevert(client, rc.transactionHash, rc.blockNumber, s.label);
+          } else {
+            try {
+              s.onHash?.(h);
+            } catch {
+              // a caller's own bookkeeping must not stop the run
+            }
           }
         }
         setStatus("success");

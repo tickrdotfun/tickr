@@ -8,6 +8,11 @@ process.env.NEXT_PUBLIC_MANAGED_TICKER_HOOK = "0x3eC51B11c1AfaaF7B084B7A31B69454
 process.env.NEXT_PUBLIC_POOL_MANAGER = "0x8366a39CC670B4001A1121B8F6A443A643e40951";
 process.env.NEXT_PUBLIC_USDG = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168";
 process.env.NEXT_PUBLIC_FACTORY = "0x00000000000000000000000000000000000000f1";
+// the suites never read the checked-in deployment record: it is replaced, in this process only, by the example's
+// zero addresses, so the environment above is what every module sees, on any machine and with any record
+const recordPath = path.join(__dirname, "..", "..", "src", "lib", "deployments.json");
+const example = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "src", "lib", "deployments.example.json"), "utf8"));
+require.cache[recordPath] = { id: recordPath, filename: recordPath, loaded: true, exports: example };
 require.extensions[".ts"] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText, f);
 const src = (p) => require(path.join(__dirname, "..", "..", "src", p));
 module.exports = {

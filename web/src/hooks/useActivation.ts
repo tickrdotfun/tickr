@@ -32,9 +32,16 @@ export function useActivation(t?: ActivationTarget) {
   const chainId = useChainId();
   const { address: user, connector } = useAccount();
   const wallet = useWalletClient();
-  const [ledger, setLedger] = useState<Ledger | null>(null);
-  const [inspection, setInspection] = useState<Inspection | null>(null);
-  const [review, setReview] = useState<Review | null>(null);
+  // everything read or reviewed is stamped with the wallet, chain and coin it was read for: another identity's
+  // results are never shown for this one, so a read that fails after a wallet change cannot leave a stale "done"
+  const identity = t && user ? `${chainId}:${user.toLowerCase()}:${t.token.toLowerCase()}` : "";
+  const [state, setState] = useState<{ id: string; ledger: Ledger | null; inspection: Inspection | null; review: Review | null }>({ id: "", ledger: null, inspection: null, review: null });
+  const ledger = state.id === identity ? state.ledger : null;
+  const inspection = state.id === identity ? state.inspection : null;
+  const review = state.id === identity ? state.review : null;
+  const setLedger = useCallback((l: Ledger | null) => setState((x) => ({ ...(x.id === identity ? x : { id: identity, ledger: null, inspection: null, review: null }), id: identity, ledger: l })), [identity]);
+  const setInspection = useCallback((i: Inspection | null) => setState((x) => ({ ...(x.id === identity ? x : { id: identity, ledger: null, inspection: null, review: null }), id: identity, inspection: i })), [identity]);
+  const setReview = useCallback((r: Review | null) => setState((x) => ({ ...(x.id === identity ? x : { id: identity, ledger: null, inspection: null, review: null }), id: identity, review: r })), [identity]);
   const [busy, setBusy] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [readsDown, setReadsDown] = useState(false);
@@ -116,11 +123,14 @@ export function useActivation(t?: ActivationTarget) {
     return createActivationFlow({ chainId, wallet: user, coin: t.token, ticker: t.ticker, pools, router: ADDRESSES.universalRouter, storage, reads, provider, locks });
   }, [ready, client, t, user, pools, wallet.data, connector, chainId]);
 
-  const fail = useCallback((e: unknown) => {
-    setReadsDown(isReadUnavailable(e));
-    setError(e instanceof Error ? e.message : String(e));
-    setReview(null);
-  }, []);
+  const fail = useCallback(
+    (e: unknown) => {
+      setReadsDown(isReadUnavailable(e));
+      setError(e instanceof Error ? e.message : String(e));
+      setReview(null);
+    },
+    [setReview],
+  );
 
   const refresh = useCallback(async () => {
     if (!flow || inFlight.current) return;
@@ -136,7 +146,7 @@ export function useActivation(t?: ActivationTarget) {
     } finally {
       setBusy("");
     }
-  }, [flow, fail]);
+  }, [flow, fail, setInspection, setLedger, setReview]);
 
   // the journal on mount and whenever the wallet, chain or launch changes; another tab's write reloads it
   useEffect(() => {
@@ -175,7 +185,7 @@ export function useActivation(t?: ActivationTarget) {
         setBusy("");
       }
     },
-    [flow, fail],
+    [flow, fail, setLedger, setReview],
   );
 
   const send = useCallback(async () => {
@@ -203,7 +213,7 @@ export function useActivation(t?: ActivationTarget) {
       inFlight.current = false;
       setBusy("");
     }
-  }, [flow, review, fail, refresh]);
+  }, [flow, review, fail, refresh, setInspection, setLedger, setReview]);
 
   const recover = useCallback(
     async (input: string) => {
@@ -220,7 +230,7 @@ export function useActivation(t?: ActivationTarget) {
         setBusy("");
       }
     },
-    [flow, fail],
+    [flow, fail, setInspection, setLedger],
   );
 
   // stages are labelled only from verified inspection; without one they are unknown, never "confirmed"

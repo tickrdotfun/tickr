@@ -8,7 +8,7 @@ A launch is priced in whatever it is quoted in. That quote is either an **offici
 
 |  | Official anchor | Invented ticker |
 | --- | --- | --- |
-| Quote asset | ETH, USDG, or an official Stock Token issued by Robinhood Assets, listed in `AnchorRegistry` | A `TickerToken`: 1 BANANA is always exactly 1 USDG, mint and redeem any time |
+| Quote asset | ETH, USDG, or an official Stock Token issued by Robinhood Assets, listed in `AnchorRegistry` | A `ManagedTickerToken`: 1 BANANA is redeemable for exactly 1 USDG, mint and redeem one for one between transactions (while the pool manager is locked), and the name runs its own pool at a dollar |
 | Entry point | `Factory.launchToken` / `LaunchAndBuyRouter.launchAndBuy` | `TickerLauncher.launch(symbol, ...)`: existing ticker or brand new, same call |
 | Pair approval | Global (`approvedPairTokens == true`) | Never global. Each coin under it is priced in it through the registrar path, on USDG's economics |
 | Issuer | Robinhood Assets for Stock Tokens; native / stablecoin issuer otherwise | Nobody. The wrapper has no owner and no admin function |

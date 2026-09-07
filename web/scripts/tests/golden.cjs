@@ -31,6 +31,8 @@ if (require.main === module) {
     const hexes = [...s.matchAll(/hex"([0-9a-f]+)"/g)];
     if (hexes.length !== 2) throw new Error("expected two hex literals in the Solidity test");
     s = s.replace(hexes[0][0], `hex"${g.quote.slice(2)}"`).replace(hexes[1][0], `hex"${g.coin.slice(2)}"`);
+    const { getAddress } = require("viem");
+    s = s.replace(/address constant USDG = 0x[0-9a-fA-F]{40};/, `address constant USDG = ${getAddress(INPUTS.usdg)};`).replace(/address constant HOOK = 0x[0-9a-fA-F]{40};/, `address constant HOOK = ${getAddress(INPUTS.hook)};`);
     fs.writeFileSync(solPath, s);
     console.log("golden.json and the Solidity test rewritten");
   } else {

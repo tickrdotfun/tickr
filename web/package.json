@@ -16,7 +16,8 @@
     "cf:preview": "DEPLOY_RECORD=deployments/4663-fork.json NEXT_PUBLIC_DEMO=1 NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_DEMO=1 NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com opennextjs-cloudflare build && NEXT_PUBLIC_DEMO=1 wrangler deploy --env=\"\"",
     "cf:build": "NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com opennextjs-cloudflare build",
     "cf:sepolia": "NEXT_PUBLIC_CHAIN_ID=11155111 NEXT_PUBLIC_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_CHAIN_ID=11155111 NEXT_PUBLIC_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com opennextjs-cloudflare build && wrangler deploy --env sepolia",
-    "cf:live": "CF_LIVE=1 NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com opennextjs-cloudflare build && wrangler deploy --env live"
+    "cf:live": "CF_LIVE=1 NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com opennextjs-cloudflare build && wrangler deploy --env live",
+    "cf:check": "CF_LIVE=1 NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com node scripts/sync-deployments.mjs && NEXT_PUBLIC_CHAIN_ID=4663 NEXT_PUBLIC_RPC_URL=https://rpc.mainnet.chain.robinhood.com opennextjs-cloudflare build && wrangler deploy --env check"
   },
   "dependencies": {
     "@tanstack/react-query": "^5",

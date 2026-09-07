@@ -24,6 +24,16 @@
       "ratelimits": [{ "name": "PIN_BURST", "namespace_id": "1003", "simple": { "limit": 3, "period": 60 } }],
       "kv_namespaces": [{ "binding": "NEXT_INC_CACHE_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }]
     },
+    "check": {
+      // the owner's private look at the real site before the domain switch: the live build, the live guard, the live
+      // secrets, under a workers.dev name the domain does not point at. deleted after the switch.
+      "name": "tickr-check",
+      "assets": { "binding": "ASSETS", "directory": ".open-next/assets" },
+      "observability": { "enabled": true },
+      "vars": { "TOKENS_URL": "https://tickr-tokens.tickrdotfun.workers.dev/" },
+      "ratelimits": [{ "name": "PIN_BURST", "namespace_id": "1004", "simple": { "limit": 3, "period": 60 } }],
+      "kv_namespaces": [{ "binding": "NEXT_INC_CACHE_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }]
+    },
     "live": {
       // tickrfun.gg: the full site against the real chain.
       "name": "tickr",
