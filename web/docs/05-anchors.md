@@ -39,60 +39,62 @@ The registry is the list of real assets. It answers two questions: *is this a re
 A one-for-one wrapper of USDG.
 
 ```
-contract TickerToken is ERC20 {
-    IERC20 public immutable counter;                       // USDG
-    function decimals() public view returns (uint8);       // the counter's, so one-for-one is literal
-    function mint(uint256 amount, address to) external;    // amount USDG in, amount BANANA out
-    function redeem(uint256 amount, address to) external;  // amount BANANA burned, amount USDG out
-    function reserve() external view returns (uint256);    // USDG held; always >= totalSupply()
+contract ManagedTickerToken is ERC20 {
+    IERC20 public immutable counter;                        // USDG
+    function decimals() public view returns (uint8);        // the counter's, so one for one is literal
+    function mint(uint256 amount, address to) external;     // amount USDG in, amount BANANA out; only while the pool manager is locked
+    function redeem(uint256 amount, address to) external;   // amount BANANA burned, amount USDG out; the same condition
+    function accounting() external view returns (uint256 backing, uint256 circulation); // backing >= circulation, always
+    function poolKey() external view returns (PoolKey);     // its own pool against USDG, described below
 }
 ```
 
-That is the whole contract. No owner, no fee, no pause, no blacklist, no upgrade, no mint without a deposit. A BANANA exists only because a USDG was deposited for it, and the only way that USDG leaves is against the burn of that BANANA. `totalSupply() <= reserve()` holds from the first block to the last.
+No owner, no fee on mint or redeem, no pause, no blacklist, no upgrade. Two kinds of BANANA exist. What is in circulation, everything a wallet or a pool other than the name's own holds, exists only because a dollar was paid for it: deposited through `mint`, or paid into the name's own pool by a buyer. That dollar is its backing, and the only way it leaves is against the burn of that BANANA, or against a sale of it back into the pool. The other kind is the wrapper's own inventory: BANANA it mints to itself and keeps in its own pool positions as the offer to buyers. Inventory is owed to nobody and backed by nothing, it is never in circulation, and it becomes circulation only at the moment a buyer pays for it. So `totalSupply()` counts both, and the number that means something is `circulatingSupply()`; the rule the contract enforces before and after every operation is `backing >= circulation`, not a comparison with the total supply.
 
-It is not a stablecoin in the sense that ever goes wrong. Nothing maintains the price: there is no peg to defend, only convertibility.
+It is not a stablecoin in the sense that ever goes wrong. Nothing maintains a price on other venues: what the contract gives is convertibility one for one with the USDG it holds, plus a market of its own that it keeps at a dollar. A name is redeemable for USDG; it is not a promise of a US dollar.
 
 ## Why the price holds
 
-A ticker's value is not defended, and it is not discovered by a market. It is defined by the contract.
+A ticker's value is not defended on someone else's market, and it is not discovered by one. It is defined by the contract, in two ways that back each other up.
 
 <figure class="doc-fig"><!-- alt:
                     mint
     1 USDG  ==================>  1 BANANA
     1 USDG  <==================  1 BANANA
                    redeem
-    one for one, no fee, no limit, open to anyone
+    one for one, no fee, while the pool manager is locked
 -->
-<svg viewBox="0 0 680 172" role="img" aria-label="One USDG can always be minted into one BANANA, and one BANANA redeemed back into one USDG, at a one to one rate with no fee"><defs><marker id="fig-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--tickr-signal)"></path></marker></defs><rect x="25" y="40" width="175" height="90" rx="45" fill="none" stroke="var(--border)"></rect><text x="112" y="80" text-anchor="middle" fill="var(--text)" font-size="22" font-weight="700">1 USDG</text><text x="112" y="102" text-anchor="middle" fill="var(--dim)" font-size="12.5">a real dollar</text><rect x="480" y="40" width="175" height="90" rx="45" fill="none" stroke="color-mix(in srgb, var(--tickr-sw-yellow) 42%, transparent)"></rect><text x="567" y="80" text-anchor="middle" fill="var(--tickr-sw-yellow)" font-size="22" font-weight="700">1 BANANA</text><text x="567" y="102" text-anchor="middle" fill="var(--dim)" font-size="12.5">an invented ticker</text><text x="340" y="59" text-anchor="middle" fill="var(--muted)" font-size="13" font-weight="600">mint</text><line x1="212" y1="70" x2="466" y2="70" stroke="var(--tickr-signal)" stroke-width="2" marker-end="url(#fig-a)"></line><text x="340" y="93" text-anchor="middle" fill="var(--dim)" font-size="12">1 : 1, no fee, any time</text><line x1="468" y1="104" x2="214" y2="104" stroke="var(--tickr-signal)" stroke-width="2" marker-end="url(#fig-a)"></line><text x="340" y="124" text-anchor="middle" fill="var(--muted)" font-size="13" font-weight="600">redeem</text></svg>
+<svg viewBox="0 0 680 172" role="img" aria-label="One USDG can be minted into one BANANA, and one BANANA redeemed back into one USDG, at a one to one rate with no fee, outside any route"><defs><marker id="fig-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="currentColor"/></marker></defs><g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M180 66H500" marker-end="url(#fig-a)"/><path d="M500 106H180" marker-end="url(#fig-a)"/></g><g font-family="ui-monospace, monospace" font-size="14" fill="currentColor"><text x="60" y="70">1 USDG</text><text x="60" y="110">1 USDG</text><text x="520" y="70">1 BANANA</text><text x="520" y="110">1 BANANA</text><text x="320" y="52" text-anchor="middle">mint</text><text x="320" y="130" text-anchor="middle">redeem</text><text x="340" y="160" text-anchor="middle" font-size="12">one for one, no fee, while the pool manager is locked</text></g></svg>
 </figure>
 
-A name is one to twelve ASCII letters or digits, case-folded to upper case; nothing else, so no name can look like NVDA, USDG or ETH through another script. A coin's own symbol follows the same rule, and a coin's name is printable ASCII: letters, digits, punctuation and single spaces, none at either end. so the reserved names cannot be dodged by a space or by a lookalike letter from another script; emoji and other scripts belong in the description and the image. `mint` pulls `amount` of USDG and issues exactly what arrived, which is `amount` for USDG. `redeem` burns `amount` and returns exactly `amount` of USDG. Neither has a fee, a cap, a cooldown, or a check on who is calling, and there is no function anywhere that issues a unit without a deposit behind it. `totalSupply() <= reserve()` therefore holds in every state the contract can reach.
+A name is one to twelve ASCII letters or digits, case-folded to upper case; nothing else, so no name can look like NVDA, USDG or ETH through another script. A coin's own symbol follows the same rule, and a coin's name is printable ASCII: letters, digits, punctuation and single spaces, none at either end.
 
 Two consequences follow, and together they are the whole argument:
 
-- **No ceiling to break.** If a ticker ever traded above its counter asset, anyone could mint at one-for-one and sell into that price. Minting is unbounded, so the supply available to meet a premium is unbounded.
-- **No floor to fall through.** If it ever traded below, anyone could buy and redeem for the full amount. The vault can always pay, because supply never exceeds reserve.
+- **No ceiling to break.** If a ticker ever traded above a dollar somewhere, anyone could mint at one for one and sell into that price. Minting is open to every address, so the supply available to meet a premium is bounded only by the dollars people bring.
+- **No floor to fall through.** If it ever traded below a dollar somewhere, anyone could buy there and redeem for the full amount. The wrapper can always pay, because backing covers circulation.
 
 <figure class="doc-fig"><!-- alt:
-   above $1: anyone mints at a dollar and sells
+   above $1 elsewhere: anyone mints at a dollar and sells
                         |
                         v
    $1.00 =====================================
                         ^
                         |
-   below $1: anyone buys it and redeems for a dollar
+   below $1 elsewhere: anyone buys it and redeems for a dollar
 -->
-<svg viewBox="0 0 680 196" role="img" aria-label="Above a dollar anyone mints at a dollar and sells; below it anyone buys and redeems for a dollar. Both push the price back to the counter asset."><defs><marker id="fig-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--tickr-sw-yellow)"></path></marker></defs><text x="340" y="26" text-anchor="middle" fill="var(--muted)" font-size="13.5">above a dollar, anyone mints at one-for-one and sells</text><line x1="340" y1="42" x2="340" y2="86" stroke="var(--tickr-sw-yellow)" stroke-width="2" marker-end="url(#fig-b)"></line><line x1="40" y1="98" x2="640" y2="98" stroke="var(--tickr-signal)" stroke-width="2.5"></line><text x="40" y="88" fill="var(--tickr-signal)" font-size="14" font-weight="700">$1.00</text><text x="640" y="88" text-anchor="end" fill="var(--dim)" font-size="12.5">the only price that holds</text><line x1="340" y1="154" x2="340" y2="110" stroke="var(--tickr-sw-yellow)" stroke-width="2" marker-end="url(#fig-b)"></line><text x="340" y="176" text-anchor="middle" fill="var(--muted)" font-size="13.5">below it, anyone buys and redeems for the full amount</text></svg>
+<svg viewBox="0 0 680 196" role="img" aria-label="Above a dollar elsewhere anyone mints at a dollar and sells; below it anyone buys and redeems for a dollar. Both push the price back to the counter asset."><defs><marker id="fig-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="currentColor"/></marker></defs><g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M60 98H620"/><path d="M340 40V86" marker-end="url(#fig-b)"/><path d="M340 156V110" marker-end="url(#fig-b)"/></g><g font-family="ui-monospace, monospace" font-size="13" fill="currentColor"><text x="340" y="30" text-anchor="middle">above $1 elsewhere: anyone mints at a dollar and sells</text><text x="340" y="180" text-anchor="middle">below $1 elsewhere: anyone buys it and redeems for a dollar</text><text x="30" y="102">$1.00</text></g></svg>
 </figure>
 
-Both trades are riskless while the vault is open, which it always is. Note that neither depends on tickr, on a market maker, or on anyone's good behaviour: the arbitrage is available to every address on the chain, permissionlessly.
+Both trades are open to every address on the chain, permissionlessly, while the pool manager is locked, which is between transactions, so not from inside a route that is already trading. They are not free of risk: the other venue's price, its fees and its depth are that venue's, and a route through the name's own pool pays that pool's fee, spread and rounding, is bounded by its offer, and may visit it once per transaction. Neither trade depends on tickr, on a market maker, or on anyone's good behaviour.
 
+The name's own pool, described further down, is the second way: the wrapper keeps it at a dollar itself, so the first way is rarely needed.
 
 This is what "only the coin is speculative" means in the contracts rather than in the copy: the pair is defined, and the coin is discovered.
 
 ## A coin under a ticker
 
-A coin priced in an invented ticker is an ordinary launch whose pair is the wrapper. `TickerLauncher.launch(symbol, coin, launchConfigId)` creates the ticker if it is new and calls `Factory.launchTokenWithPair` with the USDG economics: the pool opens at 3,236 of the wrapper per billion coins, the entire supply locked in it from the first block. `launchAndBuy(symbol, coin, launchConfigId, usdgIn, minTokensOut)` does the same and then the creator's first buy: `usdgIn` USDG is pulled from the caller, wrapped one for one, and spent in the new pool.
+A coin priced in an invented ticker is an ordinary launch whose pair is the wrapper. `TickerLauncher.launch(symbol, coin, launchConfigId)` creates the ticker if it is new and calls `Factory.launchTokenWithPair` with the USDG economics: the pool opens at 3,236 of the wrapper per billion coins, the entire supply locked in it from the first block. `launchAndBuy(symbol, coin, launchConfigId, usdgIn, minTokensOut)` does the same and then the creator's first buy: `usdgIn` USDG is pulled from the caller, wrapped one for one, and spent in the new pool. That first buy is paid in USDG the caller already holds, so from the site it is one approval and one launch, then the two activation buys: nothing here promises the reference's exact count of signatures for every mode, only its order.
 
 Buying such a coin from the site is one transaction paid in ETH or USDG: the zap turns ETH into USDG through the live pool, turns that into the ticker, through the ticker's own pool or by wrapping one for one, whichever gives more, and buys from the coin's pool. Selling runs the same route backwards and ends in USDG or ETH. Nobody has to hold the wrapper.
 

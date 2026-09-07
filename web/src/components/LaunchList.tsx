@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useActivationSignals } from "./token/Activate";
 import { isOfficialCoin } from "@/lib/addresses";
 import { useMarketData, type Row, type WindowKey } from "@/hooks/useMarketData";
 import { DEPLOYED } from "@/lib/addresses";
@@ -148,7 +149,7 @@ function LaunchCard({ r, window, partial }: { r: Row; window: WindowKey; partial
           <span className="coin-name truncate">{r.name ?? shortAddr(r.launch.token)}</span>
           <span className="coin-ticker num">{r.symbol ?? ""}</span>
           {isOfficialCoin(r.launch.token) && <span className="badge sw-green">official</span>}
-          {r.activated === false && <span className="badge sw-yellow">not activated</span>}
+          {r.fresh && <ActivationMark r={r} />}
         </div>
         <div className="coin-stats">
           <span>
@@ -168,4 +169,11 @@ function LaunchCard({ r, window, partial }: { r: Row; window: WindowKey; partial
       </div>
     </Link>
   );
+}
+
+/** The same evidence the coin's page uses, for a fresh coin under a name: a mark only on a definite "not yet". */
+function ActivationMark({ r }: { r: Row }) {
+  const signals = useActivationSignals(r.launch.token, r.quote.address, { id: r.launch.poolId }, r.launch.blockNumber, true);
+  if (signals.data?.activated !== false) return null;
+  return <span className="badge sw-yellow">not activated</span>;
 }

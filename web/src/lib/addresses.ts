@@ -1,4 +1,4 @@
-import type { Address } from "viem";
+import { getAddress, type Address } from "viem";
 import deployments from "./deployments.json";
 
 export const ZERO: Address = "0x0000000000000000000000000000000000000000";
@@ -37,7 +37,8 @@ const d = deployments as Deployments;
 
 function pick(json: string | undefined, env: string | undefined, fallback: Address = ZERO): Address {
   const v = json && json !== ZERO ? json : env && env !== "" ? env : fallback;
-  return v as Address;
+  // in checksum form, whatever case the record or the environment used: the client library refuses a wrong case
+  return /^0x[0-9a-fA-F]{40}$/.test(v) ? getAddress(v) : (v as Address);
 }
 
 /** The official coin: TICKR, priced in FUN, the first launch. Zero until a deployment records it. */

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChainId, usePublicClient, useReadContract } from "wagmi";
 import { formatEther, formatUnits, parseAbiItem, toEventSelector, type Address } from "viem";
@@ -24,7 +24,7 @@ const explorer = (h: string) => `https://robinhoodchain.blockscout.com/tx/${h}`;
  * transaction through Uniswap's canonical router. The name into the creator's wallet first, then the coin with fresh
  * ETH. A coin is shown as done only when both receipts are canonical, ordered and show the delivery.
  */
-export function ActivateCard({ token, title }: { token: Address; title?: string }) {
+export function ActivateCard({ token, title, onDone }: { token: Address; title?: string; onDone?: () => void }) {
   const d = useTokenData(token);
   const own = useReadContract({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "poolKeyOf", args: [token], query: { enabled: !!d.launch, staleTime: Infinity } });
   const target = useMemo((): ActivationTarget | undefined => {
@@ -35,6 +35,12 @@ export function ActivateCard({ token, title }: { token: Address; title?: string 
   const [hash, setHash] = useState("");
   const [ack, setAck] = useState(false);
   const reviewKey = a.review ? `${a.review.phase}:${a.review.preparedAt}` : "none";
+  const doneOnce = useRef(false);
+  useEffect(() => {
+    if (!a.done || !onDone || doneOnce.current) return;
+    doneOnce.current = true;
+    onDone();
+  }, [a.done, onDone]);
   const qs = d.quote?.symbol ?? "the name";
   const ts = d.meta.symbol ?? "the coin";
   const symbol = a.phase === "quote" ? qs : ts;
@@ -89,11 +95,11 @@ export function ActivateCard({ token, title }: { token: Address; title?: string 
             top. nothing is sent automatically, and nothing is ever sent twice.
           </p>
           <ul className="activate-steps mt-4">
-            <li data-done={a.next >= 1}>
-              <span className="num">1</span> buy {qs} through its own pool, into your wallet {a.next >= 1 && <em>confirmed</em>}
+            <li data-done={a.stageStatus(0) === "confirmed"}>
+              <span className="num">1</span> buy {qs} through its own pool, into your wallet <em>{a.stageStatus(0)}</em>
             </li>
-            <li data-done={a.next >= 2}>
-              <span className="num">2</span> buy {ts}, after step 1 is confirmed {a.next >= 2 && <em>confirmed</em>}
+            <li data-done={a.stageStatus(1) === "confirmed"}>
+              <span className="num">2</span> buy {ts}, after step 1 is confirmed <em>{a.stageStatus(1)}</em>
             </li>
           </ul>
           {a.busy && (
@@ -112,9 +118,7 @@ export function ActivateCard({ token, title }: { token: Address; title?: string 
               <button type="button" className="btn" disabled={!!a.busy || !hash} onClick={() => void a.recover(hash)}>
                 match this hash
               </button>
-              <button type="button" className="btn" disabled={!!a.busy} onClick={() => void a.dismissUnsent()}>
-                the wallet sent nothing
-              </button>
+              <span className="text-muted text-[13px]">the wallet&apos;s history shows the hash. if it shows nothing at all, the request is kept until it does; nothing is sent again.</span>
             </div>
           )}
           {!a.unknown && !a.unverified && !a.review && (
@@ -187,6 +191,7 @@ export function ActivateCard({ token, title }: { token: Address; title?: string 
 }
 
 const SWAP = parseAbiItem("event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)");
+const INITIALIZE = parseAbiItem("event Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)");
 const TRANSFER_TOPIC = toEventSelector("event Transfer(address indexed from, address indexed to, uint256 value)");
 
 /**
@@ -208,51 +213,56 @@ export function useActivationSignals(token?: Address, ticker?: Address, own?: { 
       if (!client || !token || !ticker || !own) return { activated: null, name: null, coin: null };
       const latest = await client.getBlockNumber();
       const from = launchBlock ?? 0n;
+      // no code: the client reports an empty account as "0x" or as undefined; a thrown read is unknown, not "no code"
+      const isWallet = async (addr: Address): Promise<boolean | null> => {
+        try {
+          const code = await client.getCode({ address: addr });
+          return code === undefined || code === "0x";
+        } catch {
+          return null;
+        }
+      };
+      const deliveredTo = (rc: { logs: { address: Address; topics: readonly `0x${string}`[] }[] }, asset: Address): Address[] =>
+        rc.logs.filter((x) => sameAddr(x.address, asset) && x.topics.length === 3 && x.topics[0] === TRANSFER_TOPIC && !!x.topics[1] && sameAddr(`0x${x.topics[1].slice(26)}`, ADDRESSES.poolManager)).map((x) => `0x${x.topics[2]!.slice(26)}` as Address);
+      // the name: a swap on its pool whose transaction handed the name to an ordinary wallet
       const bridgeId = poolId(managedKey(ticker));
-      // the name: a swap on its pool whose transaction handed the name to an account without code
       const nameSwaps = await adaptiveLogs((a, b) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: bridgeId }, fromBlock: a, toBlock: b }), from, latest);
       let name: boolean | null = nameSwaps.partial ? null : false;
       for (const l of nameSwaps.logs.slice(-12).reverse()) {
         if (!l.transactionHash) continue;
         const rc = await client.getTransactionReceipt({ hash: l.transactionHash }).catch(() => null);
         if (!rc) {
-          name = name === false ? null : name;
+          name = null;
           continue;
         }
-        for (const x of rc.logs) {
-          if (!sameAddr(x.address, ticker) || x.topics.length !== 3 || x.topics[0] !== TRANSFER_TOPIC) continue;
-          const fromTopic = x.topics[1];
-          const toTopic = x.topics[2];
-          if (!fromTopic || !toTopic || !sameAddr(`0x${fromTopic.slice(26)}`, ADDRESSES.poolManager)) continue;
-          const to = `0x${toTopic.slice(26)}` as Address;
-          const code = await client.getCode({ address: to }).catch(() => undefined);
-          if (code === undefined) {
-            name = name === false ? null : name;
-            continue;
-          }
-          if (code === "0x") name = true;
+        for (const to of deliveredTo(rc, ticker)) {
+          const w = await isWallet(to);
+          if (w === null) name = null;
+          else if (w) name = true;
+          if (name === true) break;
         }
         if (name === true) break;
       }
-      // the coin: a swap on its pool in a transaction other than the pool's first, delivering the coin to a wallet
+      // the coin: a swap on its pool in a transaction other than the one that initialised it, delivering the coin to
+      // a wallet. the launch transaction is found by its Initialize log; if that read fails, nothing is claimed
+      const inits = await client.getLogs({ address: ADDRESSES.poolManager, event: INITIALIZE, args: { id: own.id }, fromBlock: from, toBlock: latest }).catch(() => null);
+      const launchTx = inits?.[0]?.transactionHash?.toLowerCase();
       const coinSwaps = await adaptiveLogs((a, b) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: own.id }, fromBlock: a, toBlock: b }), from, latest);
-      let coin: boolean | null = coinSwaps.partial ? null : false;
-      const first = coinSwaps.logs[0]?.transactionHash;
-      for (const l of coinSwaps.logs.slice(-12).reverse()) {
-        if (!l.transactionHash || (first && l.transactionHash === first && coinSwaps.logs.length === 1)) continue;
-        if (first && l.transactionHash === first) continue;
-        const rc = await client.getTransactionReceipt({ hash: l.transactionHash }).catch(() => null);
-        if (!rc) {
-          coin = coin === false ? null : coin;
-          continue;
-        }
-        const delivered = rc.logs.some((x) => sameAddr(x.address, token) && x.topics.length === 3 && x.topics[0] === TRANSFER_TOPIC && !!x.topics[1] && sameAddr(`0x${x.topics[1].slice(26)}`, ADDRESSES.poolManager));
-        if (delivered) {
-          coin = true;
-          break;
+      let coin: boolean | null = coinSwaps.partial || !launchTx ? null : false;
+      if (launchTx) {
+        for (const l of coinSwaps.logs.slice(-12).reverse()) {
+          if (!l.transactionHash || l.transactionHash.toLowerCase() === launchTx) continue;
+          const rc = await client.getTransactionReceipt({ hash: l.transactionHash }).catch(() => null);
+          if (!rc) {
+            coin = null;
+            continue;
+          }
+          if (deliveredTo(rc, token).length > 0) {
+            coin = true;
+            break;
+          }
         }
       }
-      // the pool's first transaction is the launch: only a later one counts, so a single swap in the launch transaction is nothing
       const activated = name === true && coin === true ? true : name === null || coin === null ? null : false;
       return { activated, name, coin };
     },

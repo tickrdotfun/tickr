@@ -14,7 +14,6 @@ import { useLaunches, type Launch } from "./useLaunches";
 const FEES_COLLECTED = parseAbiItem(
   "event FeesCollected(address indexed token, uint256 quoteCollected, uint256 coinCollected, uint256 protocolQuote, uint256 creatorQuote, uint256 clubQuote, uint256 creatorCoin, uint256 burnedCoin)",
 );
-const TRANSFER = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 const SWAP = parseAbiItem(
   "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
 );
@@ -39,9 +38,8 @@ export type Row = {
   buys: number;
   lastBuyBlock: bigint;
   createdBlock: bigint;
-  /** the two buys after the launch have landed (a buy in a later block, and the name bought into a wallet);
-   *  undefined when the grid's window does not reach back to the launch, so nothing is claimed */
-  activated?: boolean;
+  /** a coin under a name launched inside the grid's window: its card asks the activation signal the coin's page uses */
+  fresh: boolean;
 };
 
 export type QuoteKind = "native" | "stable" | "official" | "ticker" | "coin" | "erc20";
@@ -197,19 +195,6 @@ export function useMarketData(window: WindowKey = "all") {
         vol.set(id, e);
       }
 
-      // which names have been bought into a wallet through their own pool: the pool manager paying an address without
-      // code. read once from the start, few logs ever match, and a name stays activated for good
-      const tickerAddrs = quoteAddrs.filter((a) => quoteInfo.get(a.toLowerCase())?.kind === "ticker");
-      const activatedTickers = new Set<string>();
-      if (tickerAddrs.length && !isZero(ADDRESSES.poolManager)) {
-        const transfers = await adaptive((a, b) => client.getLogs({ address: tickerAddrs, event: TRANSFER, args: { from: ADDRESSES.poolManager }, fromBlock: a, toBlock: b }), START_BLOCK, latest);
-        const targets = Array.from(new Set(transfers.map((l) => `${(l.address ?? "").toLowerCase()}|${(l.args.to ?? "").toLowerCase()}`)));
-        const codes = await Promise.all(targets.map((t) => client.getCode({ address: t.split("|")[1] as Address }).catch(() => "0x!")));
-        targets.forEach((t, i) => {
-          if (!codes[i] || codes[i] === "0x") activatedTickers.add(t.split("|")[0]);
-        });
-      }
-
       // what creators have been paid in the quote, from every collection the locker ever logged, priced like volume
       const collections = await adaptive((a, b) => client.getLogs({ address: ADDRESSES.launchLocker, event: FEES_COLLECTED, args: { token: list.map((l) => l.token) }, fromBlock: a, toBlock: b }), START_BLOCK, latest);
       const creatorQuoteBy = new Map<string, bigint>();
@@ -254,13 +239,9 @@ export function useMarketData(window: WindowKey = "all") {
           buys: v?.buys ?? 0,
           lastBuyBlock: v?.lastBuy ?? 0n,
           createdBlock: l.blockNumber ?? 0n,
-          // a mark only for a coin under a name launched inside the window, from this window's own reads: no buy in a
-          // later block, or its name never bought into a wallet, means not activated as far as the grid can tell.
-          // nothing is remembered; a partial read says nothing
-          activated:
-            partial || q.kind !== "ticker" || l.blockNumber === undefined || l.blockNumber < cutoffBlock
-              ? undefined
-              : activatedTickers.has(l.pairToken.toLowerCase()) && (v?.lastBuy ?? 0n) > l.blockNumber,
+          // a coin under a name launched inside the window is fresh enough for the card to ask the same activation
+          // signal the coin's page uses; nothing is inferred here
+          fresh: q.kind === "ticker" && l.blockNumber !== undefined && l.blockNumber >= cutoffBlock,
         };
       });
 

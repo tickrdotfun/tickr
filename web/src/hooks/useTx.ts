@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
-import { decodeErrorResult, type Abi, type Hash, type Hex } from "viem";
+import { decodeErrorResult, type Abi, type Hash, type Hex, type TransactionReceipt } from "viem";
 import { errorMessage } from "@/lib/format";
 import { DEMO } from "@/lib/demoTransport";
 import { ADDRESSES } from "@/lib/addresses";
@@ -11,7 +11,7 @@ import type { wagmiConfig } from "@/lib/wagmi";
 
 export type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
 export type WriteFn = ReturnType<typeof useWriteContract<typeof wagmiConfig>>["writeContractAsync"];
-export type TxStep = { label: string; request: (write: WriteFn) => Promise<Hash> };
+export type TxStep = { label: string; request: (write: WriteFn) => Promise<Hash>; /** called with the hash the moment the wallet returns it, before any wait */ onHash?: (hash: Hash) => void };
 
 /**
  * Imperative multi-step transaction runner (e.g. approve then buy).
@@ -91,9 +91,16 @@ export function useTx() {
   const [step, setStep] = useState<string | undefined>();
   // the failure behind the last undefined result, for callers that want to react to a specific revert
   const lastError = useRef<unknown>(undefined);
+  // every receipt this runner waited for, by hash, so a caller never fetches one a second time
+  const receipts = useRef<Map<Hash, TransactionReceipt>>(new Map());
+  // the hash of the last step the wallet returned, kept even when the wait after it failed
+  const lastHash = useRef<Hash | undefined>(undefined);
 
   const run = useCallback(
     async (steps: TxStep[]): Promise<Hash | undefined> => {
+      // per-run state first, before any guard can return early: a hash from an earlier run must never be read as this one's
+      lastHash.current = undefined;
+      lastError.current = undefined;
       setError(undefined);
       setHash(undefined);
       // A preview build has no chain behind it. Reads are replayed from a fixture, but a write goes through the
@@ -117,6 +124,12 @@ export function useTx() {
           setStatus("signing");
           const h = await s.request(writeContractAsync);
           last = h;
+          lastHash.current = h;
+          try {
+            s.onHash?.(h);
+          } catch {
+            // a caller's own bookkeeping must not stop the wait
+          }
           setHash(h);
           setStatus("confirming");
           if (client) {
@@ -132,8 +145,15 @@ export function useTx() {
             if (replaced) {
               if (replaced.reason !== "repriced") throw new Error(`${s.label}: ${replaced.reason === "cancelled" ? "cancelled in the wallet" : "replaced in the wallet by another transaction"}. nothing was sent.`);
               last = replaced.hash;
+              lastHash.current = replaced.hash;
+              try {
+                s.onHash?.(replaced.hash);
+              } catch {
+                // as above
+              }
               setHash(replaced.hash);
             }
+            receipts.current.set(rc.transactionHash, rc);
             if (rc.status !== "success") throw await minedRevert(client, rc.transactionHash, rc.blockNumber, s.label);
           }
         }
@@ -158,5 +178,5 @@ export function useTx() {
     setStep(undefined);
   }, []);
 
-  return { run, status, hash, error, step, reset, lastError, busy: status === "signing" || status === "confirming" };
+  return { run, status, hash, error, step, reset, lastError, receipts, lastHash, busy: status === "signing" || status === "confirming" };
 }

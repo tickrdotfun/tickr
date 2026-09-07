@@ -1,7 +1,8 @@
 // Copies ../contracts/deployments/<chain id>.json (NEXT_PUBLIC_CHAIN_ID, default 4663) into src/lib/deployments.json when it exists,
 // otherwise resets it to deployments.example.json (all-zero protocol addresses).
 // Runs automatically before `pnpm dev` / `pnpm build`.
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { getAddress } from "viem";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +26,19 @@ if (existsSync(src)) {
 } else {
   copyFileSync(example, dest);
   console.log("deployments: nothing to read and nothing in the tree, using example (zero addresses)");
+}
+
+// every address in the record is written in its checksummed form: a mixed-case value with the wrong case is not an
+// address to the client library, and the record is what the site and its tests read
+{
+  const record = JSON.parse(readFileSync(dest, "utf8"));
+  let fixed = 0;
+  for (const [k, v] of Object.entries(record)) {
+    if (typeof v !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(v)) continue;
+    const c = getAddress(v);
+    if (c !== v) { record[k] = c; fixed++; }
+  }
+  if (fixed) { writeFileSync(dest, JSON.stringify(record, null, 2) + "\n"); console.log(`deployments: ${fixed} address(es) rewritten in checksum form`); }
 }
 
 // a live build must carry real addresses: a preview replays a fixture and the coming-soon landing has no chain

@@ -1,17 +1,14 @@
 // Offline cases for the pure activation library: the calldata, the checks on it, the journal and what a receipt must show.
 // Run: node --test scripts/tests/activation.test.cjs
 "use strict";
-const fs = require("node:fs"), path = require("node:path"), assert = require("node:assert/strict"), { test } = require("node:test");
-const ts = require("typescript"), v = require("viem");
-require.extensions[".ts"] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText, f);
-process.env.NEXT_PUBLIC_UNIVERSAL_ROUTER = "0x8876789976dEcBfCbBbe364623C63652db8C0904";
-process.env.NEXT_PUBLIC_MANAGED_TICKER_HOOK = "0x3eC51B11c1AfaaF7B084B7A31B6945413CC5Aac0";
-const a = require(path.join(__dirname, "..", "..", "src", "lib", "activation.ts"));
-const { ADDRESSES } = require(path.join(__dirname, "..", "..", "src", "lib", "addresses.ts"));
-const wallet = "0x00000000000000000000000000000000000000a1";
-const coin = "0x1ebf16a641e5f5e1bf0ed4fa8c126ecf590523cd", ticker = "0xf1ff8ca3e0e7f843365b7c7c8e38a093dd0a82d0";
+const assert = require("node:assert/strict"), { test } = require("node:test");
+const v = require("viem");
+const fx = require("./fixture.cjs");
+const a = fx.src("lib/activation.ts");
+const { ADDRESSES } = fx.src("lib/addresses.ts");
+const { wallet, coin, ticker } = fx;
 const pools = a.poolsFor(ticker, { currency0: coin, currency1: ticker, fee: 10000, tickSpacing: 10, hooks: v.zeroAddress });
-const hash = (n) => `0x${n.toString(16).padStart(64, "0")}`;
+const hash = fx.hashOf;
 function review(phase = "quote", quote = 1240000n) {
   const minimum = a.minimumOutput(quote), deadline = 1_800_000_000;
   const data = a.encodeBuy({ wallet, pools, phase, amountIn: a.AMOUNTS[phase], minimumOut: minimum, deadline });
@@ -99,3 +96,10 @@ test("a submitted transaction must match the reviewed identity", () => {
   assert.throws(() => a.matchIdentity({ from: wallet, to: r.to, input: "0x00", nonce: 0x37, value: a.AMOUNTS.quote, chainId: 4663 }, r));
 });
 test("a review expires", () => { const r = review(); assert.equal(a.reviewExpired(r), false); r.preparedAt = Date.now() - 200_000; assert.equal(a.reviewExpired(r), true); });
+test("the golden activation calldata: the site's encoder, golden.json and the Solidity test agree byte for byte", () => {
+  const g = require("./golden.cjs");
+  const fresh = g.generate(), saved = JSON.parse(require("node:fs").readFileSync(g.jsonPath, "utf8")), sol = g.solidityHexes();
+  assert.equal(fresh.quote, saved.quote); assert.equal(fresh.coin, saved.coin);
+  assert.equal(sol.quote, saved.quote); assert.equal(sol.coin, saved.coin);
+  assert.equal((fresh.quote.length - 2) / 2, 1604); assert.equal((fresh.coin.length - 2) / 2, 1828);
+});

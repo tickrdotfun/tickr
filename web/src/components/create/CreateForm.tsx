@@ -2,8 +2,9 @@
 
 import type { Abi } from "viem";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useAccount, usePublicClient, useReadContract } from "wagmi";
+import { useAccount, useChainId, usePublicClient, useReadContract } from "wagmi";
 import { erc20Abi, formatUnits, isAddress, parseAbi, parseEther, parseEventLogs, toHex, type Address, type Hex } from "viem";
 
 /** The OpenZeppelin token errors a launch can surface, so a pre-flight names them instead of printing a selector. */
@@ -40,6 +41,9 @@ import { GlideIndicator, useGlider } from "../motion/Glide";
 import { Ceremony, useCeremony } from "../motion/Ceremony";
 import { REEL_TICKERS } from "../motion/TickerReel";
 import { ActivateCard } from "../token/Activate";
+import { clearLaunch, launchUnresolved, loadLaunch, saveLaunch, type LaunchIntent } from "@/lib/launchJournal";
+import { readBounded } from "@/lib/readRpc";
+import { explorerTx } from "@/lib/chain";
 
 type Tab = "eth" | "usdg" | "official" | "diy" | "coin" | "market";
 const SOCIAL_FIELDS = [
@@ -115,6 +119,9 @@ function vanityInputs(f: {
   return { initCodeHash, initiator: f.user, key: `${f.seed}:${initCodeHash}:${f.user.toLowerCase()}` };
 }
 
+/** The clock, outside the component so a handler may read it without the render rules objecting. */
+const nowMs = () => Date.now();
+
 function randomSalt(): Hex {
   const b = new Uint8Array(32);
   crypto.getRandomValues(b);
@@ -127,14 +134,27 @@ export function CreateForm() {
   const tx = useTx();
   const assets = useQuoteAssets();
   const ceremony = useCeremony();
+  const chainId = useChainId();
   const launchedToken = useRef<Address | undefined>(undefined);
-  const launchedBlock = useRef<bigint | undefined>(undefined);
-  // the launch landed: the coin is live, and the page shows its last step, the two buys that activate it, until
-  // they land. no link to the coin, nothing to share, before that
-  const [activating, setActivating] = useState<{ token: Address; block?: bigint } | undefined>(undefined);
+  // the launch landed: under an invented name the page shows its last step, the two buys that activate it, until
+  // they land, and no link before that; any other launch shows its receipt and its link
+  const [activating, setActivating] = useState<{ token: Address; isTicker: boolean; hash?: Hex } | undefined>(undefined);
+  // a launch this wallet started and this browser has not seen through: reconciled before anything new is offered
+  const [pendingLaunch, setPendingLaunch] = useState<LaunchIntent | undefined>(undefined);
+  const [pendingNote, setPendingNote] = useState<string>("");
+  const [recoverHash, setRecoverHash] = useState("");
   const retriedSquat = useRef(false);
-  // one salt per attempt, so a retry after a failed send lands on the same address
-  const [seed, setSeed] = useState<Hex>(randomSalt); // the salt seed: one per launch, regenerated after each success
+  // one salt per attempt, so a retry after a failed send lands on the same address; a launch resumed from the
+  // journal keeps its seed, so a second signature could only ever be the same coin, which cannot deploy twice
+  const [seed, setSeed] = useState<Hex>(() => {
+    try {
+      const w = typeof window !== "undefined" ? window : undefined;
+      const raw = w?.localStorage.getItem("tickr.launch.seed.hint");
+      return raw && /^0x[0-9a-f]{64}$/i.test(raw) ? (raw as Hex) : randomSalt();
+    } catch {
+      return randomSalt();
+    }
+  });
   // every coin's address ends in 6942: the salt is ground from the seed above once the fields are final. the review
   // and the transaction share one cache so the address shown is the address deployed.
   const vanityCache = useRef<Map<string, Promise<GrindResult>>>(new Map());
@@ -453,6 +473,102 @@ export function CreateForm() {
     return { label: `Approve ${symbolLabel}`, request: { abi: erc20Abi, address: token, functionName: "approve", args: [spender, amount] } };
   }
 
+  const storage = () => window.localStorage;
+
+  /** Reads the record of a launch this wallet started and settles it: the receipt, the coin, or the fact that the wallet's answer was lost. Sends nothing. */
+  async function reconcile(v: LaunchIntent): Promise<void> {
+    if (!client || !user) return;
+    if (!v.hash) {
+      setPendingLaunch(v);
+      setPendingNote("the wallet's answer to your launch was lost. if the wallet shows the transaction, paste its hash; if the wallet shows nothing, it declined and you can dismiss this.");
+      return;
+    }
+    try {
+      const rc = await readBounded(() => client.getTransactionReceipt({ hash: v.hash! }).catch((e) => (/not be found|NotFound|could not be found/i.test(String(e)) ? null : Promise.reject(e))));
+      if (!rc) {
+        setPendingLaunch(v);
+        setPendingNote("your launch is pending on chain. reads continue; nothing is resent.");
+        return;
+      }
+      if (rc.status !== "success") {
+        const done: LaunchIntent = { ...v, status: "reverted" };
+        saveLaunch(storage(), done);
+        setPendingLaunch(done);
+        setPendingNote("your launch reverted on chain and used its fee's gas only. you can start a new one.");
+        return;
+      }
+      const logs = parseEventLogs({ abi: FactoryAbi, eventName: "TokenLaunched", logs: rc.logs });
+      const token = logs[0]?.args.token;
+      if (!token) throw new Error("the receipt has no launch in it");
+      const done: LaunchIntent = { ...v, status: "launched", token, poolId: logs[0]?.args.poolId, blockNumber: rc.blockNumber.toString() };
+      saveLaunch(storage(), done);
+      setPendingLaunch(undefined);
+      setPendingNote("");
+      launchedToken.current = token;
+      setActivating({ token, isTicker: v.isTicker, hash: v.hash });
+    } catch (e) {
+      setPendingLaunch(v);
+      setPendingNote(`the chain could not be read for your launch (${errorMessage(e)}). reads are retried; nothing is resent.`);
+    }
+  }
+
+  /** The hash the wallet shows for a launch whose answer was lost, checked against the record before it is trusted. */
+  async function recoverLaunch(input: string): Promise<void> {
+    if (!client || !user || !pendingLaunch) return;
+    const h = input.trim();
+    if (!/^0x[0-9a-f]{64}$/i.test(h)) return setPendingNote("enter the public transaction hash, never a key");
+    try {
+      const t = await readBounded(() => client.getTransaction({ hash: h as Hex }));
+      if (!sameAddr(t.from, user)) return setPendingNote("that transaction was not sent by this wallet");
+      const v: LaunchIntent = { ...pendingLaunch, hash: h as Hex, status: "sent" };
+      saveLaunch(storage(), v);
+      await reconcile(v);
+    } catch (e) {
+      setPendingNote(`no transaction is visible at that hash yet (${errorMessage(e)})`);
+    }
+  }
+
+  /** A record whose wallet answer was lost may be set aside only by the person, when the wallet shows nothing. */
+  function dismissLaunch() {
+    if (!user) return;
+    clearLaunch(storage(), chainId, user);
+    try {
+      window.localStorage.removeItem("tickr.launch.seed.hint");
+    } catch {
+      // fine
+    }
+    setPendingLaunch(undefined);
+    setPendingNote("");
+    setSeed(randomSalt());
+  }
+
+  // on mount, and when the wallet or chain changes: an unfinished launch is reconciled before anything is offered
+  useEffect(() => {
+    if (!user || !client || DEMO) return;
+    let v: LaunchIntent | undefined;
+    try {
+      v = loadLaunch(storage(), chainId, user);
+    } catch {
+      v = undefined;
+    }
+    if (!v) return;
+    if (v.status === "launched" && v.token) {
+      const token = v.token;
+      const isTicker = v.isTicker;
+      const hash = v.hash;
+      const t = setTimeout(() => {
+        launchedToken.current = token;
+        setActivating({ token, isTicker, hash });
+      }, 0);
+      return () => clearTimeout(t);
+    }
+    if (launchUnresolved(v)) {
+      const t = setTimeout(() => void reconcile(v!), 0);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, chainId, client]);
+
   /** Builds the exact call a launch makes, once, so the pre-flight and the signature cannot disagree. */
   async function prepare(useSeed: Hex = seed): Promise<Prepared> {
     if (!client) throw new Error("no client");
@@ -629,16 +745,62 @@ export function CreateForm() {
           await client.simulateContract({ ...req, abi: [...(req.abi as Abi), ...ERC20_ERRORS, ...KNOWN_ERRORS] as Abi, account: user });
         }
       }
-      const hash = await tx.run([{ label: pr.label, request: (w: WriteFn) => w(pr.request as unknown as Parameters<WriteFn>[0]) }]);
+      // the record first, durably, then the wallet: a reload finds this and settles it before offering anything new
+      const ground = await (vanityFor(useSeed)?.catch(() => undefined) ?? Promise.resolve(undefined));
+      const wallet = user;
+      if (!wallet) return false;
+      const intent: LaunchIntent = { version: 1, chainId, wallet, seed: useSeed, predicted: ground?.address, label: pr.label, isTicker: tab === "diy", tickerSymbol: tab === "diy" ? tickerUp : undefined, createdAt: nowMs(), status: "prepared" };
+      saveLaunch(storage(), intent);
+      try {
+        window.localStorage.setItem("tickr.launch.seed.hint", useSeed);
+      } catch {
+        // the record above is what matters
+      }
+      const hash = await tx.run([
+        {
+          label: pr.label,
+          request: (w: WriteFn) => w(pr.request as unknown as Parameters<WriteFn>[0]),
+          onHash: (h) => saveLaunch(storage(), { ...intent, hash: h, status: "sent" }),
+        },
+      ]);
       if (!hash) {
+        const failure = tx.lastError.current;
+        const sent = tx.lastHash.current;
+        if (sent) {
+          // the wallet returned a hash and the wait after it failed: the record keeps the hash, and a reload settles it
+          const v: LaunchIntent = { ...intent, hash: sent, status: "sent" };
+          saveLaunch(storage(), v);
+          await reconcile(v);
+          return false;
+        }
+        const msg = errorMessage(failure) + String(failure ?? "");
+        if (/rejected|denied|declined|4001/i.test(msg)) {
+          // the wallet says it declined before anything left it: the one definite decline
+          clearLaunch(storage(), chainId, user);
+          if (isSquat(failure) && !retriedSquat.current) return retryWithFreshSalt();
+          return false;
+        }
         // a squat that landed between the simulation and the block: one retry on a fresh salt, with a fresh address
-        if (isSquat(tx.lastError.current) && !retriedSquat.current) return retryWithFreshSalt();
+        if (isSquat(failure) && !retriedSquat.current) {
+          clearLaunch(storage(), chainId, user);
+          return retryWithFreshSalt();
+        }
+        // anything else is unknown: the record stays until the hash is found or the person confirms the wallet shows nothing
+        await reconcile(intent);
         return false;
       }
-      const rc = await client.getTransactionReceipt({ hash });
+      const rc = tx.receipts.current.get(hash) ?? (await readBounded(() => client.getTransactionReceipt({ hash })));
       const logs = parseEventLogs({ abi: FactoryAbi, eventName: "TokenLaunched", logs: rc.logs });
-      launchedToken.current = logs[0]?.args.token;
-      launchedBlock.current = rc.blockNumber;
+      const token = logs[0]?.args.token;
+      if (!token) throw new Error("the receipt has no launch in it; keep the transaction link and refresh");
+      launchedToken.current = token;
+      saveLaunch(storage(), { ...intent, hash, status: "launched", token, poolId: logs[0]?.args.poolId, blockNumber: rc.blockNumber.toString() });
+      setActivating({ token, isTicker: tab === "diy", hash });
+      try {
+        window.localStorage.removeItem("tickr.launch.seed.hint");
+      } catch {
+        // fine
+      }
       setSeed(randomSalt());
       return true;
     } catch (e) {
@@ -875,17 +1037,107 @@ export function CreateForm() {
     </aside>
   );
 
+  if (pendingLaunch) {
+    return (
+      <div className="max-w-2xl">
+        <div className="mb-6">
+          <h1>A launch is not settled yet.</h1>
+          <p className="text-muted mt-3">{pendingNote || "checking your last launch against the chain, reads only."}</p>
+        </div>
+        <div className="activate">
+          <div className="label">your launch</div>
+          <div className="mt-3 text-[14px] space-y-2">
+            <div>{pendingLaunch.label}</div>
+            {pendingLaunch.hash && (
+              <div className="num">
+                <a href={explorerTx(pendingLaunch.hash)} target="_blank" rel="noreferrer">
+                  {pendingLaunch.hash}
+                </a>
+              </div>
+            )}
+            {pendingLaunch.predicted && <div className="text-muted num">coin address {pendingLaunch.predicted}</div>}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-5">
+            {pendingLaunch.hash && pendingLaunch.status !== "reverted" && (
+              <button type="button" className="btn btn-primary" onClick={() => void reconcile(pendingLaunch)}>
+                check again, no spending
+              </button>
+            )}
+            {!pendingLaunch.hash && (
+              <>
+                <input className="input num" style={{ minWidth: 340 }} value={recoverHash} placeholder="0x… the transaction hash the wallet shows, never a key" onChange={(e) => setRecoverHash(e.target.value)} aria-label="launch transaction hash" />
+                <button type="button" className="btn btn-primary" disabled={!recoverHash} onClick={() => void recoverLaunch(recoverHash)}>
+                  match this hash
+                </button>
+                <button type="button" className="btn" onClick={dismissLaunch}>
+                  the wallet shows nothing: start over
+                </button>
+              </>
+            )}
+            {pendingLaunch.status === "reverted" && (
+              <button type="button" className="btn btn-primary" onClick={dismissLaunch}>
+                start a new launch
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (activating) {
+    if (!activating.isTicker) {
+      return (
+        <div className="max-w-2xl">
+          <div className="mb-6">
+            <h1>Launched.</h1>
+            <p className="text-muted mt-3">your coin is live and trades on tickr now.</p>
+          </div>
+          <div className="activate" data-state="done">
+            <div className="label">your coin</div>
+            <div className="mt-3 text-[14px] space-y-2">
+              <div className="num">{activating.token}</div>
+              {activating.hash && (
+                <div className="num">
+                  <a href={explorerTx(activating.hash)} target="_blank" rel="noreferrer">
+                    launch transaction
+                  </a>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-3 mt-5">
+              <Link href={`/t/${activating.token}`} className="btn btn-primary no-underline" onClick={() => user && clearLaunch(storage(), chainId, user)}>
+                open your coin
+              </Link>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  if (user) clearLaunch(storage(), chainId, user);
+                  setActivating(undefined);
+                }}
+              >
+                launch another
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="max-w-2xl">
         <div className="mb-6">
           <h1>Launched. One last step.</h1>
           <p className="text-muted mt-3">
-            Your coin is live and trades on tickr now. Chart sites and trackers price it only after the small buys below land, in transactions after the launch. Do
-            them now, from the wallet that launched.
+            Your coin is live and trades on tickr now. Chart sites and trackers price it only after the two small buys below land, in transactions after the launch,
+            from the wallet that launched.{" "}
+            {activating.hash && (
+              <a href={explorerTx(activating.hash)} target="_blank" rel="noreferrer">
+                launch transaction
+              </a>
+            )}
           </p>
         </div>
-        <ActivateCard token={activating.token} title="activate your coin" />
+        <ActivateCard token={activating.token} title="activate your coin" onDone={() => user && clearLaunch(storage(), chainId, user)} />
       </div>
     );
   }
@@ -1399,7 +1651,7 @@ export function CreateForm() {
         onCancel={ceremony.cancel}
         onConfirm={() =>
           ceremony.run(submit, () => {
-            if (launchedToken.current) setActivating({ token: launchedToken.current, block: launchedBlock.current });
+            // the completion was set when the receipt was read; nothing to do here
           })
         }
       />
