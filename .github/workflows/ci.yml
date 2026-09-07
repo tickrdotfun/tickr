@@ -39,9 +39,6 @@ jobs:
       - name: dependency audit
         working-directory: web
         run: pnpm audit --audit-level moderate
-      - name: typecheck
-        working-directory: web
-        run: npx tsc --noEmit
       - name: lint
         working-directory: web
         run: npx eslint .
@@ -56,6 +53,10 @@ jobs:
           NEXT_PUBLIC_DEMO: "1"
           NEXT_PUBLIC_CHAIN_ID: "4663"
         run: pnpm build
+      # Next writes its route types during the build, so the whole-project typecheck comes after it
+      - name: typecheck
+        working-directory: web
+        run: npx tsc --noEmit
   tokens-worker:
     runs-on: ubuntu-latest
     steps:
