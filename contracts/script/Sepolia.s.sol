@@ -76,9 +76,11 @@ contract Sepolia is Script, DeployStack {
         return SEP_V3_FACTORY;
     }
 
-    /// Uniswap's canonical v4 Universal Router and quoter on Sepolia, from the published deployments.
+    /// Uniswap's canonical v4 Universal Router and quoter on Sepolia, from the published deployments. Sepolia lists two
+    /// routers: the 2.0 one decodes the older swap parameters (no per-hop price limits) and reads our amountIn as an
+    /// offset, so the rehearsal uses Universal Router 2.1.1, the build Robinhood Chain runs.
     function _universalRouter() internal pure override returns (address) {
-        return 0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b;
+        return 0x7DfD4F31be6814D2906BDE155c3e1B146EAc1468;
     }
 
     function _v4Quoter() internal pure override returns (address) {
