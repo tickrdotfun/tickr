@@ -18,6 +18,10 @@ code_size_limit = 400000
 [profile.default.fuzz]
 runs = 256
 
+# continuous integration runs the fuzz suites deeper: FOUNDRY_PROFILE=ci
+[profile.ci.fuzz]
+runs = 1000
+
 [profile.fork]
 eth_rpc_url = "https://rpc.mainnet.chain.robinhood.com"
 

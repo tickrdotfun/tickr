@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
-import { decodeErrorResult, type Abi, type Hash, type Hex, type TransactionReceipt } from "viem";
+import { decodeErrorResult, type Abi, type Address, type Hash, type Hex, type TransactionReceipt } from "viem";
 import { errorMessage } from "@/lib/format";
 import { DEMO } from "@/lib/demoTransport";
 import { ADDRESSES } from "@/lib/addresses";
@@ -12,6 +12,9 @@ import type { wagmiConfig } from "@/lib/wagmi";
 
 export type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
 export type WriteFn = ReturnType<typeof useWriteContract<typeof wagmiConfig>>["writeContractAsync"];
+/** the identity a run was reviewed with: checked live right before each wallet request, and bound into it */
+export type RunOptions = { account?: Address; chainId?: number };
+const sameAddr = (a?: string, b?: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 export type TxStep = { label: string; request: (write: WriteFn) => Promise<Hash>; /** called with the hash the moment the wallet returns it, before any wait */ onHash?: (hash: Hash) => void; /** called with a repricing's identity so the caller can verify and adopt it, or refuse */ onReplaced?: (replacement: Replacement) => void };
 
 /**
@@ -98,7 +101,7 @@ export function useTx() {
   const lastHash = useRef<Hash | undefined>(undefined);
 
   const run = useCallback(
-    async (steps: TxStep[]): Promise<Hash | undefined> => {
+    async (steps: TxStep[], opts?: RunOptions): Promise<Hash | undefined> => {
       // per-run state first, before any guard can return early: a hash from an earlier run must never be read as this one's
       lastHash.current = undefined;
       lastError.current = undefined;
@@ -123,7 +126,19 @@ export function useTx() {
         for (const s of steps) {
           setStep(s.label);
           setStatus("signing");
-          const h = await s.request(writeContractAsync);
+          // the wallet's live identity, right before it is asked: the account and the network the review was made with
+          if (opts && connector) {
+            const [accounts, chain] = await Promise.all([connector.getAccounts(), connector.getChainId()]);
+            if (opts.account && !sameAddr(accounts[0], opts.account)) {
+              throw new Error("the wallet's active account changed since this was reviewed. nothing was signed; review again from the account you want to use.");
+            }
+            if (opts.chainId !== undefined && chain !== opts.chainId) {
+              throw new Error(`the wallet's network changed since this was reviewed. nothing was signed; switch back to chain ${opts.chainId} and review again.`);
+            }
+          }
+          const bound = ((req: Parameters<WriteFn>[0]) =>
+            writeContractAsync({ ...req, ...(opts?.account ? { account: opts.account } : {}), ...(opts?.chainId !== undefined ? { chainId: opts.chainId } : {}) } as Parameters<WriteFn>[0])) as WriteFn;
+          const h = await s.request(bound);
           last = h;
           lastHash.current = h;
           setHash(h);

@@ -26,6 +26,7 @@ import { useChainTokens } from "@/hooks/useChainTokens";
 import { QuotePicker, type PickItem } from "./QuotePicker";
 import { useEthUsd } from "@/hooks/useEthUsd";
 import { useTx, type WriteFn, KNOWN_ERRORS } from "@/hooks/useTx";
+import { afterRun } from "@/lib/launchOutcome";
 import { StockLogo } from "../StockLogo";
 import { OfficialBadge } from "../QuoteChip";
 import { TxStatus } from "../TxStatus";
@@ -44,7 +45,7 @@ import { ActivateCard } from "../token/Activate";
 import { createLaunchFlow, type LaunchFlow, type LaunchIntent } from "@/lib/launchFlow";
 import { lockName } from "@/lib/activation";
 import { readBounded } from "@/lib/readRpc";
-import { explorerTx } from "@/lib/chain";
+import { explorerTx, CHAIN_ID } from "@/lib/chain";
 
 type Tab = "eth" | "usdg" | "official" | "diy" | "coin" | "market";
 const SOCIAL_FIELDS = [
@@ -423,6 +424,7 @@ export function CreateForm() {
     }
     if (tab !== "diy" && tab !== "eth" && !econ) return "Pair token is not approved on the factory.";
     if (firstBuyAmt > 0n && !firstBuyPreview) return "The first buy has no preview yet. Wait a moment, or clear it.";
+    if (firstBuyAmt > 0n && firstBuyPreview && firstBuyPreview.tokensOut === 0n) return "The first buy is too small to receive anything. Raise it or clear it.";
     if (inventing && newTickerFee.data === undefined) return "Could not read the new ticker fee. Try again in a moment.";
     if (tab === "diy" && sharedOn) {
       if (!diyQuote) return "Pick a ticker to price against.";
@@ -628,6 +630,8 @@ export function CreateForm() {
     };
     // the pool opens a tick or two above the opening price; a first buy allows one percent for that
     const minOut = firstBuyPreview ? applySlippage(firstBuyPreview.tokensOut, 100) : 0n;
+    // a first buy always carries a positive minimum, as the listing buys do; a preview that rounds to nothing stops here
+    if (firstBuyAmt > 0n && minOut === 0n) throw new Error("the first buy would receive nothing at this size. raise it or clear it.");
     if (tab === "diy") {
       // read the terms right before sending, so a stale preview reverts instead of settling. the fee for a new
       // name is due only when the name does not exist yet
@@ -785,14 +789,22 @@ export function CreateForm() {
         }
         // an approve lands first, under the same lock, then the launch is simulated with the allowance in place, then signed
         if (pr.approve) {
-          const ok = await tx.run([{ label: pr.approve.label, request: (w: WriteFn) => w(pr.approve!.request) }]);
+          const ok = await tx.run([{ label: pr.approve.label, request: (w: WriteFn) => w(pr.approve!.request) }], { account: wallet, chainId: CHAIN_ID });
           if (!ok) {
             f.declined();
             return { kind: "declined" as const, failure: tx.lastError.current };
           }
           const req = launchRequest as unknown as Parameters<typeof c.simulateContract>[0];
-          await c.simulateContract({ ...req, abi: [...(req.abi as Abi), ...ERC20_ERRORS, ...KNOWN_ERRORS] as Abi, account: wallet });
+          try {
+            await c.simulateContract({ ...req, abi: [...(req.abi as Abi), ...ERC20_ERRORS, ...KNOWN_ERRORS] as Abi, account: wallet });
+          } catch (e) {
+            // the launch was never asked of the wallet: the prepared record is cleared, the reason shown
+            f.declined();
+            throw e;
+          }
         }
+        // whether the wallet was actually asked: a failure before that point is a failure, never a lost answer
+        let sendInvoked = false;
         const hash = await tx.run([
           {
             label: pr.label,
@@ -800,25 +812,24 @@ export function CreateForm() {
               // the nonce right before the wallet opens: an approval may have moved it
               const n = await readBounded(() => c.getTransactionCount({ address: wallet, blockTag: "pending" }));
               f.amend({ nonce: n });
+              sendInvoked = true;
               return w({ ...(launchRequest as unknown as Parameters<WriteFn>[0]), nonce: n } as Parameters<WriteFn>[0]);
             },
             onHash: (h: Hash) => f.markSent(h),
             // a repricing is adopted only when it is the same request; otherwise the runner stops for review
             onReplaced: (r) => f.replaced({ hash: r.hash, from: r.from, to: r.to, input: r.input, nonce: r.nonce, value: r.value, chainId: r.chainId }),
           },
-        ]);
+        ], { account: wallet, chainId: CHAIN_ID });
         if (!hash) {
           const failure = tx.lastError.current;
-          if (f.load()?.status === "sent") return { kind: "sent" as const };
-          const msg = errorMessage(failure) + String(failure ?? "");
-          const code = (failure as { code?: number; cause?: { code?: number } } | undefined)?.code ?? (failure as { cause?: { code?: number } } | undefined)?.cause?.code;
-          if (code === 4001 || /User rejected|user rejected|rejected the request|denied transaction/i.test(msg)) {
-            // the wallet says it declined before anything left it: the one definite decline
+          const kind = afterRun({ hash, sendInvoked, storedStatus: f.load()?.status, failure, squat: isSquat(failure), retriedSquat: retriedSquat.current });
+          if (kind === "sent") return { kind: "sent" as const };
+          // never asked of the wallet, declined by it, or refused before broadcast: the record is cleared
+          if (kind === "not-sent" || kind === "declined") {
             f.declined();
             return { kind: "declined" as const, failure };
           }
-          if (isSquat(failure) && !retriedSquat.current) {
-            // the wallet reported the revert before broadcasting: nothing was sent, the address is taken
+          if (kind === "squat") {
             f.declined();
             return { kind: "squat" as const };
           }
@@ -829,7 +840,10 @@ export function CreateForm() {
         return { kind: "settled" as const, r };
       });
       if (outcome.kind === "squat") return retryWithFreshSalt();
-      if (outcome.kind === "declined") return false;
+      if (outcome.kind === "declined") {
+        if (outcome.failure !== undefined && !isSquat(outcome.failure)) setFormError(plainRevert(outcome.failure));
+        return false;
+      }
       if (outcome.kind === "sent" || outcome.kind === "unknown") {
         await reconcile();
         return false;

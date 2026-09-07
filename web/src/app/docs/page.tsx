@@ -164,9 +164,13 @@ export default function DocsOverview() {
                   <tr key={name}>
                     <td className="cap">{name}</td>
                     <td>
-                      <a className="num" href={explorerAddress(addr)} target="_blank" rel="noreferrer">
-                        {addr}
-                      </a>
+                      {DEMO ? (
+                        <span className="num">{addr}</span>
+                      ) : (
+                        <a className="num" href={explorerAddress(addr)} target="_blank" rel="noreferrer">
+                          {addr}
+                        </a>
+                      )}
                     </td>
                   </tr>
                 ))}
