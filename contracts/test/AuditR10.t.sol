@@ -2,6 +2,10 @@
 pragma solidity 0.8.26;
 
 import {BaseTest} from "./Base.t.sol";
+import {ManagedTickerHook} from "../src/ManagedTickerHook.sol";
+import {ManagedTickerDeployer} from "../src/ManagedTickerDeployer.sol";
+import {HookMine} from "../script/lib/HookMine.sol";
+import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {Token} from "../src/Token.sol";
 import {TickerToken} from "../src/TickerToken.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
@@ -225,6 +229,8 @@ contract AuditR10Test is BaseTest {
         p.symbol = "TICKR";
         p.expectedEconomics = expected;
         p.salt = keccak256("r10 genesis");
+        p.salt = saltUnder(address(this), p, tickers.predictTicker("FUN"));
+        // the fee read inside the call consumes the prank: the test contract is the sender here, as it always was
         vm.prank(creator);
         (address f, address t,) = tickers.launch{value: LAUNCH_FEE + tickers.NEW_TICKER_FEE()}("FUN", p, 0);
         fun = TickerToken(f);
@@ -272,7 +278,17 @@ contract AuditR10Test is BaseTest {
         (address t0, address f0) = treasury.official();
         assertEq(t0, address(tickr));
         assertEq(f0, address(fun));
-        TickerLauncher other = new TickerLauncher(IFactory(address(factory)), registry, IERC20(address(usdg)), seeder);
+        TickerLauncher other;
+        {
+            // a second launcher needs its own hook, bound to it before it exists
+            address otherPred = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+            uint160 flags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG;
+            (, bytes32 hookSalt) = HookMine.find(address(this), flags, keccak256(abi.encodePacked(type(ManagedTickerHook).creationCode, abi.encode(poolManager, otherPred))));
+            ManagedTickerHook otherHook = new ManagedTickerHook{salt: hookSalt}(poolManager, otherPred);
+            ManagedTickerDeployer otherDeployer = new ManagedTickerDeployer(otherPred, IERC20(address(usdg)), poolManager, 1_000_000e6);
+            other = new TickerLauncher(IFactory(address(factory)), registry, IERC20(address(usdg)), seeder, poolManager, otherHook, otherDeployer);
+            assertEq(address(other), otherPred);
+        }
         vm.prank(owner);
         factory.setTickerLauncher(address(other));
         assertEq(factory.tickerLauncher(), address(other), "the factory moved");

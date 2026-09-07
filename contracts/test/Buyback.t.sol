@@ -57,6 +57,8 @@ contract BuybackTest is BaseTest {
         p.symbol = "TICKR";
         p.expectedEconomics = expected;
         p.salt = keccak256("genesis");
+        p.salt = saltUnder(address(this), p, tickers.predictTicker("FUN"));
+        // the fee read inside the call consumes the prank: the test contract is the sender here, as it always was
         vm.prank(creator);
         (address f, address t,) = tickers.launch{value: LAUNCH_FEE + tickers.NEW_TICKER_FEE()}("FUN", p, 0);
         fun = TickerToken(f);

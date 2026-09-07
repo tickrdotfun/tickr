@@ -2081,3 +2081,62 @@
   .tax-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--tickr-sw-yellow); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--border); }
   .tax-range::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--tickr-sw-yellow); border: 2px solid var(--bg); }
   .tax-range:focus-visible { outline: 2px solid var(--tickr-sw-yellow); outline-offset: 4px; }
+
+/* ---- activation: the two buys after a launch */
+.confetti {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 60;
+}
+.activate {
+  border: 1px solid var(--tickr-line, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  padding: 20px 22px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.activate[data-state="done"] {
+  border-color: var(--tickr-signal);
+}
+.activate-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+}
+.activate-steps li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.activate-steps li > .num {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 12px;
+  flex: none;
+}
+.activate-steps li[data-done="true"] {
+  opacity: 0.7;
+}
+.activate-steps li[data-done="true"] > .num {
+  border-color: var(--tickr-signal);
+  color: var(--tickr-signal);
+}
+.activate-steps em {
+  font-style: normal;
+  color: var(--tickr-signal);
+  margin-left: 4px;
+}
+.coin-card .badge.sw-yellow {
+  color: var(--tickr-sw-yellow);
+}

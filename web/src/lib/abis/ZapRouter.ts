@@ -280,6 +280,100 @@ export const ZapRouterAbi = [
   },
   {
     "type": "function",
+    "name": "previewZapTicker",
+    "inputs": [
+      {
+        "name": "p",
+        "type": "tuple",
+        "internalType": "struct ZapRouter.ZapTickerParams",
+        "components": [
+          {
+            "name": "ticker",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "tokenIn",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amountIn",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "path",
+            "type": "tuple[]",
+            "internalType": "struct ZapRouter.Hop[]",
+            "components": [
+              {
+                "name": "kind",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "key",
+                "type": "tuple",
+                "internalType": "struct PoolKey",
+                "components": [
+                  {
+                    "name": "currency0",
+                    "type": "address",
+                    "internalType": "Currency"
+                  },
+                  {
+                    "name": "currency1",
+                    "type": "address",
+                    "internalType": "Currency"
+                  },
+                  {
+                    "name": "fee",
+                    "type": "uint24",
+                    "internalType": "uint24"
+                  },
+                  {
+                    "name": "tickSpacing",
+                    "type": "int24",
+                    "internalType": "int24"
+                  },
+                  {
+                    "name": "hooks",
+                    "type": "address",
+                    "internalType": "contract IHooks"
+                  }
+                ]
+              },
+              {
+                "name": "pool",
+                "type": "address",
+                "internalType": "address"
+              }
+            ]
+          },
+          {
+            "name": "minOut",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
     "name": "uniswapV3SwapCallback",
     "inputs": [
       {
@@ -534,6 +628,106 @@ export const ZapRouterAbi = [
     "stateMutability": "nonpayable"
   },
   {
+    "type": "function",
+    "name": "zapTicker",
+    "inputs": [
+      {
+        "name": "p",
+        "type": "tuple",
+        "internalType": "struct ZapRouter.ZapTickerParams",
+        "components": [
+          {
+            "name": "ticker",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "tokenIn",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amountIn",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "path",
+            "type": "tuple[]",
+            "internalType": "struct ZapRouter.Hop[]",
+            "components": [
+              {
+                "name": "kind",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "key",
+                "type": "tuple",
+                "internalType": "struct PoolKey",
+                "components": [
+                  {
+                    "name": "currency0",
+                    "type": "address",
+                    "internalType": "Currency"
+                  },
+                  {
+                    "name": "currency1",
+                    "type": "address",
+                    "internalType": "Currency"
+                  },
+                  {
+                    "name": "fee",
+                    "type": "uint24",
+                    "internalType": "uint24"
+                  },
+                  {
+                    "name": "tickSpacing",
+                    "type": "int24",
+                    "internalType": "int24"
+                  },
+                  {
+                    "name": "hooks",
+                    "type": "address",
+                    "internalType": "contract IHooks"
+                  }
+                ]
+              },
+              {
+                "name": "pool",
+                "type": "address",
+                "internalType": "address"
+              }
+            ]
+          },
+          {
+            "name": "minOut",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tickerOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
     "type": "event",
     "name": "ZapSold",
     "inputs": [
@@ -612,6 +806,43 @@ export const ZapRouterAbi = [
       },
       {
         "name": "tokensOut",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ZappedTicker",
+    "inputs": [
+      {
+        "name": "ticker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "tickerOut",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"

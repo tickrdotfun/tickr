@@ -13,6 +13,7 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {ManagedTickerToken} from "../../src/ManagedTickerToken.sol";
 import {PoolSwapTest} from "v4-core/src/test/PoolSwapTest.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {DeployStack} from "../../script/DeployStack.sol";
@@ -46,8 +47,9 @@ contract RobinhoodForkTest is Test, DeployStack {
         live = vm.envOr("FORK", false);
         if (!live) return;
         require(block.chainid == 4663, "use --fork-url robinhood");
-        s = _deployStack(address(this), address(this), address(this), address(this), IPoolManager(RH_POOL_MANAGER), IPositionManager(RH_POSITION_MANAGER), IAllowanceTransfer(PERMIT2), RH_USDG);
-        _configureStack(s, RH_USDG);
+        DeployStack.Stack memory m = _deployStack(address(this), address(this), address(this), address(this), IPoolManager(RH_POOL_MANAGER), IPositionManager(RH_POSITION_MANAGER), IAllowanceTransfer(PERMIT2), RH_USDG);
+        _configureStack(m, RH_USDG);
+        _store(m);
         s.factory.setLaunchEnabled(true);
         vm.deal(creator, 100 ether);
         vm.deal(alice, 100 ether);
@@ -55,6 +57,38 @@ contract RobinhoodForkTest is Test, DeployStack {
     }
 
     receive() external payable {}
+
+    /// @dev The stack, field by field, into storage: a whole-struct copy of this many fields is one generated
+    /// routine with more live values than the compiler's stack holds.
+    function _store(DeployStack.Stack memory m) internal {
+        s.registry = m.registry;
+        s.escrow = m.escrow;
+        s.locker = m.locker;
+        s.buybackVault = m.buybackVault;
+        s.treasury = m.treasury;
+        s.launchDeployer = m.launchDeployer;
+        s.seeder = m.seeder;
+        s.managedHook = m.managedHook;
+        s.managedDeployer = m.managedDeployer;
+        s.factory = m.factory;
+        s.router = m.router;
+        s.tickers = m.tickers;
+        s.coinQuote = m.coinQuote;
+        s.stockQuote = m.stockQuote;
+        s.marketQuote = m.marketQuote;
+        s.zap = m.zap;
+    }
+
+    /// @dev A coin under a ticker must sort below it; the site grinds its salts the same way. The creator launches.
+    function _underTicker(TokenParams memory p, string memory ticker) internal view returns (TokenParams memory) {
+        address t = s.tickers.predictTicker(ticker);
+        uint256 supply = s.factory.getLaunchConfig(0).supply;
+        for (uint256 i; i < 256; i++) {
+            if (s.launchDeployer.predictToken(creator, p, supply) < t) return p;
+            p.salt = keccak256(abi.encode(p.salt, i));
+        }
+        revert("fork: no salt under the ticker");
+    }
 
     function _params(string memory name, string memory symbol, bytes32 expected, string memory salt) internal pure returns (TokenParams memory) {
         return TokenParams({name: name, symbol: symbol, logo: "", description: "", socials: Socials("", "", "", "", ""), creatorFeeRecipient: address(0), creatorTaxBps: 0, buybackEnabled: false, expectedEconomics: expected, salt: keccak256(bytes(salt))});
@@ -91,42 +125,77 @@ contract RobinhoodForkTest is Test, DeployStack {
         emit log_named_uint("coin burned", Token(t).balanceOf(BURN));
     }
 
-    function test_fork_inventingATickerOpensItsGuardedDollarPool_realUsdg() public {
+    function test_fork_inventingATickerOpensItsOwnDollarPool_realUsdg() public {
         if (!live) return;
         (,, bytes32 expected,) = s.tickers.previewLaunch("BANANA", 0);
         uint256 value = LAUNCH_FEE + s.tickers.NEW_TICKER_FEE();
+        TokenParams memory under1 = _underTicker(_params("Fork Bread", "BREAD", expected, "fork-bread"), "BANANA");
         vm.prank(creator);
-        (address banana, address bread,) = s.tickers.launch{value: value}("BANANA", _params("Fork Bread", "BREAD", expected, "fork-bread"), 0);
+        (address banana, address bread,) = s.tickers.launch{value: value}("BANANA", under1, 0);
         vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
-        assertTrue(s.seeder.hasChartPool(banana), "BANANA/USDG exists on the canonical pool manager");
-        PoolKey memory key = s.seeder.chartKey(banana);
-        (uint160 sqrtP, int24 tick,,) = IPoolManager(RH_POOL_MANAGER).getSlot0(key.toId());
-        assertGt(sqrtP, 0);
-        assertLe(tick, 0);
-        assertGe(tick, -2);
-        assertGt(IPoolManager(RH_POOL_MANAGER).getLiquidity(key.toId()), 0);
-        emit log_named_address("BANANA", banana);
-        emit log_named_bytes32("BANANA/USDG pool id", PoolId.unwrap(key.toId()));
-        emit log_named_int("tick after the listing swap", tick);
-        emit log_named_uint("real USDG in the dollar pool", IERC20(RH_USDG).balanceOf(RH_POOL_MANAGER));
+        assertTrue(bread < banana, "the coin is currency0 of its pool");
+        _assertNamePoolAtRest(ManagedTickerToken(banana));
+        _roundTripThroughTheNamePool(ManagedTickerToken(banana));
+    }
 
-        // a shove with real dollars reverts and the tick does not move
+    /// the name's pool on the canonical pool manager: bound to the one hook, at one dollar, the fee's real dollars as surplus
+    function _assertNamePoolAtRest(ManagedTickerToken wrapper) internal {
+        PoolKey memory key = wrapper.poolKey();
+        assertEq(address(key.hooks), address(s.managedHook), "behind the one hook, on the canonical pool manager");
+        assertEq(address(s.managedHook.tokenOf(key.toId())), address(wrapper), "registered");
+        (uint160 sqrtP, int24 tick,,) = IPoolManager(RH_POOL_MANAGER).getSlot0(key.toId());
+        assertEq(sqrtP, wrapper.PARITY(), "one dollar");
+        assertGt(IPoolManager(RH_POOL_MANAGER).getLiquidity(key.toId()), 0);
+        (uint256 backing, uint256 circulation) = wrapper.accounting();
+        assertLe(circulation, 1_000, "nobody holds the name yet, bar the position maths' rounding");
+        assertGe(backing, wrapper.MIN_DONATION(), "the name fee became real dollars in the wrapper");
+        emit log_named_address("BANANA", address(wrapper));
+        emit log_named_bytes32("BANANA/USDG pool id", PoolId.unwrap(key.toId()));
+        emit log_named_uint("real USDG working surplus", backing);
+        emit log_named_int("tick at rest", tick);
+    }
+
+    /// bob buys the name with real dollars through the pool, then sells it all back: a dollar each way, less the fee
+    function _roundTripThroughTheNamePool(ManagedTickerToken wrapper) internal {
         PoolSwapTest sw = new PoolSwapTest(IPoolManager(RH_POOL_MANAGER));
-        PoolKey memory ethUsdg = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(RH_USDG), fee: 100, tickSpacing: 1, hooks: IHooks(address(0))});
-        vm.prank(bob);
-        s.seeder.swapExactIn{value: 1 ether}(ethUsdg, true, 1 ether, 0, bob);
-        bool usdgIs0 = Currency.unwrap(key.currency0) == RH_USDG;
-        (, int24 tickBefore,,) = IPoolManager(RH_POOL_MANAGER).getSlot0(key.toId());
+        _dollarsFor(bob, 1 ether);
+        bool usdgIs0 = Currency.unwrap(wrapper.poolKey().currency0) == RH_USDG;
         vm.startPrank(bob);
         IERC20(RH_USDG).approve(address(sw), type(uint256).max);
-        vm.expectRevert();
-        sw.swap(key, SwapParams({zeroForOne: usdgIs0, amountSpecified: -int256(300e6), sqrtPriceLimitX96: usdgIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1}), PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), "");
+        wrapper.approve(address(sw), type(uint256).max);
+        _swapInNamePool(sw, wrapper.poolKey(), usdgIs0, 300e6);
+        uint256 got = wrapper.balanceOf(bob);
+        assertGt(got, 297e6, "about a dollar each");
+        _assertBacked(wrapper, got);
+        uint256 usdgBefore = IERC20(RH_USDG).balanceOf(bob);
+        _swapInNamePool(sw, wrapper.poolKey(), !usdgIs0, got);
         vm.stopPrank();
-        (, int24 tickAfter,,) = IPoolManager(RH_POOL_MANAGER).getSlot0(key.toId());
-        assertEq(tickAfter, tickBefore, "the guard held");
-        emit log_named_int("tick after the failed shove", tickAfter);
+        assertGt(IERC20(RH_USDG).balanceOf(bob) - usdgBefore, (got * 99) / 100, "and back to dollars");
+        _assertBacked(wrapper, 0);
+        emit log_named_uint("BANANA bought with real dollars", got);
+    }
 
-        bread;
+    /// real dollars for a wallet, through the live ETH/USDG pool
+    function _dollarsFor(address who, uint256 eth) internal {
+        PoolKey memory ethUsdg = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(RH_USDG), fee: 100, tickSpacing: 1, hooks: IHooks(address(0))});
+        vm.prank(who);
+        s.seeder.swapExactIn{value: eth}(ethUsdg, true, eth, 0, who);
+    }
+
+    /// one exact-input swap in a name's pool, as any router would send it
+    function _swapInNamePool(PoolSwapTest sw, PoolKey memory key, bool zeroForOne, uint256 amountIn) internal {
+        uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        sw.swap(key, SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: limit}), PoolSwapTest.TestSettings(false, false), "");
+    }
+
+    /// what is out is backed, and the pool is still at a dollar
+    function _assertBacked(ManagedTickerToken wrapper, uint256 expectedCirculation) internal {
+        (uint256 backing, uint256 circulation) = wrapper.accounting();
+        assertApproxEqAbs(circulation, expectedCirculation, 1_000, "the circulation is what is held");
+        assertGe(backing, circulation, "backed by real dollars");
+        (, int24 tick,,) = IPoolManager(RH_POOL_MANAGER).getSlot0(wrapper.poolKey().toId());
+        assertTrue(tick >= -2 && tick <= 2, "inside the band");
+        emit log_named_int("tick", tick);
     }
 
     function test_fork_nvdaQuotedLaunchThroughLiveV3() public {
@@ -178,8 +247,9 @@ contract RobinhoodForkTest is Test, DeployStack {
         if (!live) return;
         uint256 fee = LAUNCH_FEE + s.tickers.NEW_TICKER_FEE();
         (,, bytes32 expected,) = s.tickers.previewLaunch("FRZN", 0);
+        TokenParams memory under2 = _underTicker(_params("Frozen", "FRZN", expected, "fork-frozen"), "FRZN");
         vm.prank(creator);
-        (address ticker, address t,) = s.tickers.launch{value: fee}("FRZN", _params("Frozen", "FRZN", expected, "fork-frozen"), 0);
+        (address ticker, address t,) = s.tickers.launch{value: fee}("FRZN", under2, 0);
         vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         assertEq(s.factory.getLaunchFeePolicy(t).club, address(s.tickers), "club written into the policy");
         s.factory.setFeeClub(bob); // the owner here is the test contract; bob is an EOA
@@ -287,8 +357,9 @@ contract RobinhoodForkTest is Test, DeployStack {
         if (!live) return;
         (,, bytes32 expected,) = s.tickers.previewLaunch("PEEL", 0);
         uint256 value = LAUNCH_FEE + s.tickers.NEW_TICKER_FEE();
+        TokenParams memory under3 = _underTicker(_params("Fork Peel Coin", "PEELC", expected, "fork-peel"), "PEEL");
         vm.prank(creator);
-        (address peel, address coin,) = s.tickers.launch{value: value}("PEEL", _params("Fork Peel Coin", "PEELC", expected, "fork-peel"), 0);
+        (address peel, address coin,) = s.tickers.launch{value: value}("PEEL", under3, 0);
         vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6); // past the launch block caps and the snipe window
         PoolKey memory ethUsdg = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(RH_USDG), fee: 100, tickSpacing: 1, hooks: IHooks(address(0))});
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](3);

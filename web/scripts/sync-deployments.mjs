@@ -48,7 +48,7 @@ if (existsSync(src)) {
     else if (Number(record.chainId) !== Number(chainId)) problems.push(`the record is for chain ${record.chainId}, this build is for ${chainId}`);
     for (const k of ["buybackTreasury", "genesisToken", "genesisTicker"]) if (!record[k] || record[k] === ZERO) problems.push(`${k} is missing: run genesis and sync again`);
     // every field by name: the record is a fixed schema, and a field it does not know is a mistake
-    const ADDRESSES = new Set(["factory", "chartGuardHook", "feeEscrow", "launchLocker", "launchDeployer", "launchSeeder", "buybackVault", "buybackTreasury", "anchorRegistry", "launchAndBuyRouter", "tickerLauncher", "coinQuoteLauncher", "stockQuoteLauncher", "marketQuoteLauncher", "marketQuoteLauncherDeployed", "v3Factory", "zapRouter", "poolManager", "positionManager", "permit2", "usdg", "weth", "v4Quoter", "genesisToken", "genesisTicker", "stockAAPL", "stockF", "stockNVDA"]);
+    const ADDRESSES = new Set(["factory", "managedTickerHook", "managedTickerDeployer", "feeEscrow", "launchLocker", "launchDeployer", "launchSeeder", "buybackVault", "buybackTreasury", "anchorRegistry", "launchAndBuyRouter", "tickerLauncher", "coinQuoteLauncher", "stockQuoteLauncher", "marketQuoteLauncher", "marketQuoteLauncherDeployed", "v3Factory", "zapRouter", "poolManager", "positionManager", "permit2", "usdg", "weth", "v4Quoter", "genesisToken", "genesisTicker", "stockAAPL", "stockF", "stockNVDA"]);
     const HASHES = new Set(["genesisPool"]);
     const NUMBERS = new Set(["chainId", "startBlock"]);
     const BOOLEANS = new Set(["sepolia"]);

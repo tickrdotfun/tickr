@@ -20,7 +20,6 @@ import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {ILaunchSeeder} from "./interfaces/ILaunchSeeder.sol";
 import {IFactory} from "./interfaces/IFactory.sol";
-import {ITickerToken} from "./interfaces/ITickerToken.sol";
 import {PriceMath} from "./libraries/PriceMath.sol";
 import {V4Seeder} from "./libraries/V4Seeder.sol";
 
@@ -31,12 +30,6 @@ import {V4Seeder} from "./libraries/V4Seeder.sol";
 /// behaves exactly like a constant product pool whose quote side starts with a virtual balance of `phantomQuote`,
 /// and it is locked in the locker from the first block. Nothing graduates, because nothing needs to.
 ///
-/// A wrapper's dollar pool: an invented ticker is a one-for-one wrapper of USDG and needs no market, but chart
-/// sites price a pair by walking from its quote token to a dollar through pools. So when a ticker is invented, the
-/// fee for inventing it buys USDG and opens a guarded WRAPPER/USDG pool at exactly one dollar, locked, behind
-/// `ChartGuardHook`, which refuses any swap that would leave the pool off one dollar. One small swap follows so
-/// indexers list the pair.
-///
 /// The seeder also offers a plain exact-input swap on any pool, used for the creator's dev buy in the launch
 /// transaction and for the site's trades. It holds nothing between calls and has no owner.
 contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
@@ -44,24 +37,16 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    uint24 internal constant CHART_FEE = 100;
-    int24 internal constant CHART_TICK_SPACING = 1;
-    int24 internal constant CHART_BAND = 10; // ticks either side of one dollar, about 0.1%; the guard's band
-    uint160 internal constant SQRT_ONE = 79228162514264337593543950336; // sqrt(1) * 2^96; a wrapper has its counter's decimals
-
     address public immutable override factory;
     IPoolManager public immutable poolManager;
     IPositionManager public immutable positionManager;
     IAllowanceTransfer public immutable permit2;
     address public immutable locker;
-    /// @notice The guard every wrapper's dollar pool is created behind.
-    IHooks public immutable chartHook;
     /// @notice USDG, and the live ETH/USDG pool the ticker fee is converted through.
     address public immutable usdg;
-    PoolKey internal ethUsdgKey;
+    PoolKey public override ethUsdgKey;
 
     event LaunchSeeded(address indexed token, bytes32 indexed poolId, uint256 tokenId, int24 tickLower, int24 tickUpper, uint128 liquidity);
-    event DollarPoolSeeded(address indexed wrapper, bytes32 poolId, uint256 usdgIn, uint256 wrapperIn, uint256 tokenId);
 
     error OnlyPoolManager();
     error NotOneSided();
@@ -76,7 +61,6 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         IPositionManager posm,
         IAllowanceTransfer permit2_,
         address locker_,
-        IHooks chartHook_,
         address usdg_,
         uint24 ethUsdgFee,
         int24 ethUsdgTickSpacing
@@ -86,7 +70,6 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         positionManager = posm;
         permit2 = permit2_;
         locker = locker_;
-        chartHook = chartHook_;
         usdg = usdg_;
         ethUsdgKey = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(usdg_), fee: ethUsdgFee, tickSpacing: ethUsdgTickSpacing, hooks: IHooks(address(0))});
     }
@@ -133,34 +116,6 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         address token = Currency.unwrap(tokenIs0 ? key.currency0 : key.currency1);
         if (supply > used) IERC20(token).safeTransfer(locker, supply - used);
         emit LaunchSeeded(token, PoolId.unwrap(key.toId()), tokenId, tickLower, tickUpper, liquidity);
-    }
-
-    // ---------------------------------------------------------------- the dollar pool
-
-    /// @inheritdoc ILaunchSeeder
-    function seedDollarPool(address wrapper) external payable override nonReentrant {
-        if (msg.sender != IFactory(factory).tickerLauncher()) revert OnlyTickerLauncher();
-        if (msg.value == 0) revert BadValue();
-        // the ticker fee becomes dollars through the live ETH/USDG pool
-        (uint256 got,) = _swap(ethUsdgKey, true, msg.value, address(this), TickMath.MIN_SQRT_PRICE + 1);
-        // one part in two hundred stays for the listing swap; of the rest, half becomes the wrapper
-        uint256 dust = got / 200;
-        uint256 pool = got - dust;
-        uint256 half = pool / 2;
-        IERC20(usdg).forceApprove(wrapper, half);
-        ITickerToken(wrapper).mint(half, address(this));
-
-        PoolKey memory key = _chartKey(wrapper, usdg);
-        poolManager.initialize(key, SQRT_ONE);
-        bool wrapperIs0 = Currency.unwrap(key.currency0) == wrapper;
-        (uint256 w, uint256 u) = (half, pool - half);
-        (uint256 b0, uint256 b1) = wrapperIs0 ? (w, u) : (u, w);
-        (uint256 tokenId,,) = V4Seeder.seedRange(positionManager, permit2, key, SQRT_ONE, -CHART_BAND, CHART_BAND, b0, b1, locker);
-        // one small trade, dollars into the wrapper, so indexers that wait for a swap list the pair
-        _swap(key, !wrapperIs0, dust, locker, !wrapperIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1);
-        _flush(Currency.wrap(usdg), locker);
-        _flush(Currency.wrap(wrapper), locker);
-        emit DollarPoolSeeded(wrapper, PoolId.unwrap(key.toId()), u, w, tokenId);
     }
 
     // ---------------------------------------------------------------- swaps
@@ -257,20 +212,6 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
 
     // ---------------------------------------------------------------- views
 
-    function chartKey(address wrapper) external view override returns (PoolKey memory) {
-        return _chartKey(wrapper, usdg);
-    }
-
-    function hasChartPool(address wrapper) external view override returns (bool) {
-        (uint160 sqrtP,,,) = poolManager.getSlot0(_chartKey(wrapper, usdg).toId());
-        return sqrtP != 0;
-    }
-
-    function _chartKey(address a, address b) internal view returns (PoolKey memory) {
-        (address c0, address c1) = a < b ? (a, b) : (b, a);
-        return PoolKey({currency0: Currency.wrap(c0), currency1: Currency.wrap(c1), fee: CHART_FEE, tickSpacing: CHART_TICK_SPACING, hooks: chartHook});
-    }
-
     function _ceilAlign(int24 tick, int24 spacing) internal pure returns (int24) {
         int24 q = tick / spacing;
         if (tick % spacing != 0 && tick > 0) q += 1;
@@ -285,11 +226,6 @@ contract LaunchSeeder is ILaunchSeeder, IUnlockCallback, ReentrancyGuard {
         int24 aligned = q * spacing;
         int24 minTick = TickMath.minUsableTick(spacing);
         return aligned < minTick + spacing ? minTick + spacing : aligned;
-    }
-
-    function _flush(Currency c, address to) internal {
-        uint256 bal = IERC20(Currency.unwrap(c)).balanceOf(address(this));
-        if (bal > 0) IERC20(Currency.unwrap(c)).safeTransfer(to, bal);
     }
 
     receive() external payable {}

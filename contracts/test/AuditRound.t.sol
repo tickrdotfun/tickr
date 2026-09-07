@@ -2,6 +2,8 @@
 pragma solidity 0.8.26;
 
 import {BaseTest} from "./Base.t.sol";
+import {ManagedTickerToken} from "../src/ManagedTickerToken.sol";
+import {PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {Token} from "../src/Token.sol";
 import {TokenParams, PairEconomics} from "../src/Types.sol";
 import {TickerLauncher} from "../src/TickerLauncher.sol";
@@ -32,6 +34,7 @@ contract AuditRoundTest is BaseTest {
         (,, bytes32 expected,) = tickers.previewLaunch(name, 0);
         TokenParams memory p = defaultParams(address(0), 0);
         p.expectedEconomics = expected;
+        p.salt = saltUnder(creator, p, tickers.predictTicker(name));
         vm.prank(creator);
         (ticker, coin,) = tickers.launch{value: fee}(name, p, 0);
         pastTheWindow();
@@ -54,7 +57,7 @@ contract AuditRoundTest is BaseTest {
         (,, bytes32 expected,) = tickers.previewLaunch("CLUBB", 0);
         TokenParams memory p = defaultParams(address(0), 0);
         p.expectedEconomics = expected;
-        p.salt = keccak256("bob");
+        p.salt = saltUnder(bob, p, tickers.predictTicker("CLUBB"));
         vm.startPrank(bob);
         usdg.approve(address(tickers), 1);
         tickers.launchAndBuy{value: LAUNCH_FEE}("CLUBB", p, 0, 1, 0);
@@ -70,10 +73,11 @@ contract AuditRoundTest is BaseTest {
         (,, bytes32 expected,) = tickers.previewLaunch("STILL", 0);
         TokenParams memory p = defaultParams(address(0), 0);
         p.expectedEconomics = expected;
+        p.salt = saltUnder(creator, p, tickers.predictTicker("STILL"));
         vm.prank(creator);
         (address ticker, address coin,) = tickers.launch{value: fee}("STILL", p, 0);
         assertTrue(tickers.isTicker(ticker));
-        assertTrue(seeder.hasChartPool(ticker), "the dollar pool opened through the ticker launcher, club or no club");
+        assertEq(address(managedHook.tokenOf(ManagedTickerToken(ticker).poolKey().toId())), ticker, "the dollar pool opened through the ticker launcher, club or no club");
         assertTrue(factory.getLaunchedToken(coin).exists);
     }
 
@@ -118,6 +122,7 @@ contract AuditRoundTest is BaseTest {
         }
         (,, bytes32 expected,) = tickers.previewLaunch("OK42", 0);
         p.expectedEconomics = expected;
+        p.salt = saltUnder(creator, p, tickers.predictTicker("OK42"));
         vm.prank(creator);
         (address ticker,,) = tickers.launch{value: fee}("OK42", p, 0);
         assertTrue(tickers.isTicker(ticker));
@@ -211,6 +216,7 @@ contract AuditRoundTest is BaseTest {
         // a fresh preview carries the new terms and goes through, with the club's share folded to the creator
         (,, bytes32 again,) = tickers.previewLaunch("CLUBX", 0);
         p.expectedEconomics = again;
+        p.salt = saltUnder(creator, p, tickers.predictTicker("CLUBX"));
         vm.prank(creator);
         (, address t,) = tickers.launch{value: fee}("CLUBX", p, 0);
         assertEq(factory.getLaunchFeePolicy(t).club, address(0));

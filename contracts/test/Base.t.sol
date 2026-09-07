@@ -19,7 +19,9 @@ import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {DeployPermit2} from "permit2/test/utils/DeployPermit2.sol";
 import {HookMine} from "../script/lib/HookMine.sol";
-import {ChartGuardHook} from "../src/ChartGuardHook.sol";
+import {ManagedTickerHook} from "../src/ManagedTickerHook.sol";
+import {ManagedTickerToken} from "../src/ManagedTickerToken.sol";
+import {ManagedTickerDeployer} from "../src/ManagedTickerDeployer.sol";
 
 import {Factory, FactoryInit} from "../src/Factory.sol";
 import {LaunchDeployer} from "../src/LaunchDeployer.sol";
@@ -78,7 +80,8 @@ abstract contract BaseTest is Test, DeployPermit2 {
     BuybackVault buybackVault;
     LaunchDeployer deployer;
     LaunchSeeder seeder;
-    ChartGuardHook chartHook;
+    ManagedTickerHook managedHook;
+    ManagedTickerDeployer managedDeployer;
     Factory factory;
     LaunchAndBuyRouter router;
     TickerLauncher tickers;
@@ -111,18 +114,13 @@ abstract contract BaseTest is Test, DeployPermit2 {
         escrow = new FeeEscrow();
         buybackVault = new BuybackVault(owner);
 
-        // locker -> guard hook (CREATE2, mined flags) -> deployer -> executor -> factory
+        // locker -> deployer -> executor -> factory
         uint64 n = vm.getNonce(address(this));
-        address executorPred = vm.computeCreateAddress(address(this), n + 3);
-        address factoryPred = vm.computeCreateAddress(address(this), n + 4);
+        address executorPred = vm.computeCreateAddress(address(this), n + 2);
+        address factoryPred = vm.computeCreateAddress(address(this), n + 3);
         locker = new LaunchLocker(posm, poolManager, factoryPred);
-        {
-            uint160 guardFlags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.AFTER_SWAP_FLAG;
-            (, bytes32 guardSalt) = HookMine.find(address(this), guardFlags, keccak256(abi.encodePacked(type(ChartGuardHook).creationCode, abi.encode(poolManager, executorPred))));
-            chartHook = new ChartGuardHook{salt: guardSalt}(poolManager, executorPred);
-        }
         deployer = new LaunchDeployer(factoryPred);
-        seeder = new LaunchSeeder(factoryPred, poolManager, posm, permit2, address(locker), IHooks(address(chartHook)), address(usdg), 100, 1);
+        seeder = new LaunchSeeder(factoryPred, poolManager, posm, permit2, address(locker), address(usdg), 100, 1);
         require(address(seeder) == executorPred, "fixture: seeder prediction");
         factory = new Factory(
             FactoryInit({
@@ -152,7 +150,17 @@ abstract contract BaseTest is Test, DeployPermit2 {
 
         router = new LaunchAndBuyRouter(factory, ILaunchSeeder(address(seeder)));
         coinQuote = new CoinQuoteLauncher(owner, factory, poolManager, registry, ILaunchSeeder(address(seeder)));
-        tickers = new TickerLauncher(factory, registry, IERC20(address(usdg)), ILaunchSeeder(address(seeder)));
+        {
+            // the one hook every ticker's dollar pool runs behind (CREATE2, mined flags), bound to the launcher that follows it
+            address tickersPred = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+            uint160 flags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG;
+            (, bytes32 hookSalt) = HookMine.find(address(this), flags, keccak256(abi.encodePacked(type(ManagedTickerHook).creationCode, abi.encode(poolManager, tickersPred))));
+            managedHook = new ManagedTickerHook{salt: hookSalt}(poolManager, tickersPred);
+            managedDeployer = new ManagedTickerDeployer(tickersPred, IERC20(address(usdg)), poolManager, 1_000_000e6);
+            tickers = new TickerLauncher(factory, registry, IERC20(address(usdg)), ILaunchSeeder(address(seeder)), poolManager, managedHook, managedDeployer);
+            require(address(tickers) == tickersPred, "fixture: ticker launcher prediction");
+        }
         // One USD target for every Stock Token, converted through each asset's own feed.
         stockQuote = new StockQuoteLauncher(owner, factory, registry, ILaunchSeeder(address(seeder)), 8_090e8, 1 days);
         weth = new WETH();
@@ -251,6 +259,17 @@ abstract contract BaseTest is Test, DeployPermit2 {
     /// past the protected blocks but still inside the snipe window's first second: the tax alone
     function pastTheBlocks() internal {
         vm.roll(vm.getBlockNumber() + 3);
+    }
+
+    /// @dev A salt whose coin sorts below `ticker`, as every coin under a ticker must; the site grinds the same way.
+    function saltUnder(address who, TokenParams memory p, address ticker) internal view returns (bytes32 salt) {
+        salt = p.salt;
+        for (uint256 i; i < 256; i++) {
+            p.salt = salt;
+            if (deployer.predictToken(who, p, factory.getLaunchConfig(0).supply) < ticker) return salt;
+            salt = keccak256(abi.encode(salt, i));
+        }
+        revert("fixture: no salt under the ticker");
     }
 
     function launchNative(address who) internal returns (Token token, bytes32 poolId) {

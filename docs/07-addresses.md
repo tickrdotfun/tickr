@@ -16,7 +16,7 @@ tickr curves and pools use native ETH (`address(0)`), not WETH. WETH is listed f
 
 ## Canonical Uniswap v4 on Robinhood Chain
 
-These are the deployments tickr calls. `LaunchSeeder`, `LaunchLocker`, `CoinQuoteLauncher`, `MarketQuoteLauncher` and `TickerLauncher` are constructed with them as immutables. `ChartGuardHook` is deployed with the stack too: every invented ticker's dollar pool is created behind it, and it holds nothing.
+These are the deployments tickr calls. `LaunchSeeder`, `LaunchLocker`, `CoinQuoteLauncher`, `MarketQuoteLauncher` and `TickerLauncher` are constructed with them as immutables. `ManagedTickerHook` is deployed with the stack too: every invented ticker's own pool is created behind it, and it holds nothing.
 
 | Contract | Address |
 |---|---|
@@ -42,16 +42,17 @@ Addresses are written to `contracts/deployments/4663.json` by the deploy script.
 | Contract | Job | Address |
 |---|---|---|
 | `LaunchDeployer` | CREATE2 coin; `predictToken(initiator, params, supply)` | TBD, see `contracts/deployments/4663.json` after deploy |
-| `LaunchSeeder` | Opens a launch pool at the opening price with the supply in a locked one-sided position; opens a ticker's guarded dollar pool from the ticker fee; `swapExactIn` on any pool | TBD, see `contracts/deployments/4663.json` after deploy |
+| `LaunchSeeder` | Opens a launch pool at the opening price with the supply in a locked one-sided position; `swapExactIn` and `swapExactInBounded` on any pool | TBD, see `contracts/deployments/4663.json` after deploy |
 | `FeeEscrow` | Pull-based protocol + creator balances (native + ERC-20) | TBD, see `contracts/deployments/4663.json` after deploy |
 | `LaunchLocker` | Holds every launch position; `collectFees` splits the pool's fees per the frozen terms; no withdrawal | TBD, see `contracts/deployments/4663.json` after deploy |
 | `LaunchAndBuyRouter` | Create + first buy in one tx (must be a factory registrar) | TBD, see `contracts/deployments/4663.json` after deploy |
 | `AnchorRegistry` | ETH / USDG / official Stock Token allowlist | TBD, see `contracts/deployments/4663.json` after deploy |
 | `BuybackVault` | Receives buyback slices; strategy interface only in v1 | TBD, see `contracts/deployments/4663.json` after deploy |
 | `BuybackTreasury` | The protocol's fee recipient, frozen into every launch: collects the protocol share, pays the team half, buys TICKR with the other half and burns it. No owner | TBD, see `contracts/deployments/4663.json` after deploy |
-| `TickerLauncher` | Invents tickers (one-for-one USDG wrappers) and launches coins under them; a factory registrar and the ticker club; no owner | TBD, see `contracts/deployments/4663.json` after deploy |
+| `TickerLauncher` | Invents tickers (one-for-one USDG wrappers, each running its own dollar pool) and launches coins under them; a factory registrar and the ticker club; no owner | TBD, see `contracts/deployments/4663.json` after deploy |
 | `Factory` | Launches, records, owner terms, the CTO timelock; `launchToken`, `getLaunchedToken`, `poolKeyOf` | TBD, see `contracts/deployments/4663.json` after deploy |
-| `ChartGuardHook` | The hook on every ticker's dollar pool: opened only by the seeder at one dollar, liquidity within the band, no swap that moves the price | TBD, see `contracts/deployments/4663.json` after deploy |
+| `ManagedTickerDeployer` | Deploys each ticker's wrapper at its CREATE2 address, for the ticker launcher alone; holds the wrapper's creation code so the launcher stays under the size limit | TBD, see `contracts/deployments/4663.json` after deploy |
+| `ManagedTickerHook` | The one hook on every ticker's own pool: hands each pool's callbacks to its wrapper, so the wrapper tops up its offer before a swap and checks the price and its backing after; only the wrapper touches its pool's liquidity | TBD, see `contracts/deployments/4663.json` after deploy |
 | `CoinQuoteLauncher` | Mode 3: launches priced in a coin launched here, opening cap from its pool | TBD, see `contracts/deployments/4663.json` after deploy |
 | `StockQuoteLauncher` | Mode 4: launches priced in a Stock Token, opening cap from its Chainlink feed | TBD, see `contracts/deployments/4663.json` after deploy |
 | `MarketQuoteLauncher` | Mode 5: launches priced in any token with a deep enough Uniswap v3 pool against WETH or USDG | TBD, see `contracts/deployments/4663.json` after deploy |

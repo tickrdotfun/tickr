@@ -148,6 +148,7 @@ function LaunchCard({ r, window, partial }: { r: Row; window: WindowKey; partial
           <span className="coin-name truncate">{r.name ?? shortAddr(r.launch.token)}</span>
           <span className="coin-ticker num">{r.symbol ?? ""}</span>
           {isOfficialCoin(r.launch.token) && <span className="badge sw-green">official</span>}
+          {r.activated === false && <span className="badge sw-yellow">not activated</span>}
         </div>
         <div className="coin-stats">
           <span>

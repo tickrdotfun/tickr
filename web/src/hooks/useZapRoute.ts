@@ -7,6 +7,7 @@ import { FactoryAbi, TickerLauncherAbi } from "@/lib/abis";
 import { poolManagerAbi as PoolManagerAbi, v3FactoryAbi, v3PoolAbi } from "@/lib/extraAbis";
 import { ADDRESSES, ZERO, isZero, sameAddr } from "@/lib/addresses";
 import { FEE_TIERS, V3_FEES, ethUsdgKey, idOf, keyOf, liquiditySlot, v3Hop, v4Hop, wrapHop, type Hop, type V4Key } from "@/lib/route";
+import { isManagedHookWired, managedKey } from "@/lib/activation";
 import { previewZapOnce, previewZapSellOnce } from "@/hooks/useZap";
 import { reverseRoute } from "@/lib/route";
 
@@ -101,10 +102,15 @@ async function routesToAsset(client: Client, pair: Address): Promise<{ paths: Ho
   if (isZero(pair)) return { paths: [[]], label: "ETH" };
   if (sameAddr(pair, ADDRESSES.usdg)) return { paths: [[v4Hop(ethUsdgKey())]], label: "ETH → USDG" };
 
-  // An invented ticker is a one-for-one wrapper of USDG: reach USDG, then wrap. Nothing to price, nothing to route.
+  // An invented ticker is a one-for-one wrapper of USDG with a pool of its own: reach USDG, then wrap one for one
+  // or trade through the name's pool, whichever pays more for this size
   if (!isZero(ADDRESSES.tickerLauncher)) {
     const isTicker = await client.readContract({ abi: TickerLauncherAbi, address: ADDRESSES.tickerLauncher, functionName: "isTicker", args: [pair] });
-    if (isTicker) return { paths: [[v4Hop(ethUsdgKey()), wrapHop(pair)]], label: "ETH → USDG → ticker" };
+    if (isTicker) {
+      const ways: Hop[][] = [[v4Hop(ethUsdgKey()), wrapHop(pair)]];
+      if (isManagedHookWired()) ways.push([v4Hop(ethUsdgKey()), v4Hop(managedKey(pair))]);
+      return { paths: ways, label: "ETH → USDG → ticker" };
+    }
   }
 
   // Another coin launched here: through its own pool, which sits on ETH, USDG or a ticker (depth one).

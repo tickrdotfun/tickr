@@ -16,7 +16,7 @@ The creator picks a name, a symbol, an image, a description, socials, a pair, an
 
 A dev buy is a swap on the new pool in the same transaction, done by the router or launcher that called the factory: `LaunchAndBuyRouter.launchAndBuy` for ETH and USDG, `launchAndBuy` on the ticker launcher (paid in USDG, wrapped into the ticker on the way in), `launchWithStockQuoteAndBuy` and `launchWithCoinQuoteAndBuy` for the other two.
 
-Inventing a new ticker costs `TickerLauncher.NEW_TICKER_FEE` on top of the launch fee. That fee buys USDG and opens the ticker's guarded one dollar pool, locked, in the same transaction. See [05 anchors](./05-anchors.md).
+Inventing a new ticker costs `TickerLauncher.NEW_TICKER_FEE` on top of the launch fee. That fee buys USDG and becomes the working dollars of the ticker's own pool, which opens at one dollar in the same transaction. See [05 anchors](./05-anchors.md).
 
 ## 2. Trade
 

@@ -15,7 +15,8 @@ import {FeeEscrow} from "../src/FeeEscrow.sol";
 import {LaunchLocker} from "../src/LaunchLocker.sol";
 import {LaunchSeeder} from "../src/LaunchSeeder.sol";
 import {ILaunchSeeder} from "../src/interfaces/ILaunchSeeder.sol";
-import {ChartGuardHook} from "../src/ChartGuardHook.sol";
+import {ManagedTickerHook} from "../src/ManagedTickerHook.sol";
+import {ManagedTickerDeployer} from "../src/ManagedTickerDeployer.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {LaunchAndBuyRouter} from "../src/LaunchAndBuyRouter.sol";
 import {AnchorRegistry} from "../src/AnchorRegistry.sol";
@@ -74,7 +75,8 @@ abstract contract DeployStack {
         BuybackTreasury treasury;
         LaunchDeployer launchDeployer;
         LaunchSeeder seeder;
-        ChartGuardHook chartHook;
+        ManagedTickerHook managedHook;
+        ManagedTickerDeployer managedDeployer;
         Factory factory;
         LaunchAndBuyRouter router;
         TickerLauncher tickers;
@@ -94,6 +96,19 @@ abstract contract DeployStack {
         return RH_V3_FACTORY;
     }
 
+    /// @dev The ticker launcher and the two contracts bound to it before it exists: its hook and its wrapper deployer.
+    /// Kept out of `_deployStack` so neither function holds too many variables for the compiler's stack.
+    function _deployTickers(Stack memory s, address sender, address create2Deployer, IPoolManager pm, address usdg) internal {
+        address tickersPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 2);
+        uint160 flags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+            | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG;
+        (, bytes32 hookSalt) = HookMine.find(create2Deployer, flags, keccak256(abi.encodePacked(type(ManagedTickerHook).creationCode, abi.encode(pm, tickersPred))));
+        s.managedHook = new ManagedTickerHook{salt: hookSalt}(pm, tickersPred);
+        s.managedDeployer = new ManagedTickerDeployer(tickersPred, IERC20(usdg), pm, 1_000_000e6);
+        s.tickers = new TickerLauncher(s.factory, s.registry, IERC20(usdg), ILaunchSeeder(address(s.seeder)), pm, s.managedHook, s.managedDeployer);
+        require(address(s.tickers) == tickersPred, "DeployStack: ticker launcher prediction");
+    }
+
     /// @param sender the account whose nonce sequences the CREATE deployments (EOA in a script, test contract in tests)
     /// @param create2Deployer who executes `new{salt}` (CREATE2 proxy in a script, the test contract in tests)
     /// @param teamWallet where the team's slice of protocol revenue goes; the factory's own recipient is the treasury
@@ -111,19 +126,14 @@ abstract contract DeployStack {
         s.escrow = new FeeEscrow();
         s.buybackVault = new BuybackVault(owner);
 
-        // treasury -> locker -> guard hook (CREATE2) -> launch deployer -> executor -> factory
-        address executorPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 4);
-        address factoryPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 5);
+        // treasury -> locker -> launch deployer -> executor -> factory
+        address executorPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 3);
+        address factoryPred = VM.computeCreateAddress(sender, VM.getNonce(sender) + 4);
         // the protocol's share goes to the buyback treasury from the first launch on; the team is paid from there
         s.treasury = new BuybackTreasury(IFactory(factoryPred), IFeeEscrow(address(s.escrow)), LaunchSeeder(payable(executorPred)), IERC20(usdg), teamWallet);
         s.locker = new LaunchLocker(posm, pm, factoryPred);
-        {
-            uint160 guardFlags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.AFTER_SWAP_FLAG;
-            (, bytes32 guardSalt) = HookMine.find(create2Deployer, guardFlags, keccak256(abi.encodePacked(type(ChartGuardHook).creationCode, abi.encode(pm, executorPred))));
-            s.chartHook = new ChartGuardHook{salt: guardSalt}(pm, executorPred);
-        }
         s.launchDeployer = new LaunchDeployer(factoryPred);
-        s.seeder = new LaunchSeeder(factoryPred, pm, posm, permit2, address(s.locker), IHooks(address(s.chartHook)), usdg, ETH_USDG_FEE, ETH_USDG_TICK_SPACING);
+        s.seeder = new LaunchSeeder(factoryPred, pm, posm, permit2, address(s.locker), usdg, ETH_USDG_FEE, ETH_USDG_TICK_SPACING);
         require(address(s.seeder) == executorPred, "DeployStack: seeder prediction");
         s.factory = new Factory(
             FactoryInit({
@@ -151,7 +161,9 @@ abstract contract DeployStack {
         require(address(s.factory) == factoryPred, "factory prediction");
         s.router = new LaunchAndBuyRouter(s.factory, ILaunchSeeder(address(s.seeder)));
         s.coinQuote = new CoinQuoteLauncher(owner, s.factory, pm, s.registry, ILaunchSeeder(address(s.seeder)));
-        s.tickers = new TickerLauncher(s.factory, s.registry, IERC20(usdg), ILaunchSeeder(address(s.seeder)));
+        // the one hook every ticker's dollar pool runs behind (CREATE2, mined flags) and the wrapper deployer, both
+        // bound to the launcher that follows them
+        _deployTickers(s, sender, create2Deployer, pm, usdg);
         // One USD target for every Stock Token; each launch converts it through that asset's own Chainlink feed.
         s.stockQuote = new StockQuoteLauncher(owner, s.factory, s.registry, ILaunchSeeder(address(s.seeder)), STOCK_TARGET_RAISE_USD, STOCK_MAX_STALENESS);
         // Any token on the chain with a real market, priced from its deepest v3 pool against WETH or USDG.

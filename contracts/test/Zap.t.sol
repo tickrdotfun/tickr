@@ -44,6 +44,7 @@ contract ZapTest is BaseTest {
         TokenParams memory p = defaultParams(address(0), 0);
         p.expectedEconomics = expected;
         uint256 value = LAUNCH_FEE + tickers.NEW_TICKER_FEE();
+        p.salt = saltUnder(creator, p, tickers.predictTicker("BANANA"));
         vm.prank(creator);
         (address banana, address bread,) = tickers.launch{value: value}("BANANA", p, 0);
         pastTheWindow();
@@ -119,35 +120,31 @@ contract ZapTest is BaseTest {
         }
     }
 
-    /// The coin under a ticker can sort after its wrapper (currency1). A fresh one, never bought, opens with its
-    /// position at the price's edge: the first buy, through the zap, must still fill.
-    function test_zap_freshCoinThatSortsAfterItsWrapper_firstBuyThroughTheZap() public {
+    /// Every coin under a ticker sorts below it, so a coin is always currency0 and the name currency1; a fresh
+    /// one, never bought, opens with its position at the price's edge and the first buy through the zap fills.
+    function test_zap_freshCoinUnderATicker_firstBuyThroughTheZap() public {
         (,, bytes32 expected,) = tickers.previewLaunch("BANANA", 0);
         TokenParams memory p = defaultParams(address(0), 0);
         p.expectedEconomics = expected;
         uint256 value = LAUNCH_FEE + tickers.NEW_TICKER_FEE();
+        p.salt = saltUnder(creator, p, tickers.predictTicker("BANANA"));
         vm.prank(creator);
         (address banana,,) = tickers.launch{value: value}("BANANA", p, 0);
         pastTheWindow();
-        // launch coins under BANANA until one sorts after the wrapper
-        address coin;
-        for (uint256 i; i < 12 && coin == address(0); i++) {
-            (,, bytes32 e,) = tickers.previewLaunch("BANANA", 0);
-            TokenParams memory q = defaultParams(address(0), 0);
-            q.expectedEconomics = e;
-            q.salt = keccak256(abi.encodePacked("c1-hunt", i));
-            vm.prank(alice);
-            (, address t,) = tickers.launch{value: LAUNCH_FEE}("BANANA", q, 0);
+        (,, bytes32 e,) = tickers.previewLaunch("BANANA", 0);
+        TokenParams memory q = defaultParams(address(0), 0);
+        q.expectedEconomics = e;
+        q.salt = saltUnder(alice, q, banana);
+        vm.prank(alice);
+        (, address coin,) = tickers.launch{value: LAUNCH_FEE}("BANANA", q, 0);
         pastTheWindow();
-            if (t > banana) coin = t;
-        }
-        assertTrue(coin != address(0), "found a coin that is currency1");
+        assertTrue(coin < banana, "the coin is currency0");
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](3);
         path[0] = _v4(ethUsdgKey);
         path[1] = _wrapHop(banana);
         path[2] = _v4(factory.poolKeyOf(coin));
         vm.prank(bob);
         uint256 out = zap.zapBuy{value: 0.2 ether}(_buyParams(coin, address(0), 0, path, bob));
-        assertGt(out, 0, "the first buy of a currency1 coin fills through the zap");
+        assertGt(out, 0, "the first buy of a fresh coin fills through the zap");
     }
 }

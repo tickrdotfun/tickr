@@ -2,7 +2,7 @@
 
 import type { Abi } from "viem";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useAccount, usePublicClient, useReadContract } from "wagmi";
 import { erc20Abi, formatUnits, isAddress, parseAbi, parseEther, parseEventLogs, toHex, type Address, type Hex } from "viem";
 
@@ -39,6 +39,7 @@ import { DEMO } from "@/lib/demoTransport";
 import { GlideIndicator, useGlider } from "../motion/Glide";
 import { Ceremony, useCeremony } from "../motion/Ceremony";
 import { REEL_TICKERS } from "../motion/TickerReel";
+import { ActivateCard } from "../token/Activate";
 
 type Tab = "eth" | "usdg" | "official" | "diy" | "coin" | "market";
 const SOCIAL_FIELDS = [
@@ -121,13 +122,16 @@ function randomSalt(): Hex {
 }
 
 export function CreateForm() {
-  const router = useRouter();
   const client = usePublicClient();
   const { address: user } = useAccount();
   const tx = useTx();
   const assets = useQuoteAssets();
   const ceremony = useCeremony();
   const launchedToken = useRef<Address | undefined>(undefined);
+  const launchedBlock = useRef<bigint | undefined>(undefined);
+  // the launch landed: the coin is live, and the page shows its last step, the two buys that activate it, until
+  // they land. no link to the coin, nothing to share, before that
+  const [activating, setActivating] = useState<{ token: Address; block?: bigint } | undefined>(undefined);
   const retriedSquat = useRef(false);
   // one salt per attempt, so a retry after a failed send lands on the same address
   const [seed, setSeed] = useState<Hex>(randomSalt); // the salt seed: one per launch, regenerated after each success
@@ -634,6 +638,7 @@ export function CreateForm() {
       const rc = await client.getTransactionReceipt({ hash });
       const logs = parseEventLogs({ abi: FactoryAbi, eventName: "TokenLaunched", logs: rc.logs });
       launchedToken.current = logs[0]?.args.token;
+      launchedBlock.current = rc.blockNumber;
       setSeed(randomSalt());
       return true;
     } catch (e) {
@@ -869,6 +874,21 @@ export function CreateForm() {
       </dl>
     </aside>
   );
+
+  if (activating) {
+    return (
+      <div className="max-w-2xl">
+        <div className="mb-6">
+          <h1>Launched. One last step.</h1>
+          <p className="text-muted mt-3">
+            Your coin is live and trades on tickr now. Chart sites and trackers price it only after the small buys below land, in transactions after the launch. Do
+            them now, from the wallet that launched.
+          </p>
+        </div>
+        <ActivateCard token={activating.token} launchBlock={activating.block} title="activate your coin" />
+      </div>
+    );
+  }
 
   return (
     <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-14 lg:items-start">
@@ -1367,7 +1387,7 @@ export function CreateForm() {
         subject={symbol || name || "Untitled"}
         detail={
           (inventing
-            ? `${tickerUp || "The ticker"} is created and its dollar pool opened, then your coin's pool opens with the whole supply locked in it.`
+            ? `${tickerUp || "The ticker"} is created with its own dollar pool, then your coin's pool opens with the whole supply locked in it.`
             : "Your coin's pool opens with the whole supply locked in it.") +
           (firstBuyAmt > 0n
             ? ` Your first buy of ${fmtAmount(firstBuyAmt, firstBuyDecimals)} ${firstBuySymbol} then buys from the pool like anyone else, at the opening price.`
@@ -1379,7 +1399,7 @@ export function CreateForm() {
         onCancel={ceremony.cancel}
         onConfirm={() =>
           ceremony.run(submit, () => {
-            if (launchedToken.current) router.push(`/t/${launchedToken.current}`);
+            if (launchedToken.current) setActivating({ token: launchedToken.current, block: launchedBlock.current });
           })
         }
       />

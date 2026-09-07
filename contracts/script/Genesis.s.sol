@@ -14,6 +14,8 @@ import {LaunchSeeder} from "../src/LaunchSeeder.sol";
 import {TokenParams, Socials} from "../src/Types.sol";
 import {Token} from "../src/Token.sol";
 import {ILaunchDeployer} from "../src/interfaces/ILaunchDeployer.sol";
+import {ZapRouter} from "../src/ZapRouter.sol";
+import {ManagedTickerToken} from "../src/ManagedTickerToken.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 
 /// @notice The first launch: TICKR, priced in FUN. Runs as the last step of a deployment, while launches are
@@ -34,8 +36,14 @@ import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 /// This file holds one contract and must stay that way: with two, `forge script script/Genesis.s.sol` refuses to
 /// run without `--tc`, and neither local.sh nor the runbook passes it. Helpers live in script/lib.
 ///
-/// TICKR's address ends in 6942, like every coin launched from the site. The salt is ground here, off chain, against
-/// the deployed LaunchDeployer's own prediction, and the script refuses to launch if the prediction does not end that way.
+/// TICKR's address ends in 6942, like every coin launched from the site, and sorts below FUN's, like every coin under
+/// a name. The salt is ground here, off chain, against the deployed LaunchDeployer's own prediction, and the script
+/// refuses to launch if the prediction does not come out that way.
+///
+/// After the launch come the two activation buys, each its own transaction: FUN itself, bought through its own pool
+/// and paid to the deployer's wallet, then TICKR. Chart sites price a name from a swap that lands in a wallet after
+/// the pool exists, and price the coin from a buy after its pool exists; the launch transaction is neither.
+/// env: GENESIS_ACTIVATION_ETH (ETH for each of the two buys, default 0.005).
 contract Genesis is Script {
     using stdJson for string;
 
@@ -56,7 +64,9 @@ contract Genesis is Script {
         Factory factory = Factory(payable(j.readAddress(".factory")));
         TickerLauncher tickers = TickerLauncher(j.readAddress(".tickerLauncher"));
         LaunchSeeder seeder = LaunchSeeder(payable(j.readAddress(".launchSeeder")));
+        ZapRouter zap = ZapRouter(payable(j.readAddress(".zapRouter")));
         address usdg = j.readAddress(".usdg");
+        uint256 activationEth = vm.envOr("GENESIS_ACTIVATION_ETH", uint256(0.005 ether));
 
         require(factory.canLaunch(me), "genesis: deployer cannot launch");
         require(!factory.launchEnabled(), "genesis: launches are already open; genesis must come first");
@@ -82,15 +92,18 @@ contract Genesis is Script {
             // the seed is secret until this transaction lands, so nobody can compute TICKR's address and squat its pool
             bytes32 seed = vm.envBytes32("GENESIS_SEED");
             require(seed != bytes32(0), "genesis: set GENESIS_SEED to a random bytes32");
-            p.salt = _grindSalt(deployer, me, p, supplyOf, seed);
+            address funPredicted = tickers.predictTicker("FUN");
+            p.salt = _grindSalt(deployer, me, p, supplyOf, seed, funPredicted);
             address predicted = deployer.predictToken(me, p, supplyOf);
             require(uint16(uint160(predicted)) == VANITY_SUFFIX, "genesis: predicted TICKR address does not end in 6942");
+            require(predicted < funPredicted, "genesis: TICKR must sort below FUN");
+            console.log("  genesis FUN predicted  ", funPredicted);
             console.log("  genesis TICKR predicted", predicted);
         }
 
         // 2. the disclosed first buy, sized in a simulation of the very transaction that makes it
         uint256 target = (supplyOf * shareBps) / 10_000;
-        // inventing FUN costs the ticker fee on top of the launch fee: it opens FUN's guarded dollar pool, locked
+        // inventing FUN costs the ticker fee on top of the launch fee: it becomes the first dollars of FUN's own pool
         uint256 fees = factory.launchFee() + tickers.NEW_TICKER_FEE();
         PoolKey memory ethUsdg = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(usdg), fee: FEE_ETH_USDG, tickSpacing: TICK_ETH_USDG, hooks: IHooks(address(0))});
         (uint256 ethIn, uint256 usdgIn, uint256 coinsOut) = _sizeFirstBuy(seeder, tickers, usdg, ethUsdg, p, fees, target, me);
@@ -116,7 +129,11 @@ contract Genesis is Script {
         // 5. exactly the disclosed share to the treasury; the crumbs the search overshot by stay with the deployer
         if (treasury != me) IERC20(tickr).transfer(treasury, got < target ? got : target);
 
-        // 6. open launches to everyone, and take the deployer's own pass away: from here it is a wallet like any other
+        // 6. the two activation buys, one transaction each, both to the deployer's own wallet: FUN through its own
+        //    pool first, then TICKR through FUN's pool and its own. from here chart sites can price both
+        _activate(zap, factory, ethUsdg, fun, tickr, activationEth, me);
+
+        // 7. open launches to everyone, and take the deployer's own pass away: from here it is a wallet like any other
         factory.setLaunchEnabled(true);
         factory.setWhitelistedLauncher(me, false);
         vm.stopBroadcast();
@@ -125,6 +142,22 @@ contract Genesis is Script {
         vm.writeJson(vm.toString(fun), path, ".genesisTicker");
         vm.writeJson(vm.toString(poolId), path, ".genesisPool");
         console.log("  genesis launches open; recorded in", path);
+    }
+
+    /// @dev The two activation buys, as the site sends them for every launch under a name: the name into the wallet
+    /// through its own pool, then the coin through the name's pool and its own. Two transactions under a broadcast.
+    function _activate(ZapRouter zap, Factory factory, PoolKey memory ethUsdg, address fun, address tickr, uint256 eth, address me) internal {
+        ZapRouter.Hop[] memory toFun = new ZapRouter.Hop[](2);
+        toFun[0] = ZapRouter.Hop({kind: 0, key: ethUsdg, pool: address(0)});
+        toFun[1] = ZapRouter.Hop({kind: 0, key: ManagedTickerToken(fun).poolKey(), pool: address(0)});
+        uint256 funGot = zap.zapTicker{value: eth}(ZapRouter.ZapTickerParams({ticker: fun, tokenIn: address(0), amountIn: 0, path: toFun, minOut: 0, recipient: me, deadline: block.timestamp + 30 minutes}));
+        console.log("  genesis activation 1: FUN to the wallet", funGot);
+        ZapRouter.Hop[] memory toTickr = new ZapRouter.Hop[](3);
+        toTickr[0] = toFun[0];
+        toTickr[1] = toFun[1];
+        toTickr[2] = ZapRouter.Hop({kind: 0, key: factory.poolKeyOf(tickr), pool: address(0)});
+        uint256 tickrGot = zap.zapBuy{value: eth}(ZapRouter.ZapParams({token: tickr, tokenIn: address(0), amountIn: 0, path: toTickr, minTokensOut: 0, recipient: me, deadline: block.timestamp + 30 minutes}));
+        console.log("  genesis activation 2: TICKR to the wallet", tickrGot);
     }
 
     /// @dev Finds the ETH whose dollars buy `target` coins, by doing the whole thing in a simulation that is thrown
@@ -181,10 +214,10 @@ contract Genesis is Script {
     }
 
     /// Mirrors LaunchDeployer: the coin lands at CREATE2(deployer, keccak256(initiator ++ salt), initCodeHash). Tries
-    /// salts derived from a fixed seed until the address ends in 6942, so the result is reproducible from the inputs.
-    /// The loop works in a fixed scratch area of memory: hundreds of thousands of tries must not grow memory, or the
-    /// script runs out of it.
-    function _grindSalt(ILaunchDeployer deployer, address initiator, TokenParams memory p, uint256 supply, bytes32 seed) internal view returns (bytes32 found) {
+    /// salts derived from a fixed seed until the address ends in 6942 and sorts below the name, so the result is
+    /// reproducible from the inputs. The loop works in a fixed scratch area of memory: hundreds of thousands of tries
+    /// must not grow memory, or the script runs out of it.
+    function _grindSalt(ILaunchDeployer deployer, address initiator, TokenParams memory p, uint256 supply, bytes32 seed, address below) internal view returns (bytes32 found) {
         bytes32 initCodeHash = keccak256(
             abi.encodePacked(
                 type(Token).creationCode,
@@ -208,7 +241,7 @@ contract Genesis is Script {
                 let salt := keccak256(add(buf, 64), 52)
                 mstore(add(buf, 149), salt)
                 let a := and(keccak256(add(buf, 128), 85), 0xffffffffffffffffffffffffffffffffffffffff)
-                if eq(and(a, 0xffff), 0x6942) {
+                if and(eq(and(a, 0xffff), 0x6942), lt(a, below)) {
                     found := userSalt
                     tries := add(i, 1)
                     break

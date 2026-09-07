@@ -12,17 +12,26 @@ import {IFeeClub} from "./interfaces/IFeeClub.sol";
 import {ILaunchSeeder} from "./interfaces/ILaunchSeeder.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
+import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
+import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {ITickerToken} from "./interfaces/ITickerToken.sol";
 import {TokenParams, PairEconomics} from "./Types.sol";
-import {TickerToken} from "./TickerToken.sol";
+import {ManagedTickerToken} from "./ManagedTickerToken.sol";
+import {ManagedTickerHook} from "./ManagedTickerHook.sol";
+import {ManagedTickerDeployer} from "./ManagedTickerDeployer.sol";
 
 /// @title TickerLauncher
 /// @notice Pair anything.
 ///
 /// A launch names its pair. If the name is an invented ticker that exists, the coin is priced in it; if it does
-/// not exist yet, it is created in the same transaction. An invented ticker is a `TickerToken`: a one-for-one
-/// wrapper of USDG with the symbol somebody typed. So BREAD/BANANA is a real pair on-chain and on every chart,
-/// and economically it is BREAD against USDG.
+/// not exist yet, it is created in the same transaction. An invented ticker is a `ManagedTickerToken`: a
+/// one-for-one wrapper of USDG with the symbol somebody typed, running its own dollar pool against USDG behind
+/// the one `ManagedTickerHook`, so the name has a market of its own that anything can trade at one dollar. So
+/// BREAD/BANANA is a real pair on-chain and on every chart, and economically it is BREAD against USDG.
+///
+/// A ticker's address sits in the top sixteenth of the address space, and every coin under a ticker must sort
+/// below it, so the coin is always currency0 of its pool and the name currency1: the base and the quote read the
+/// same way everywhere. A launch whose coin would sort above its ticker reverts; the site grinds its salts for it.
 ///
 /// Nobody owns a ticker: no owner slot, no rights over any other coin, no permission to ask before joining. What a
 /// ticker has is a club: every coin priced in it pays the club's slice of its trade fee (10% of the 1% at deploy)
@@ -48,12 +57,26 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
     IAnchorRegistry public immutable registry;
     IERC20 public immutable usdg;
     ILaunchSeeder public immutable seeder;
-    /// @notice What inventing a new ticker costs on top of the launch fee. It buys the dollars that open the
-    /// ticker's guarded one-dollar pool, locked, so chart sites can price every coin under the name from its first
-    /// block. Launching under a ticker that exists costs the launch fee alone.
+    IPoolManager public immutable poolManager;
+    /// @notice The one hook every ticker's dollar pool runs behind; this contract registers each new wrapper with it.
+    ManagedTickerHook public immutable hook;
+    /// @notice Deploys each wrapper at its CREATE2 address, for this contract alone.
+    ManagedTickerDeployer public immutable wrapperDeployer;
     /// @notice The longest invented name, in bytes.
     uint256 public constant MAX_SYMBOL_LENGTH = 12;
+    /// @notice What inventing a new ticker costs on top of the launch fee. It becomes the first dollars of the
+    /// ticker's own pool: the wrapper's working surplus, which pays for keeping the pool at one dollar and is never
+    /// part of the backing. Launching under a ticker that exists costs the launch fee alone.
     uint256 public constant NEW_TICKER_FEE = 0.0015 ether;
+    /// @notice The fewest dollars the fee must buy for the wrapper to open; the wrapper's own minimum.
+    uint256 public constant MIN_DONATION = 1_000_000;
+    /// @notice The inventory every ticker's pool offers at rest, in the wrapper's six decimals: one million
+    /// dollars' worth, so a single buy of up to that much fills whole while nothing is in circulation; the offer
+    /// grows by four times whatever is out. Inventory is the wrapper's own unsold tokens, backed by nothing and
+    /// owed to nobody until sold, when the dollars paid for them become their backing.
+    uint256 public constant INVENTORY_FLOOR = 1_000_000e6;
+    /// @dev A ticker's address always starts with this nibble, so a coin's can sort below it fifteen times in sixteen.
+    uint160 internal constant TICKER_PREFIX = 0xF;
 
     mapping(bytes32 => address) internal _tickerOf;
     mapping(address => bool) public isTicker;
@@ -97,12 +120,31 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
     error EmptySymbol();
     error SymbolTooLong();
     error BadSymbol();
+    /// @notice The coin's address must sort below its ticker's; grind the coin's salt until it does.
+    error CoinNotFirst(address coin, address ticker);
+    error TooFewDollars(uint256 got);
 
-    constructor(IFactory factory_, IAnchorRegistry registry_, IERC20 usdg_, ILaunchSeeder seeder_) {
+    constructor(
+        IFactory factory_,
+        IAnchorRegistry registry_,
+        IERC20 usdg_,
+        ILaunchSeeder seeder_,
+        IPoolManager poolManager_,
+        ManagedTickerHook hook_,
+        ManagedTickerDeployer wrapperDeployer_
+    ) {
         seeder = seeder_;
         factory = factory_;
         registry = registry_;
         usdg = usdg_;
+        poolManager = poolManager_;
+        hook = hook_;
+        wrapperDeployer = wrapperDeployer_;
+        if (hook_.issuer() != address(this) || hook_.poolManager() != poolManager_) revert BadSymbol();
+        if (
+            wrapperDeployer_.issuer() != address(this) || wrapperDeployer_.counter() != usdg_ || wrapperDeployer_.poolManager() != poolManager_
+                || wrapperDeployer_.floor() != INVENTORY_FLOOR
+        ) revert BadSymbol();
     }
 
     // ---------------------------------------------------------------- views
@@ -147,7 +189,14 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
     function predictTicker(string calldata symbol) public view returns (address) {
         address existing = _tickerOf[_key(symbol)];
         if (existing != address(0)) return existing;
-        return Create2.computeAddress(_key(symbol), _initCodeHash(symbol), address(this));
+        (, address predicted) = _tickerSalt(_key(symbol), _initCodeHash(_upper(symbol)));
+        return predicted;
+    }
+
+    /// @notice The pool every ticker trades in against USDG: the wrapper's own key.
+    function poolKeyOf(address ticker) external view returns (PoolKey memory) {
+        if (!isTicker[ticker]) revert NotUnderTicker();
+        return ManagedTickerToken(ticker).poolKey();
     }
 
     /// @notice The economics every coin under a ticker launches with: the same as USDG's, because a ticker is
@@ -249,12 +298,12 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
         if (ticker == address(0)) {
             if (msg.value != fee + NEW_TICKER_FEE) revert BadValue();
             ticker = _create(symbol);
-            // the fee for the name opens its dollar pool, locked, behind the guard
-            seeder.seedDollarPool{value: NEW_TICKER_FEE}(ticker);
         } else {
             if (msg.value != fee) revert BadValue();
         }
         (token, poolId) = factory.launchTokenWithPair{value: fee}(msg.sender, coin, launchConfigId, ticker, _economics());
+        // the coin is currency0 of its pool and the name currency1, on every chart the same way round
+        if (token >= ticker) revert CoinNotFirst(token, ticker);
         _pairsOf[ticker].push(token);
         emit Launched(token, poolId, ticker);
     }
@@ -356,11 +405,34 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
         if (registry.isReservedTicker(symbol)) revert IFactory.TickerReserved();
         bytes32 key = _key(symbol);
         string memory upper = _upper(symbol);
-        ticker = address(new TickerToken{salt: key}(upper, upper, usdg));
+        (bytes32 salt, address predicted) = _tickerSalt(key, _initCodeHash(upper));
+        ticker = wrapperDeployer.deploy(salt, upper);
+        assert(ticker == predicted);
         _tickerOf[key] = ticker;
         isTicker[ticker] = true;
         _tickers.push(ticker);
+        // the wrapper is bound to the one hook, and the fee for the name becomes its first dollars through the
+        // live ETH/USDG pool: the working surplus its pool opens with
+        hook.register(ManagedTickerToken(ticker));
+        uint256 got = seeder.swapExactIn{value: NEW_TICKER_FEE}(_ethUsdgKey(), true, NEW_TICKER_FEE, MIN_DONATION, address(this));
+        if (got < MIN_DONATION) revert TooFewDollars(got);
+        usdg.forceApprove(ticker, got);
+        ManagedTickerToken(ticker).initialize(address(hook), got);
         emit TickerCreated(ticker, upper, msg.sender);
+    }
+
+    /// @dev The salt, and the address it gives, for a ticker: the first salt in the name's own sequence whose
+    /// address starts with `TICKER_PREFIX`. Sixteen tries on average, the same in a preview as at creation.
+    function _tickerSalt(bytes32 key, bytes32 initCodeHash) internal view returns (bytes32 salt, address predicted) {
+        for (uint256 i;; i++) {
+            salt = keccak256(abi.encode(key, i));
+            predicted = Create2.computeAddress(salt, initCodeHash, address(wrapperDeployer));
+            if (uint160(predicted) >> 156 == TICKER_PREFIX) return (salt, predicted);
+        }
+    }
+
+    function _ethUsdgKey() internal view returns (PoolKey memory k) {
+        (k.currency0, k.currency1, k.fee, k.tickSpacing, k.hooks) = seeder.ethUsdgKey();
     }
 
     /// @dev A ticker wraps USDG, so a coin under it launches on USDG's terms. Read live from the factory, so
@@ -370,9 +442,8 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
         e = PairEconomics({phantomQuote: phantom, decimals: IERC20Metadata(address(usdg)).decimals()});
     }
 
-    function _initCodeHash(string calldata symbol) internal view returns (bytes32) {
-        string memory upper = _upper(symbol);
-        return keccak256(abi.encodePacked(type(TickerToken).creationCode, abi.encode(upper, upper, usdg)));
+    function _initCodeHash(string memory upper) internal view returns (bytes32) {
+        return wrapperDeployer.initCodeHash(upper);
     }
 
     /// @dev Upper-cases ASCII, so BANANA, banana and Banana are one ticker.

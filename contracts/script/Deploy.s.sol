@@ -67,7 +67,8 @@ contract Deploy is Script, DeployStack {
         vm.serializeUint(j, "chainId", block.chainid);
         vm.serializeUint(j, "startBlock", block.number);
         vm.serializeAddress(j, "factory", address(s.factory));
-        vm.serializeAddress(j, "chartGuardHook", address(s.chartHook));
+        vm.serializeAddress(j, "managedTickerHook", address(s.managedHook));
+        vm.serializeAddress(j, "managedTickerDeployer", address(s.managedDeployer));
         vm.serializeAddress(j, "feeEscrow", address(s.escrow));
         vm.serializeAddress(j, "launchLocker", address(s.locker));
         vm.serializeAddress(j, "launchDeployer", address(s.launchDeployer));

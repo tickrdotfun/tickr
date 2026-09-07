@@ -42,6 +42,7 @@ contract FeesTest is BaseTest {
         TokenParams memory p = defaultParams(address(0), 200);
         p.expectedEconomics = expected;
         uint256 value = LAUNCH_FEE + tickers.NEW_TICKER_FEE();
+        p.salt = saltUnder(creator, p, tickers.predictTicker("BANANA"));
         vm.prank(creator);
         (address banana, address bread,) = tickers.launch{value: value}("BANANA", p, 0);
         pastTheWindow();
@@ -95,6 +96,7 @@ contract FeesTest is BaseTest {
         TokenParams memory p = defaultParams(address(0), 0);
         p.expectedEconomics = expected;
         uint256 value = LAUNCH_FEE + tickers.NEW_TICKER_FEE(); // read before the prank: a view call would consume it
+        p.salt = saltUnder(creator, p, tickers.predictTicker("BANANA"));
         vm.prank(creator);
         (address banana, address bread,) = tickers.launch{value: value}("BANANA", p, 0);
         pastTheWindow();

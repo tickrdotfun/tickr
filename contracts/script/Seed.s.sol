@@ -16,6 +16,8 @@ import {LaunchSeeder} from "../src/LaunchSeeder.sol";
 import {LaunchLocker} from "../src/LaunchLocker.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
 import {ITickerToken} from "../src/interfaces/ITickerToken.sol";
+import {ILaunchDeployer} from "../src/interfaces/ILaunchDeployer.sol";
+import {ManagedTickerToken} from "../src/ManagedTickerToken.sol";
 import {TokenParams, Socials, PairEconomics} from "../src/Types.sol";
 
 /// @notice Demo launches for a fork or a devnet, after Genesis. Every coin has a pool from its first block.
@@ -31,6 +33,7 @@ contract Seed is Script {
 
     Factory factory;
     LaunchSeeder seeder;
+    ILaunchDeployer launchDeployer;
     address me;
     /// @dev Every amount below is scaled by this, in basis points: 10,000 on a fork or a devnet with ETH to burn,
     /// a hundred or so on a public testnet where the deployer holds a fraction of an ETH.
@@ -53,6 +56,7 @@ contract Seed is Script {
         // the chain token a demo coin is priced in: the devnet's own MOON, or on a fork of the real chain a liquid coin that is already there
         address chainToken = vm.keyExistsJson(j, ".demoMoon") ? j.readAddress(".demoMoon") : LIVE_CHAIN_TOKEN;
         seeder = LaunchSeeder(payable(j.readAddress(".launchSeeder")));
+        launchDeployer = ILaunchDeployer(j.readAddress(".launchDeployer"));
         LaunchLocker locker = LaunchLocker(payable(j.readAddress(".launchLocker")));
         address usdg = j.readAddress(".usdg");
         uint256 fee = factory.launchFee();
@@ -83,12 +87,16 @@ contract Seed is Script {
         seeder.swapExactIn{value: _s(2 ether)}(ethUsdg, true, _s(2 ether), 0, me);
         console.log("  3 usdg on hand", IERC20(usdg).balanceOf(me) / 1e6);
 
-        // 4. BREAD, priced in BANANA. BANANA does not exist yet: inventing it opens its guarded dollar pool
+        // 4. BREAD, priced in BANANA. BANANA does not exist yet: inventing it opens its own dollar pool. the coin
+        //    must sort below the name, so its salt is ground for that like the site does
         (,, bytes32 expected,) = tickers.previewLaunch("BANANA", 0);
         (address banana, address bread,) = tickers.launch{value: fee + tickers.NEW_TICKER_FEE()}(
-            "BANANA", _params("Bread", "BREAD", "bread, priced in BANANA", expected, "bread"), 0
+            "BANANA", _under(_params("Bread", "BREAD", "bread, priced in BANANA", expected, "bread"), tickers.predictTicker("BANANA")), 0
         );
         console.log("  4 BANANA invented, BREAD under it", banana, bread);
+        // 4b. the two activation buys, as the site sends them: BANANA into this wallet through its own pool, then BREAD
+        _activate(zap, ethUsdg, banana, bread);
+        console.log("  4b BANANA and BREAD activated");
 
         // 5. a buy of BREAD: dollars become BANANA one for one, then BANANA buys in the pool
         _buyWithDollars(usdg, banana, bread, _s(1_500e6));
@@ -97,7 +105,7 @@ contract Seed is Script {
         // 6. a second coin under BANANA, with a dev buy in dollars
         (,, expected,) = tickers.previewLaunch("BANANA", 0);
         IERC20(usdg).approve(address(tickers), _s(500e6));
-        (, address split,,) = tickers.launchAndBuy{value: fee}("BANANA", _params("Split", "SPLIT", "a split, also priced in BANANA", expected, "split"), 0, _s(500e6), 0);
+        (, address split,,) = tickers.launchAndBuy{value: fee}("BANANA", _under(_params("Split", "SPLIT", "a split, also priced in BANANA", expected, "split"), banana), 0, _s(500e6), 0);
         console.log("  6 SPLIT under BANANA, 500 dollar dev buy", split);
 
         // 7. a coin priced in PAPER. Buying it means buying PAPER first
@@ -108,8 +116,9 @@ contract Seed is Script {
         // 8. a second ticker with one coin under it, and some trading so fees exist to collect
         (,, expected,) = tickers.previewLaunch("KETCHUP", 0);
         (address ketchup, address fries,) = tickers.launch{value: fee + tickers.NEW_TICKER_FEE()}(
-            "KETCHUP", _params("Fries", "FRIES", "fries, priced in KETCHUP", expected, "fries"), 0
+            "KETCHUP", _under(_params("Fries", "FRIES", "fries, priced in KETCHUP", expected, "fries"), tickers.predictTicker("KETCHUP")), 0
         );
+        _activate(zap, ethUsdg, ketchup, fries);
         _buyWithDollars(usdg, ketchup, fries, _s(300e6));
         locker.collectFees(bread);
         console.log("  8 KETCHUP ticker, FRIES under it; BREAD fees collected", ketchup, fries);
@@ -130,6 +139,30 @@ contract Seed is Script {
         }
 
         vm.stopBroadcast();
+    }
+
+    /// @dev A coin under a name must sort below it: the first salt in the coin's own sequence that does.
+    function _under(TokenParams memory p, address ticker) internal view returns (TokenParams memory) {
+        uint256 supply = factory.getLaunchConfig(0).supply;
+        for (uint256 i; i < 256; i++) {
+            if (launchDeployer.predictToken(me, p, supply) < ticker) return p;
+            p.salt = keccak256(abi.encode(p.salt, i));
+        }
+        revert("seed: no salt under the ticker");
+    }
+
+    /// @dev The two buys that follow a launch under a name, one transaction each: the name into this wallet through
+    /// its own pool, then the coin through the name's pool and its own. What chart sites need before they price either.
+    function _activate(ZapRouter zap, PoolKey memory ethUsdg, address ticker, address coin) internal {
+        ZapRouter.Hop[] memory toName = new ZapRouter.Hop[](2);
+        toName[0] = ZapRouter.Hop({kind: 0, key: ethUsdg, pool: address(0)});
+        toName[1] = ZapRouter.Hop({kind: 0, key: ManagedTickerToken(ticker).poolKey(), pool: address(0)});
+        zap.zapTicker{value: _s(0.005 ether)}(ZapRouter.ZapTickerParams({ticker: ticker, tokenIn: address(0), amountIn: 0, path: toName, minOut: 0, recipient: me, deadline: block.timestamp + 1 hours}));
+        ZapRouter.Hop[] memory toCoin = new ZapRouter.Hop[](3);
+        toCoin[0] = toName[0];
+        toCoin[1] = toName[1];
+        toCoin[2] = ZapRouter.Hop({kind: 0, key: factory.poolKeyOf(coin), pool: address(0)});
+        zap.zapBuy{value: _s(0.005 ether)}(ZapRouter.ZapParams({token: coin, tokenIn: address(0), amountIn: 0, path: toCoin, minTokensOut: 0, recipient: me, deadline: block.timestamp + 1 hours}));
     }
 
     function _params(string memory name, string memory symbol, string memory description, bytes32 expected, string memory salt)

@@ -31,3 +31,7 @@ function claimToken(address token) returns (uint256);                           
 ```
 
 A collection splits by the terms frozen at launch, [06 fees](./06-fees.md). The coin side, every fee taken in the launched coin on sells, splits like the quote side: the creator's share and the tax go to the escrow in the coin, the protocol's and the club's shares are burned to `0x000000000000000000000000000000000000dEaD`; nobody is paid in the coin, so the burned supply of a coin is that address's balance. What a collection produced is in the `FeesCollected` event.
+
+## A coin under an invented name
+
+Buying it with ETH is the zap with a route through the ETH/USDG pool, then either the name's own pool (a v4 hop, fee 500, spacing 1, hooks = `ManagedTickerHook`, key from `TickerLauncher.poolKeyOf(ticker)`) or a wrap hop, then the coin's pool; selling it is the same route backwards. Paying in the name itself is one hop through the coin's own pool. The name is a dollar either way: `ManagedTickerToken.mint` and `redeem` are one for one with USDG, outside any route (they refuse to run while the pool manager is unlocked), and the name's pool trades within two ticks of a dollar or not at all. See [12](./12-zap.md) for `zapTicker`.

@@ -20,6 +20,7 @@ contract GenesisTest is BaseTest {
         p.creatorFeeRecipient = treasury;
         p.expectedEconomics = expected;
         p.salt = keccak256("genesis");
+        p.salt = saltUnder(creator, p, tickers.predictTicker("FUN"));
     }
 
     /// one attempt, thrown away: `eth` into dollars, every dollar into the launch-and-buy

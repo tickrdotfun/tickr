@@ -16,6 +16,8 @@ const NAMES = [
   "LaunchAndBuyRouter",
   "TickerLauncher",
   "TickerToken",
+  "ManagedTickerToken",
+  "ManagedTickerHook",
   "CoinQuoteLauncher",
   "StockQuoteLauncher",
   "MarketQuoteLauncher",

@@ -81,6 +81,8 @@ contract AuditR11Test is BaseTest {
         p.symbol = "TICKR";
         p.expectedEconomics = expected;
         p.salt = keccak256("r11 genesis");
+        p.salt = saltUnder(address(this), p, tickers.predictTicker("FUN"));
+        // the fee read inside the call consumes the prank: the test contract is the sender here, as it always was
         vm.prank(creator);
         (address f, address t,) = tickers.launch{value: LAUNCH_FEE + tickers.NEW_TICKER_FEE()}("FUN", p, 0);
         fun = TickerToken(f);
@@ -100,10 +102,12 @@ contract AuditR11Test is BaseTest {
         fun.mint(amount, to);
     }
 
-    /// the price of TICKR in FUN, from the pool's sqrt price, as a fraction with 1e18 precision
+    /// the price of currency0 in currency1, from the pool's sqrt price, with 1e36 precision: with the coin as
+    /// currency0 and an eighteen-decimal coin against a six-decimal name the raw price is around 1e-17, so 1e18
+    /// alone would read it as a couple of units and a three percent move as five
     function _price(PoolKey memory key) internal view returns (uint256 p, uint160 sqrtP) {
         (sqrtP,,,) = poolManager.getSlot0(key.toId());
-        p = FullMath.mulDiv(uint256(sqrtP) * uint256(sqrtP), 1e18, FixedPoint96.Q96 * FixedPoint96.Q96);
+        p = FullMath.mulDiv(uint256(sqrtP) * uint256(sqrtP), 1e36, FixedPoint96.Q96 * FixedPoint96.Q96);
     }
 
     /// Thick liquidity at the price and thin liquidity past it: the sizing sees the thick part and would push the
@@ -212,6 +216,8 @@ contract AuditR11Test is BaseTest {
         (,, bytes32 expected,) = tickers.previewLaunch("BANANA", 0);
         TokenParams memory p = defaultParams(address(0), 0);
         p.expectedEconomics = expected;
+        p.salt = saltUnder(address(this), p, tickers.predictTicker("BANANA"));
+        // the fee read inside the call consumes the prank: the test contract is the sender here, as it always was
         vm.prank(creator);
         (address banana, address bread,) = tickers.launch{value: LAUNCH_FEE + tickers.NEW_TICKER_FEE()}("BANANA", p, 0);
         pastTheWindow();

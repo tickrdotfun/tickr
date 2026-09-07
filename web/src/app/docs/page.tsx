@@ -11,7 +11,7 @@ const CONTRACTS: [string, string][] = [
   ["FeeEscrow", ADDRESSES.feeEscrow],
   ["TickerLauncher", ADDRESSES.tickerLauncher],
   ["ZapRouter", ADDRESSES.zapRouter],
-  ["ChartGuardHook", ADDRESSES.chartGuardHook],
+  ["ManagedTickerHook", ADDRESSES.managedTickerHook],
   ["CoinQuoteLauncher", ADDRESSES.coinQuoteLauncher],
   ["StockQuoteLauncher", ADDRESSES.stockQuoteLauncher],
   ["LaunchAndBuyRouter", ADDRESSES.launchAndBuyRouter],

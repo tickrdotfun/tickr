@@ -6,6 +6,8 @@ export { AnchorRegistryAbi } from "./AnchorRegistry";
 export { LaunchAndBuyRouterAbi } from "./LaunchAndBuyRouter";
 export { TickerLauncherAbi } from "./TickerLauncher";
 export { TickerTokenAbi } from "./TickerToken";
+export { ManagedTickerTokenAbi } from "./ManagedTickerToken";
+export { ManagedTickerHookAbi } from "./ManagedTickerHook";
 export { CoinQuoteLauncherAbi } from "./CoinQuoteLauncher";
 export { StockQuoteLauncherAbi } from "./StockQuoteLauncher";
 export { MarketQuoteLauncherAbi } from "./MarketQuoteLauncher";

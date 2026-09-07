@@ -7,7 +7,7 @@ Three inputs, one place they land, one function that splits them.
 | what | amount | when |
 | --- | --- | --- |
 | launch fee | 0.0005 ETH | once, at creation, to the protocol |
-| new ticker fee | 0.0015 ETH more | once, when a ticker is invented; it opens the ticker's dollar pool, locked |
+| new ticker fee | 0.0015 ETH more | once, when a ticker is invented; it becomes the working dollars of the ticker's own pool |
 | pool fee | 1% base plus the creator's tax, 0 to 2% | every buy and sell, taken by the pool from the swap's input |
 
 The pool fee is the pool's own LP fee, fixed when the pool is created: `(baseFeeBps + creatorTaxBps) * 100` in Uniswap's hundredths of a bip, so 10000 for 1%. It is part of the pool key and can never change. Buys pay it in the pair, sells pay it in the coin, and it accrues to the locked launch position.

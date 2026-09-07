@@ -96,6 +96,7 @@ contract HardeningTest is BaseTest {
         (,, bytes32 expected,) = tickers.previewLaunch("CLUB", 0);
         TokenParams memory p = defaultParams(address(0), 0);
         p.expectedEconomics = expected;
+        p.salt = saltUnder(creator, p, tickers.predictTicker("CLUB"));
         vm.prank(creator);
         (address ticker, address t,) = tickers.launch{value: fee}("CLUB", p, 0);
         pastTheWindow();

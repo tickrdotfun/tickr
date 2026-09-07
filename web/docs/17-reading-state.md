@@ -77,14 +77,25 @@ function pairsOf(address ticker) view returns (address[]);
 function captainOf(address ticker, uint256 epoch) view returns (address);   // counts double in that epoch's split: the founder's coin while it trades, else the top coin
 function topOf(address ticker, uint256 epoch) view returns (address);       // the most volume under the ticker in the epoch
 function NEW_TICKER_FEE() view returns (uint256);           // 0.0015 ETH
-// TickerToken: a one for one wrapper
+function INVENTORY_FLOOR() view returns (uint256);          // 1,000,000e6: the offer of every name's pool at rest
+function predictTicker(string symbol) view returns (address); // where the name lives, invented or not
+function poolKeyOf(address ticker) view returns (PoolKey);   // the name's own pool against USDG
+// ManagedTickerToken: a one for one wrapper with its own pool
 function counter() view returns (IERC20);                   // USDG
-function mint(uint256 amount, address to);
+function mint(uint256 amount, address to);                  // only while the pool manager is locked, so not from inside a route
 function redeem(uint256 amount, address to);
-// LaunchSeeder
-function chartKey(address wrapper) view returns (PoolKey);   // the guarded WRAPPER/USDG pool
-function hasChartPool(address wrapper) view returns (bool);
+function poolKey() view returns (PoolKey);                  // WRAPPER/USDG, fee 500, spacing 1, hooks = ManagedTickerHook
+function accounting() view returns (uint256 backing, uint256 circulation); // backing covers circulation, always
+function circulatingSupply() view returns (uint256);        // what is out: totalSupply less the wrapper's own inventory
+function usableBacking() view returns (uint256);            // backing less what the bridge position keeps
+function inventoryCapacity() view returns (uint256);        // the most one buy through the pool can take: floor + 4 x circulation
+function hook() view returns (address);
+// ManagedTickerHook
+function tokenOf(bytes32 poolId) view returns (address);     // the wrapper behind a pool, zero for any other pool
+function issuer() view returns (address);                   // the ticker launcher
 ```
+
+`totalSupply()` of a wrapper counts its own unsold inventory, which is neither owed to anyone nor backed until sold; read `circulatingSupply()` for what is out.
 
 The club: `pot(ticker, epoch, coin)`, `volumeOf(coin, epoch)`, `clubVolume(ticker, epoch)`, `claimable(member, payers, epoch)`, `claimClub(member, payers, epoch)`, `sweepDeadPot(coin, epoch)`, `currentEpoch()`; epochs are thirty days. See [05 invented tickers](./05-anchors.md).
 

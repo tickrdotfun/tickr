@@ -29,11 +29,6 @@ export const LaunchSeederAbi = [
         "internalType": "address"
       },
       {
-        "name": "chartHook_",
-        "type": "address",
-        "internalType": "contract IHooks"
-      },
-      {
         "name": "usdg_",
         "type": "address",
         "internalType": "address"
@@ -57,59 +52,33 @@ export const LaunchSeederAbi = [
   },
   {
     "type": "function",
-    "name": "chartHook",
+    "name": "ethUsdgKey",
     "inputs": [],
     "outputs": [
       {
-        "name": "",
+        "name": "currency0",
+        "type": "address",
+        "internalType": "Currency"
+      },
+      {
+        "name": "currency1",
+        "type": "address",
+        "internalType": "Currency"
+      },
+      {
+        "name": "fee",
+        "type": "uint24",
+        "internalType": "uint24"
+      },
+      {
+        "name": "tickSpacing",
+        "type": "int24",
+        "internalType": "int24"
+      },
+      {
+        "name": "hooks",
         "type": "address",
         "internalType": "contract IHooks"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "chartKey",
-    "inputs": [
-      {
-        "name": "wrapper",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
       }
     ],
     "stateMutability": "view"
@@ -123,25 +92,6 @@ export const LaunchSeederAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hasChartPool",
-    "inputs": [
-      {
-        "name": "wrapper",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -197,19 +147,6 @@ export const LaunchSeederAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "seedDollarPool",
-    "inputs": [
-      {
-        "name": "wrapper",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
   },
   {
     "type": "function",
@@ -458,43 +395,6 @@ export const LaunchSeederAbi = [
   },
   {
     "type": "event",
-    "name": "DollarPoolSeeded",
-    "inputs": [
-      {
-        "name": "wrapper",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "usdgIn",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "wrapperIn",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "tokenId",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "LaunchSeeded",
     "inputs": [
       {
@@ -554,11 +454,6 @@ export const LaunchSeederAbi = [
   {
     "type": "error",
     "name": "OnlyPoolManager",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlyTickerLauncher",
     "inputs": []
   },
   {

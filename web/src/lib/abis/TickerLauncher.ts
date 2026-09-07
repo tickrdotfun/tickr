@@ -22,6 +22,21 @@ export const TickerLauncherAbi = [
         "name": "seeder_",
         "type": "address",
         "internalType": "contract ILaunchSeeder"
+      },
+      {
+        "name": "poolManager_",
+        "type": "address",
+        "internalType": "contract IPoolManager"
+      },
+      {
+        "name": "hook_",
+        "type": "address",
+        "internalType": "contract ManagedTickerHook"
+      },
+      {
+        "name": "wrapperDeployer_",
+        "type": "address",
+        "internalType": "contract ManagedTickerDeployer"
       }
     ],
     "stateMutability": "nonpayable"
@@ -41,7 +56,33 @@ export const TickerLauncherAbi = [
   },
   {
     "type": "function",
+    "name": "INVENTORY_FLOOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_SYMBOL_LENGTH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_DONATION",
     "inputs": [],
     "outputs": [
       {
@@ -236,6 +277,19 @@ export const TickerLauncherAbi = [
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hook",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ManagedTickerHook"
       }
     ],
     "stateMutability": "view"
@@ -621,6 +675,65 @@ export const TickerLauncherAbi = [
   },
   {
     "type": "function",
+    "name": "poolKeyOf",
+    "inputs": [
+      {
+        "name": "ticker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct PoolKey",
+        "components": [
+          {
+            "name": "currency0",
+            "type": "address",
+            "internalType": "Currency"
+          },
+          {
+            "name": "currency1",
+            "type": "address",
+            "internalType": "Currency"
+          },
+          {
+            "name": "fee",
+            "type": "uint24",
+            "internalType": "uint24"
+          },
+          {
+            "name": "tickSpacing",
+            "type": "int24",
+            "internalType": "int24"
+          },
+          {
+            "name": "hooks",
+            "type": "address",
+            "internalType": "contract IHooks"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "poolManager",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IPoolManager"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "pot",
     "inputs": [
       {
@@ -899,6 +1012,19 @@ export const TickerLauncherAbi = [
     "stateMutability": "view"
   },
   {
+    "type": "function",
+    "name": "wrapperDeployer",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ManagedTickerDeployer"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
     "type": "event",
     "name": "ClubClaimed",
     "inputs": [
@@ -1090,6 +1216,22 @@ export const TickerLauncherAbi = [
   },
   {
     "type": "error",
+    "name": "CoinNotFirst",
+    "inputs": [
+      {
+        "name": "coin",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "ticker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "EmptySymbol",
     "inputs": []
   },
@@ -1143,5 +1285,16 @@ export const TickerLauncherAbi = [
     "type": "error",
     "name": "TickerReserved",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooFewDollars",
+    "inputs": [
+      {
+        "name": "got",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   }
 ] as const;

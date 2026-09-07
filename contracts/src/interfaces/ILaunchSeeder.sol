@@ -2,10 +2,11 @@
 pragma solidity 0.8.26;
 
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
+import {Currency} from "v4-core/src/types/Currency.sol";
+import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 
 interface ILaunchSeeder {
     error OnlyFactory();
-    error OnlyTickerLauncher();
     error Slippage();
 
     function factory() external view returns (address);
@@ -14,9 +15,6 @@ interface ILaunchSeeder {
     function seedLaunch(PoolKey calldata key, bool tokenIs0, uint256 supply, uint256 phantomQuote)
         external
         returns (uint256 tokenId, int24 tickLower, int24 tickUpper, uint128 liquidity);
-
-    /// @notice Open a wrapper's guarded dollar pool from the ETH sent, locked. Only the ticker club may call.
-    function seedDollarPool(address wrapper) external payable;
 
     /// @notice One pool, exact input. Send value for a native input; approve for an ERC-20 input.
     /// A fill the pool cuts short, because it ran dry, must still deliver `minOut` or it reverts whole and nothing moves.
@@ -34,6 +32,6 @@ interface ILaunchSeeder {
         payable
         returns (uint256 amountOut);
 
-    function chartKey(address wrapper) external view returns (PoolKey memory);
-    function hasChartPool(address wrapper) external view returns (bool);
+    /// @notice The live ETH/USDG pool the seeder converts ETH through: currency0 is native ETH, currency1 USDG.
+    function ethUsdgKey() external view returns (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks);
 }
