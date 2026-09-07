@@ -9,6 +9,20 @@ const nextConfig: NextConfig = {
     config.plugins.push(new webpack.IgnorePlugin({ resourceRegExp: /^@x402\// }));
     return config;
   },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'" },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     return [
       // `/docs/lifecycle.md` reads the page's source, which is the shape an agent guesses first.

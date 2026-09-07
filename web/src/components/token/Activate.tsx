@@ -50,8 +50,8 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
   if (!a.ready) {
     return (
       <div className="activate">
-        <div className="label">{title ?? "activate"}</div>
-        <p className="text-muted text-[14px] mt-3">{DEMO ? "this is a preview: the two activation buys are sent from the live site." : isZero(ADDRESSES.universalRouter) ? "no router is recorded for this deployment; the activation buys cannot be prepared here." : "connect the wallet that launched this coin to activate it."}</p>
+        <div className="label">{title ?? "listing"}</div>
+        <p className="text-muted text-[14px] mt-3">{DEMO ? "this is a preview: the two listing buys are sent from the live site." : isZero(ADDRESSES.universalRouter) ? "no router is recorded for this deployment; the listing buys cannot be prepared here." : "connect the wallet that launched this coin to activate it."}</p>
       </div>
     );
   }
@@ -60,7 +60,7 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
   return (
     <div className="activate" data-state={a.done ? "done" : a.busy ? "busy" : "ready"}>
       <Confetti fire={a.celebrate} />
-      <div className="label">{title ?? "activate"}</div>
+      <div className="label">{title ?? "listing"}</div>
       {a.done ? (
         <div className="mt-3">
           <div className="text-[20px] font-semibold">on-chain sequence confirmed. external trading still unverified.</div>
@@ -88,7 +88,7 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
         </div>
       ) : (
         <div className="mt-3">
-          <div className="text-[20px] font-semibold">{ts} is live, not activated yet</div>
+          <div className="text-[20px] font-semibold">{ts} is live, listing pending</div>
           <p className="text-muted text-[14px] mt-2">
             two separate purchases, each reviewed and signed in your wallet, through uniswap&apos;s router: first {formatEther(AMOUNTS.quote)} eth of {qs} delivered to your
             wallet, then, after that receipt is confirmed, {formatEther(AMOUNTS.coin)} eth of {ts} with fresh eth. the {qs} from the first stays in your wallet. gas is on
@@ -283,7 +283,7 @@ export function ActivationNotice({ token, deployer }: { token: Address; deployer
   const signals = useActivationSignals(d.isTicker ? token : undefined, d.launch?.pairToken, d.pool.poolId ? { id: d.pool.poolId } : undefined, found?.blockNumber, d.isTicker);
   if (!d.isTicker || !d.launch) return null;
   const mine = !!d.user && (sameAddr(d.user, deployer ?? d.launch.deployer) || sameAddr(d.user, d.launch.creatorFeeRecipient));
-  if (mine) return <ActivateCard token={token} title="not activated yet" />;
+  if (mine) return <ActivateCard token={token} title="listing pending" />;
   if (signals.data?.activated !== false) return null;
-  return <Notice kind="warn">not activated yet, as far as this page can tell: the two buys that follow a launch under a name have not landed. it trades here as usual.</Notice>;
+  return <Notice kind="warn">listing pending, as far as this page can tell: the two buys that follow a launch under a name have not landed. it trades here as usual.</Notice>;
 }

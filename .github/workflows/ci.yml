@@ -1,0 +1,72 @@
+# Every push and pull request: the contracts build and test, the site typechecks, lints, runs its offline suites and
+# builds, and the tokens Worker typechecks. The fork suite needs a live Robinhood Chain node and runs locally.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: build with sizes
+        working-directory: contracts
+        run: forge build --sizes
+      - name: unit, fuzz and invariant tests
+        working-directory: contracts
+        run: forge test --no-match-path 'test/fork/*' -vv
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: install
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: dependency audit
+        working-directory: web
+        run: pnpm audit --audit-level moderate
+      - name: typecheck
+        working-directory: web
+        run: npx tsc --noEmit
+      - name: lint
+        working-directory: web
+        run: npx eslint .
+      - name: offline suites and the golden router bytes
+        working-directory: web
+        run: |
+          node --test scripts/tests/activation.test.cjs scripts/tests/activationFlow.test.cjs scripts/tests/launchFlow.test.cjs scripts/tests/recordSchema.test.cjs scripts/tests/uploadAuth.test.cjs
+          node scripts/tests/golden.cjs
+      - name: build
+        working-directory: web
+        env:
+          NEXT_PUBLIC_DEMO: "1"
+          NEXT_PUBLIC_CHAIN_ID: "4663"
+        run: pnpm build
+  tokens-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install the site (the worker borrows its TypeScript)
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: install and typecheck the worker
+        working-directory: workers/tokens
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck

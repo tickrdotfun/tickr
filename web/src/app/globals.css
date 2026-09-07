@@ -21,6 +21,7 @@
   --tickr-sw-orange: #F0862A;
   --tickr-sw-pink: #F4B8C6;
   --tickr-sw-red: #E23B2E;
+  --tickr-sw-red-type: #FF6B5E; /* the red, lightened for type on dark grounds */
 
   /* semantic aliases used by components; every value resolves to a brand token */
   --bg: var(--tickr-ink);
@@ -38,7 +39,7 @@
   --buy: var(--tickr-signal);          /* positive market state: numbers only */
   --sell: var(--tickr-sw-red);          /* market down: swatch red, on numbers only (§6) */
   --warn: var(--tickr-white);
-  --danger: var(--tickr-white);
+  --danger: var(--tickr-sw-red-type);  /* errors and refusals: red type (decided 2026-09-07); warnings stay white */
 
   /* Serif is reserved for the mark. Running text, chrome, numbers and forms use the UI sans. */
   --font-serif: var(--font-source-serif), "Source Serif 4", Georgia, serif;

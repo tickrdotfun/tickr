@@ -1,9 +1,18 @@
 import { NextResponse } from "next/server";
+import { createPublicClient, http, parseEther, type Address } from "viem";
+import { decodeUploadAuth, verifyUploadAuth } from "@/lib/uploadAuth";
+import { CHAIN_ID, robinhoodChain } from "@/lib/chain";
 
 /**
- * Pins a coin's image and its metadata JSON to IPFS through Pinata. The key lives in `PINATA_JWT` on the server
- * and never reaches the browser. Without it the route answers 503 and the create page falls back to a pasted
- * link, so a missing key degrades to the old behaviour instead of a broken form.
+ * Pins a coin's image to IPFS through Pinata. The key lives in `PINATA_JWT` on the server and never reaches the
+ * browser. Without it the route answers 503 and the create page stores the image with the coin instead.
+ *
+ * What stands between a script and the pinning bill, in order: the origin check (advisory, a header can be forged),
+ * a signature from a wallet that holds ETH on the site's chain (one free signature per browser per hour; a script has
+ * to fund every address it uploads from), shared counters in the tokens Worker (per address, per wallet, for
+ * everyone, and a hard daily budget), and a memory of files already pinned so the same bytes are never pinned or
+ * counted twice. Every decision is logged as one JSON line for the Worker's observability. A creator never sees any
+ * of it fail: whenever this route says no, the create page stores the image on-chain with the coin instead.
  */
 const MAX_BYTES = 4 * 1024 * 1024;
 const TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -21,9 +30,6 @@ async function pin(jwt: string, file: Blob, name: string): Promise<string> {
   return out.data.cid;
 }
 
-const WINDOW_MS = 60 * 60_000;
-const PER_WINDOW = 12;
-const hits = new Map<string, number[]>();
 /** the site's own hosts, plus anything listed in PIN_ALLOWED_ORIGINS */
 function sameSite(req: Request): boolean {
   const from = req.headers.get("origin") ?? req.headers.get("referer") ?? "";
@@ -39,49 +45,74 @@ function sameSite(req: Request): boolean {
   const mine = req.headers.get("host") ?? "";
   return host === mine || allowed.includes(host);
 }
-/**
- * The per-address budget. On Cloudflare the count lives in KV, shared by every instance; anywhere else it is
- * in memory, which is per instance and enough for a preview. The origin check above is advisory, a script
- * can set any header; this budget is the control that costs an abuser something.
- */
-async function overBudget(req: Request): Promise<boolean> {
-  const ip = (req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
+
+/** the preview replays a recording and has no wallet to sign with, so it skips the signature and keeps the counters */
+const DEMO = process.env.NEXT_PUBLIC_DEMO === "1";
+/** a signed-in wallet must hold this much on the site's chain: a launch costs more, so every creator has it */
+const MIN_FUNDED = parseEther("0.0001");
+const balances = new Map<string, { at: number; ok: boolean }>();
+async function funded(address: Address): Promise<boolean> {
+  const k = address.toLowerCase();
+  const c = balances.get(k);
   const now = Date.now();
-  // on Cloudflare the shared budget in the tokens Worker is the only counter that holds across instances. anything
-  // that goes wrong on the way to it, a missing binding, a failed fetch, an answer that is not an explicit yes,
-  // denies the upload: a budget that cannot be asked is a budget that is exhausted, never one that is unlimited
-  let cf: { env: Record<string, unknown> } | undefined;
+  if (c && now - c.at < 10 * 60_000) return c.ok;
   try {
-    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    cf = getCloudflareContext() as unknown as { env: Record<string, unknown> };
+    const client = createPublicClient({ chain: robinhoodChain, transport: http(robinhoodChain.rpcUrls.default.http[0]) });
+    const ok = (await client.getBalance({ address })) >= MIN_FUNDED;
+    if (balances.size > 5_000) balances.clear();
+    balances.set(k, { at: now, ok });
+    return ok;
   } catch {
-    cf = undefined; // not on Cloudflare: `next dev` on a laptop, where the per-process map below is the only counter there is
+    return c?.ok ?? false;
   }
-  // a production build that cannot reach its Cloudflare context is misconfigured, not a laptop: nothing is pinned
-  if (!cf && process.env.NODE_ENV === "production") return true;
-  if (cf) {
-    try {
-      const env = cf.env as {
-        PIN_BURST?: { limit(o: { key: string }): Promise<{ success: boolean }> };
-      };
-      // the edge burst limit sits in front of the hourly count
-      if (env.PIN_BURST && !(await env.PIN_BURST.limit({ key: ip })).success) return true;
-      const base = process.env.TOKENS_URL;
-      const secret = process.env.BUDGET_KEY;
-      if (!base || !secret) return true;
-      const r = await fetch(`${base}budget?key=${encodeURIComponent(ip)}`, { headers: { "x-budget-key": secret } });
-      if (!r.ok) return true;
-      const d = (await r.json()) as { allowed?: unknown };
-      return d.allowed !== true;
-    } catch {
-      return true;
-    }
+}
+
+/** the shared accounting in the tokens Worker; `undefined` when it cannot be reached, and the caller decides */
+const TOKENS = process.env.TOKENS_URL;
+const KEY = process.env.BUDGET_KEY;
+function shared(): boolean {
+  return !!TOKENS && !!KEY;
+}
+async function worker<T>(path: string, body?: unknown): Promise<T | undefined> {
+  if (!TOKENS || !KEY) return undefined;
+  try {
+    const r = await fetch(`${TOKENS}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { "x-budget-key": KEY, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!r.ok) return undefined;
+    return (await r.json()) as T;
+  } catch {
+    return undefined;
   }
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < WINDOW_MS);
+}
+/** when the shared counters cannot be asked, this instance counts on its own: thirty an hour per address */
+const LOCAL_WINDOW_MS = 60 * 60_000;
+const LOCAL_PER_WINDOW = 30;
+const hits = new Map<string, number[]>();
+function overLocalBudget(ip: string): boolean {
+  const now = Date.now();
+  const recent = (hits.get(ip) ?? []).filter((t) => now - t < LOCAL_WINDOW_MS);
   recent.push(now);
   hits.set(ip, recent);
   if (hits.size > 5_000) hits.clear();
-  return recent.length > PER_WINDOW;
+  return recent.length > LOCAL_PER_WINDOW;
+}
+type Budget = { allowed: boolean; by?: string; counts?: Record<string, { count: number; limit: number }> };
+async function overBudget(ip: string, wallet?: string): Promise<{ over: boolean; by: string }> {
+  const b = await worker<Budget>("budget", { ip, wallet });
+  if (b) return { over: b.allowed !== true, by: b.by ?? "shared" };
+  return { over: overLocalBudget(ip), by: "local" };
+}
+function clientIp(req: Request): string {
+  return (req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
+}
+async function sha256(bytes: ArrayBuffer): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function log(event: Record<string, unknown>) {
+  console.log(JSON.stringify({ pin: true, at: new Date().toISOString(), ...event }));
 }
 
 /** The request body up to `max` bytes; undefined once it runs over, with the rest never read. */
@@ -114,57 +145,72 @@ async function readCapped(req: Request, max: number): Promise<ArrayBuffer | unde
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  let burst = false;
   let kv = false;
+  const stats = await worker<unknown>("pin-stats");
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const env = getCloudflareContext().env as Record<string, unknown>;
-    burst = !!env.PIN_BURST;
     kv = !!env.NEXT_INC_CACHE_KV;
-    // one token from a diagnostic bucket per call, so the limiter can be seen to count
-    let probe: unknown = "no binding";
-    try {
-      probe = env.PIN_BURST ? await (env.PIN_BURST as { limit(o: { key: string }): Promise<{ success: boolean }> }).limit({ key: "diag" }) : probe;
-    } catch (e) {
-      probe = `limit threw: ${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`;
-    }
     // names only, never values: which secrets the worker was given, and whether they reached process.env
     const secretNames = Object.keys(env).filter((k) => /JWT|KEY|SECRET/i.test(k));
-    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, envHasJwt: "PINATA_JWT" in env, secretNames, burst, kv, probe, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
+    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, envHasJwt: "PINATA_JWT" in env, secretNames, kv, signature: !DEMO, shared: shared(), stats, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
   } catch {
-    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, burst, kv, bindings: [] });
+    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, kv, signature: !DEMO, shared: shared(), stats, bindings: [] });
   }
 }
 
 export async function POST(req: Request) {
-  if (!sameSite(req)) return NextResponse.json({ error: "pinning is for the create page only." }, { status: 403 });
-  if (await overBudget(req)) return NextResponse.json({ error: "too many uploads from this address. try again in an hour, or paste an image link." }, { status: 429 });
+  const ip = clientIp(req);
+  if (!sameSite(req)) return NextResponse.json({ error: "pinning is for the create page only.", code: "origin" }, { status: 403 });
+  // who is asking: a wallet that signed for uploads and holds ETH here. the preview has no wallet and skips this
+  let wallet: Address | undefined;
+  if (!DEMO) {
+    const auth = decodeUploadAuth(req.headers.get("x-upload-auth"));
+    if (!auth) return NextResponse.json({ error: "connect a wallet and sign once to upload images.", code: "auth" }, { status: 401 });
+    const verdict = await verifyUploadAuth(auth, CHAIN_ID);
+    if (verdict !== "ok") {
+      log({ refused: "signature", verdict, ip });
+      return NextResponse.json({ error: "the upload signature is not valid any more. pick the image again.", code: "auth" }, { status: 401 });
+    }
+    if (!(await funded(auth.address))) {
+      log({ refused: "unfunded", wallet: auth.address, ip });
+      return NextResponse.json({ error: "uploads need a wallet that holds some eth here.", code: "auth" }, { status: 401 });
+    }
+    wallet = auth.address;
+  }
   // the size is refused from the header, before any of the body is read
   const declared = Number(req.headers.get("content-length") ?? "0");
-  if (declared > MAX_BYTES + 64 * 1024) return NextResponse.json({ error: "up to 4 MB." }, { status: 413 });
+  if (declared > MAX_BYTES + 64 * 1024) return NextResponse.json({ error: "up to 4 MB.", code: "size" }, { status: 413 });
   const jwt = process.env.PINATA_JWT;
-  if (!jwt) return NextResponse.json({ error: "pinning is not configured on this deployment yet. paste an image link instead." }, { status: 503 });
+  if (!jwt) return NextResponse.json({ error: "pinning is not configured on this deployment yet. paste an image link instead.", code: "off" }, { status: 503 });
   try {
     // the body is read with a byte count and cut off at the limit before any of it is parsed, whatever the header said
     const body = await readCapped(req, MAX_BYTES + 64 * 1024);
-    if (!body) return NextResponse.json({ error: "up to 4 MB." }, { status: 413 });
+    if (!body) return NextResponse.json({ error: "up to 4 MB.", code: "size" }, { status: 413 });
     const form = await new Request(req.url, { method: "POST", headers: req.headers, body }).formData();
     const file = form.get("file");
-    const metadata = form.get("metadata");
-    let image: string | undefined;
-    if (file instanceof File) {
-      if (!TYPES.has(file.type)) return NextResponse.json({ error: "png, jpeg, gif or webp only." }, { status: 400 });
-      if (file.size > MAX_BYTES) return NextResponse.json({ error: "up to 4 MB." }, { status: 400 });
-      image = `ipfs://${await pin(jwt, file, file.name || "image")}`;
+    if (!(file instanceof File)) return NextResponse.json({ error: "no image in the request.", code: "file" }, { status: 400 });
+    if (!TYPES.has(file.type)) return NextResponse.json({ error: "png, jpeg, gif or webp only.", code: "file" }, { status: 400 });
+    if (file.size > MAX_BYTES) return NextResponse.json({ error: "up to 4 MB.", code: "size" }, { status: 400 });
+    // the same bytes pinned before come back from memory: nothing sent to Pinata, nothing counted
+    const bytes = await file.arrayBuffer();
+    const hash = await sha256(bytes);
+    const seen = await worker<{ image?: string }>(`pin-seen?hash=${hash}`);
+    if (seen?.image) {
+      log({ ok: true, deduplicated: true, wallet, ip, bytes: file.size });
+      return NextResponse.json({ image: seen.image, gateway: "https://gateway.pinata.cloud/ipfs/", deduplicated: true });
     }
-    let meta: string | undefined;
-    if (typeof metadata === "string" && metadata.length > 0 && metadata.length < 64 * 1024) {
-      const parsed = JSON.parse(metadata) as Record<string, unknown>;
-      if (image) parsed.image = image;
-      meta = `ipfs://${await pin(jwt, new Blob([JSON.stringify(parsed)], { type: "application/json" }), "metadata.json")}`;
+    const budget = await overBudget(ip, wallet);
+    if (budget.over) {
+      log({ refused: "budget", by: budget.by, wallet, ip });
+      return NextResponse.json({ error: "too many uploads right now. the create page stores the image with the coin instead.", code: "budget" }, { status: 429 });
     }
-    return NextResponse.json({ image, metadata: meta, gateway: "https://gateway.pinata.cloud/ipfs/" });
+    const image = `ipfs://${await pin(jwt, new Blob([bytes], { type: file.type }), file.name || "image")}`;
+    await worker("pin-record", { hash, image });
+    log({ ok: true, wallet, ip, bytes: file.size, counted: budget.by });
+    return NextResponse.json({ image, gateway: "https://gateway.pinata.cloud/ipfs/" });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "pinning failed" }, { status: 502 });
+    log({ failed: e instanceof Error ? e.message.slice(0, 120) : "pinning failed", ip });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "pinning failed", code: "failed" }, { status: 502 });
   }
 }

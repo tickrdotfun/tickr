@@ -279,7 +279,7 @@ export function TradePanel({ d }: { d: TokenData }) {
             <>
               <Row k={`Receive (${ts})`} v={buyOut !== undefined ? fmtAmount(buyOut, td) : amt && zp.isFetching ? "quoting" : "-"} />
               <Row k="Min. after slippage" v={buyOut !== undefined ? `${fmtAmount(applySlippage(buyOut, slipBps), td)} ${ts}` : "-"} />
-              {inEth && zp.isError && <div className="text-[13px] text-signal">no quote at this size. try a smaller amount{nativePair ? "" : `, or pay in ${qs}`}.</div>}
+              {inEth && zp.isError && <div className="text-[13px] text-danger">no quote at this size. try a smaller amount{nativePair ? "" : `, or pay in ${qs}`}.</div>}
               {guarded && (
                 <div className="text-[13px] text-signal">
                   first two blocks: 5% per wallet.{" "}
@@ -303,7 +303,7 @@ export function TradePanel({ d }: { d: TokenData }) {
             <>
               <Row k={`Receive (${outSymbol})`} v={zs.data ? fmtAmount(zs.data.amountOut, outDecimals) : amt && zs.isFetching ? "quoting" : "-"} />
               <Row k="Min. after slippage" v={zs.data ? `${fmtAmount(applySlippage(zs.data.amountOut, slipBps), outDecimals)} ${outSymbol}` : "-"} />
-              {zs.isError && <div className="text-[13px] text-signal">no quote at this size. try a smaller amount{inEth && !nativePair ? `, or receive ${qs}` : ""}.</div>}
+              {zs.isError && <div className="text-[13px] text-danger">no quote at this size. try a smaller amount{inEth && !nativePair ? `, or receive ${qs}` : ""}.</div>}
               <details className="trade-more">
                 <summary>breakdown</summary>
                 <Row k="Route" v={inEth ? `coin → ${route.data?.label?.replace(/ → coin$/, "").split(" → ").reverse().join(" → ") ?? "ETH"}` : `coin → ${qs}`} />

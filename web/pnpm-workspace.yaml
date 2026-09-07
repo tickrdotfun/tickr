@@ -1,3 +1,9 @@
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+# security pins: pnpm 10 reads overrides here, not from package.json
+overrides:
+  "ws@>=8.0.0 <8.21.0": ">=8.21.0"
+  "axios@>=1.15.1 <1.18.0": ">=1.18.0"
+  "decode-uri-component@<=0.4.2": ">=0.5.0"
+  "uuid@<11.1.1": ">=11.1.1"

@@ -480,7 +480,7 @@ export function CreateForm() {
     if (!user) throw new Error("no wallet");
     if (typeof navigator === "undefined" || !navigator.locks) throw new Error("this browser cannot hold a signing lock across tabs, so nothing is sent from it. use a current desktop browser.");
     return navigator.locks.request(lockName(chainId, user), { ifAvailable: true }, async (lock) => {
-      if (!lock) throw new Error("another tab is launching or activating with this wallet. finish there, or close it without clearing its records.");
+      if (!lock) throw new Error("another tab is launching or listing with this wallet. finish there, or close it without clearing its records.");
       return fn();
     }) as Promise<T>;
   };
@@ -500,7 +500,7 @@ export function CreateForm() {
         block: (n) => readBounded(() => c.getBlock({ blockNumber: n }).then((b) => ({ hash: b.hash as Hash, number: b.number })).catch(() => null)),
         blockNumber: () => readBounded(() => c.getBlockNumber()),
       },
-      locks: locks === "held" ? { request: (_n, fn) => fn() } : typeof navigator !== "undefined" && navigator.locks ? { request: (name, fn) => navigator.locks.request(name, { ifAvailable: true }, async (lock) => { if (!lock) throw new Error("another tab is launching or activating with this wallet."); return fn(); }) as ReturnType<typeof fn> } : undefined,
+      locks: locks === "held" ? { request: (_n, fn) => fn() } : typeof navigator !== "undefined" && navigator.locks ? { request: (name, fn) => navigator.locks.request(name, { ifAvailable: true }, async (lock) => { if (!lock) throw new Error("another tab is launching or listing with this wallet."); return fn(); }) as ReturnType<typeof fn> } : undefined,
     });
   };
 
@@ -1192,7 +1192,7 @@ export function CreateForm() {
             )}
           </p>
         </div>
-        <ActivateCard token={activating.token} title="activate your coin" onDone={() => void flowFor("own")?.clear().catch(() => undefined)} />
+        <ActivateCard token={activating.token} title="list your coin" onDone={() => void flowFor("own")?.clear().catch(() => undefined)} />
       </div>
     );
   }

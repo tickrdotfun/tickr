@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { useGasPrice } from "wagmi";
+import { useAccount, useChainId, useGasPrice, useSignMessage } from "wagmi";
+import { DEMO } from "@/lib/demoTransport";
+import { UPLOAD_AUTH_TTL_MS, encodeUploadAuth, uploadMessage } from "@/lib/uploadAuth";
 import { formatEther } from "viem";
 import { resolveImage } from "@/lib/imageSrc";
 
 /**
- * The coin image. There is no server and no pinning service here, so whatever is chosen is written into the
- * token's `logo` string on-chain, where it costs about 710 gas per byte and lives as long as the token does.
+ * The coin image. First choice is a pin through tickr's server (`/api/pin`), which leaves a short link in the
+ * token's `logo` string. Where pinning is not set up, or refused for the moment, the image itself is written
+ * into that string on-chain, where it costs about 710 gas per byte and lives as long as the token does.
  *
- * A file picked from the device is therefore squeezed to a small square before it goes anywhere near a
+ * A file that goes on-chain is therefore squeezed to a small square before it goes anywhere near a
  * transaction: drawn to a 64px canvas and encoded as WebP, dropping quality (then size) until it fits the
  * target. A link can still be pasted instead, which stores only the URL.
  */
@@ -82,13 +85,15 @@ async function forPin(file: File): Promise<Blob> {
   }
 }
 
-/** Pins through tickr's server; `undefined` means pinning is not set up here, so the on-chain path takes over. */
-async function pinToIpfs(file: File): Promise<string | undefined> {
+/** Pins through tickr's server; `undefined` means the image goes on-chain instead, whatever the reason. */
+async function pinToIpfs(file: File, auth: string | undefined): Promise<string | undefined> {
   const blob = await forPin(file);
   const fd = new FormData();
   fd.append("file", blob, file.name.replace(/\.[^.]+$/, "") + (blob.type === "image/webp" ? ".webp" : ""));
-  const r = await fetch("/api/pin", { method: "POST", body: fd });
-  if (r.status === 503) return undefined;
+  const r = await fetch("/api/pin", { method: "POST", body: fd, headers: auth ? { "x-upload-auth": auth } : undefined });
+  // 401: no signed-in wallet. 429: over the upload budget. 503: pinning is not set up here. 5xx: it failed. in every
+  // case the image goes on-chain instead, quietly, so a launch is never held up by the pinning service
+  if (r.status === 401 || r.status === 429 || r.status === 503 || r.status >= 500) return undefined;
   const out = (await r.json().catch(() => ({}))) as { image?: string; error?: string };
   if (!r.ok) throw new Error(out.error ?? "pinning failed");
   return out.image;
@@ -102,6 +107,38 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const gasPrice = useGasPrice();
+  const { address } = useAccount();
+  const chainId = useChainId();
+  const { signMessageAsync } = useSignMessage();
+
+  // the permission to upload: one free signature per wallet per hour, kept for this tab. no wallet, or a declined
+  // signature, means no permission, and the image goes on-chain instead
+  const uploadAuth = useCallback(async (): Promise<string | undefined> => {
+    if (DEMO || !address) return undefined;
+    const key = `tickr.upload.${chainId}.${address.toLowerCase()}`;
+    try {
+      const kept = sessionStorage.getItem(key);
+      if (kept) {
+        const a = JSON.parse(atob(kept)) as { until?: number };
+        if (typeof a.until === "number" && a.until > Date.now() + 60_000) return kept;
+      }
+    } catch {
+      // nothing kept
+    }
+    const until = Date.now() + UPLOAD_AUTH_TTL_MS;
+    try {
+      const signature = await signMessageAsync({ message: uploadMessage(address, chainId, until) });
+      const enc = encodeUploadAuth({ address, until, signature });
+      try {
+        sessionStorage.setItem(key, enc);
+      } catch {
+        // a tab without storage signs again next time
+      }
+      return enc;
+    } catch {
+      return undefined;
+    }
+  }, [address, chainId, signMessageAsync]);
 
   const take = useCallback(
     async (file: File | undefined) => {
@@ -117,8 +154,9 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
       setBusy(true);
       setError(undefined);
       try {
-        // first choice: pin to IPFS through tickr's server, so the token carries a short link instead of the bytes
-        const pinned = await pinToIpfs(file);
+        // first choice: pin to IPFS through tickr's server, so the token carries a short link instead of the bytes.
+        // off the preview that takes a signed-in wallet; without one the image is stored with the coin
+        const pinned = DEMO || address ? await pinToIpfs(file, await uploadAuth()) : undefined;
         if (pinned) {
           onChange(pinned);
           setBytes(undefined);
@@ -137,7 +175,7 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
         setBusy(false);
       }
     },
-    [onChange],
+    [onChange, address, uploadAuth],
   );
 
   // an image pasted while the image area has focus becomes the coin image. nowhere else on the page listens,
@@ -216,8 +254,10 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
               ? "uploaded. it stays with the coin forever."
               : isData && bytes
                 ? `stored with the coin, ${(bytes / 1024).toFixed(1)} kb. adds about ${cost} to your launch.`
-                : isData
-                  ? "stored with the coin."
+                : isData && !address && !DEMO
+                  ? "stored with the coin. connect a wallet and pick it again to upload it instead."
+                  : isData
+                    ? "stored with the coin."
                   : "png, jpg, gif or webp. click here, then Ctrl+V to paste one."}
           </p>
           {linking && !isData && (
@@ -229,7 +269,7 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
               aria-label="Image link"
             />
           )}
-          {error && <p className="text-[13px] text-signal mt-2">{error}</p>}
+          {error && <p className="text-[13px] text-danger mt-2">{error}</p>}
         </div>
       </div>
       <input

@@ -16,7 +16,7 @@ tickr has one coin of its own. Its ticker is **TICKR**, it is priced in **FUN**,
 
 ## How it was launched
 
-In the genesis transaction, while launching was still closed to everyone but the deployer: `TickerLauncher.launchAndBuy("FUN", ...)` invented FUN, paid the ticker fee that became the working dollars of FUN's own pool, opened TICKR's pool with the whole supply locked in it, on the same terms as every coin after it, and made the disclosed first buy, all in that one transaction, so nothing could trade the pool before it. Two small buys followed, each its own transaction through Uniswap's canonical Universal Router, both to the deployer's wallet: 0.0005 ETH of FUN through its own pool, then 0.001 ETH of TICKR; these are the activation buys every launch under a name ends with, see below. Then launches opened to everyone.
+In the genesis transaction, while launching was still closed to everyone but the deployer: `TickerLauncher.launchAndBuy("FUN", ...)` invented FUN, paid the ticker fee that became the working dollars of FUN's own pool, opened TICKR's pool with the whole supply locked in it, on the same terms as every coin after it, and made the disclosed first buy, all in that one transaction, so nothing could trade the pool before it. Two small buys followed, each its own transaction through Uniswap's canonical Universal Router, both to the deployer's wallet: 0.0005 ETH of FUN through its own pool, then 0.001 ETH of TICKR; these are the listing buys every launch under a name ends with, see below. Then launches opened to everyone.
 
 ## The first buy
 

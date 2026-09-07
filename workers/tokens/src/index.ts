@@ -15,6 +15,8 @@ const addr = (a: string): Address => getAddress(a.toLowerCase());
 
 type Env = {
   TICKR_KV: KVNamespace;
+  PIN_COUNTER: DurableObjectNamespace;
+  BUDGET_KEY?: string;
   RPC_URL: string;
   EXPLORER: string;
   WETH: string;
@@ -25,8 +27,6 @@ type Env = {
   MARKET_QUOTE_LAUNCHER: string;
   BLOCKSCOUT_KEY?: string;
   REFRESH_KEY?: string;
-  BUDGET_KEY?: string;
-  PIN_BUDGET: DurableObjectNamespace;
 };
 
 export type ChainToken = {
@@ -315,27 +315,83 @@ async function refresh(env: Env) {
 }
 
 /**
- * The pin budget: how many uploads an address may make per hour, counted in one place. A Durable Object is a
- * single-threaded counter, so twenty requests at once cannot each see "zero" the way a read-then-write in KV can.
+ * Upload accounting for the site's image pinning: shared counters per address, per signed-in wallet, for everyone
+ * and per day (the hard spending budget), a memory of pinned files by hash so the same bytes are never pinned twice,
+ * and a stats view. Everything behind BUDGET_KEY. Each counter is one Durable Object, single-threaded, so twenty
+ * requests at once cannot each see "zero" the way a read-then-write in KV can; it keeps counts in buckets (a minute
+ * for hour windows, an hour for the day window), which stays small however busy the site gets.
  */
-export class PinBudget {
+export const PIN_LIMITS = {
+  ip: { limit: 30, windowMs: 3_600_000 },
+  wallet: { limit: 30, windowMs: 3_600_000 },
+  everyone: { limit: 2_000, windowMs: 3_600_000 },
+  day: { limit: 10_000, windowMs: 86_400_000 },
+} as const;
+type Rule = { limit: number; windowMs: number };
+type Counted = { allowed: boolean; count: number; limit: number };
+export class PinCounter {
   state: DurableObjectState;
   constructor(state: DurableObjectState) {
     this.state = state;
   }
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
-    const limit = Number(url.searchParams.get("limit") ?? "12");
-    const windowMs = Number(url.searchParams.get("window") ?? String(60 * 60_000));
+    const limit = Number(url.searchParams.get("limit") ?? "30");
+    const windowMs = Number(url.searchParams.get("window") ?? "3600000");
+    const peek = url.searchParams.get("peek") === "1";
+    const bucketMs = windowMs >= 86_400_000 ? 3_600_000 : 60_000;
     const now = Date.now();
-    const hits = ((await this.state.storage.get<number[]>("hits")) ?? []).filter((t) => now - t < windowMs);
-    const allowed = hits.length < limit;
-    if (allowed) {
-      hits.push(now);
-      await this.state.storage.put("hits", hits);
+    const kept: Record<string, number> = {};
+    for (const [k, v] of Object.entries((await this.state.storage.get<Record<string, number>>("buckets")) ?? {})) if (now - Number(k) < windowMs) kept[k] = v;
+    const count = Object.values(kept).reduce((a, b) => a + b, 0);
+    const allowed = count < limit;
+    if (allowed && !peek) {
+      const b = String(now - (now % bucketMs));
+      kept[b] = (kept[b] ?? 0) + 1;
+      await this.state.storage.put("buckets", kept);
     }
-    return Response.json({ allowed, count: hits.length, limit });
+    return Response.json({ allowed, count: allowed && !peek ? count + 1 : count, limit });
   }
+}
+async function counted(env: Env, name: string, rule: Rule, peek = false): Promise<Counted> {
+  const stub = env.PIN_COUNTER.get(env.PIN_COUNTER.idFromName(name));
+  return (await stub.fetch(new Request(`https://count/?limit=${rule.limit}&window=${rule.windowMs}${peek ? "&peek=1" : ""}`))).json() as Promise<Counted>;
+}
+async function pinRoutes(url: URL, req: Request, env: Env): Promise<Response> {
+  // the secret travels in a header, never in the URL, so it cannot end up in a request log
+  if (!env.BUDGET_KEY || req.headers.get("x-budget-key") !== env.BUDGET_KEY) return new Response("not found", { status: 404 });
+  if (url.pathname === "/budget" && req.method === "POST") {
+    const { ip, wallet } = (await req.json().catch(() => ({}))) as { ip?: string; wallet?: string };
+    const order: [string, string, Rule][] = [["ip", `ip:${ip ?? "unknown"}`, PIN_LIMITS.ip]];
+    if (wallet) order.push(["wallet", `wallet:${wallet.toLowerCase()}`, PIN_LIMITS.wallet]);
+    order.push(["everyone", "everyone", PIN_LIMITS.everyone], ["day", "day", PIN_LIMITS.day]);
+    const counts: Record<string, Counted> = {};
+    for (const [key, name, rule] of order) {
+      const c = await counted(env, name, rule);
+      counts[key] = c;
+      if (!c.allowed) {
+        console.log(JSON.stringify({ pin: "refused", by: key, count: c.count, limit: c.limit }));
+        return Response.json({ allowed: false, by: key, counts });
+      }
+    }
+    return Response.json({ allowed: true, counts });
+  }
+  if (url.pathname === "/pin-seen") {
+    const hash = url.searchParams.get("hash") ?? "";
+    if (!/^[0-9a-f]{64}$/.test(hash)) return Response.json({});
+    const image = await env.TICKR_KV.get(`pin:${hash}`);
+    return Response.json(image ? { image } : {});
+  }
+  if (url.pathname === "/pin-record" && req.method === "POST") {
+    const { hash, image } = (await req.json().catch(() => ({}))) as { hash?: string; image?: string };
+    if (!hash || !/^[0-9a-f]{64}$/.test(hash) || !image || !image.startsWith("ipfs://") || image.length > 200) return Response.json({ ok: false });
+    await env.TICKR_KV.put(`pin:${hash}`, image, { expirationTtl: 30 * 86_400 });
+    return Response.json({ ok: true });
+  }
+  if (url.pathname === "/pin-stats") {
+    return Response.json({ everyone: await counted(env, "everyone", PIN_LIMITS.everyone, true), day: await counted(env, "day", PIN_LIMITS.day, true), limits: PIN_LIMITS });
+  }
+  return new Response("not found", { status: 404 });
 }
 
 export default {
@@ -352,14 +408,7 @@ export default {
       const out = await refresh(env);
       return Response.json({ ok: true, ...out.stats, tokens: out.tokens.length, stored: out.stored, keeping: out.keeping });
     }
-    // the pin budget for the site: one counter per address, atomic. `key` is the caller's address, `secret` proves the caller is ours.
-    if (url.pathname === "/budget") {
-      // the secret travels in a header, never in the URL, so it cannot end up in a request log
-      if (!env.BUDGET_KEY || req.headers.get("x-budget-key") !== env.BUDGET_KEY) return new Response("not found", { status: 404 });
-      const who = url.searchParams.get("key") ?? "unknown";
-      const stub = env.PIN_BUDGET.get(env.PIN_BUDGET.idFromName(who));
-      return stub.fetch(new Request(`https://budget/?limit=12&window=${60 * 60_000}`));
-    }
+    if (url.pathname === "/budget" || url.pathname.startsWith("/pin-")) return pinRoutes(url, req, env);
     const cached = await env.TICKR_KV.get(KEY);
     return new Response(cached ?? JSON.stringify({ tokens: [], at: 0 }), { headers: { "content-type": "application/json", "cache-control": "public, max-age=60" } });
   },

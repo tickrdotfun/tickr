@@ -9,8 +9,9 @@
   "triggers": { "crons": ["*/15 * * * *"] },
   "observability": { "enabled": true },
   "kv_namespaces": [{ "binding": "TICKR_KV", "id": "28581ee68ee442759cca8922c61d7dfb" }],
-  "durable_objects": { "bindings": [{ "name": "PIN_BUDGET", "class_name": "PinBudget" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PinBudget"] }],
+  // upload accounting for the site: shared counters in one Durable Object per name (v1 and v2 are the earlier shape, kept for the migration history)
+  "durable_objects": { "bindings": [{ "name": "PIN_COUNTER", "class_name": "PinCounter" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PinBudget"] }, { "tag": "v2", "deleted_classes": ["PinBudget"] }, { "tag": "v3", "new_sqlite_classes": ["PinCounter"] }],
   "vars": {
     "RPC_URL": "https://rpc.mainnet.chain.robinhood.com",
     "EXPLORER": "https://robinhoodchain.blockscout.com/api/v2",

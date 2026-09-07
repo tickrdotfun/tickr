@@ -145,7 +145,10 @@ export function useTokenData(token?: Address) {
   const liquidity = liqHex ? BigInt(liqHex) : undefined;
   const price = sqrtP && sqrtP > 0n && key ? tokenPriceInQuote(sqrtP, key.tokenIs0, tokenDecimals, quoteDecimals) : undefined;
   const totalSupply = g<bigint>(6);
-  const marketCap = price !== undefined && totalSupply !== undefined ? price * (Number(totalSupply) / 10 ** tokenDecimals) : undefined;
+  // the coins burned to the dead address stay in totalSupply on chain; the value shown leaves them out
+  const burnedSoFar = g<bigint>(10) ?? 0n;
+  const circulating = totalSupply !== undefined ? (totalSupply > burnedSoFar ? totalSupply - burnedSoFar : 0n) : undefined;
+  const marketCap = price !== undefined && circulating !== undefined ? price * (Number(circulating) / 10 ** tokenDecimals) : undefined;
   // the quote sitting in the locked position, from its liquidity and the price
   const quoteInPool =
     launch && key && sqrtP && sqrtP > 0n

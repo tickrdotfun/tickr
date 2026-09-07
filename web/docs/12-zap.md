@@ -84,6 +84,6 @@ Where no route is known the trade panel falls back to paying in the quote asset 
 | The v3 swap callback comes from the pool being swapped, and never asks for more than the hop holds | `OnlyPool`, `InsufficientLiquidity` |
 | Every hop fills completely | `InsufficientLiquidity` (a partial hop would strand funds in the router) |
 
-## The activation buys
+## The listing buys
 
 The two buys that end a launch under a name ([05](./05-anchors.md)) do not go through tickr's zap: they are sent through Uniswap's canonical Universal Router (`universalRouter` in the deployment record) with an explicit path of the launch's own pool keys, as the reference did. The calldata is `execute(0x1004, [v4 swap (actions 0x070c0f: exact input, settle all, take all), sweep], deadline)` with native ETH in, the last pool's currency as the output and the wallet as the recipient; `contracts/script/lib/UniversalRouterBuy.sol` builds it for the scripts and the fork test, `web/src/lib/activation.ts` for the site, byte for byte the same. The minimum is one percent under a fresh quote from Uniswap's v4 quoter (`v4Quoter` in the record) and is never zero. A name's pool takes one visit per transaction: a route through the same name's pool twice reverts.

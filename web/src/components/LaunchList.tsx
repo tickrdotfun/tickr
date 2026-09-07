@@ -175,5 +175,5 @@ function LaunchCard({ r, window, partial }: { r: Row; window: WindowKey; partial
 function ActivationMark({ r }: { r: Row }) {
   const signals = useActivationSignals(r.launch.token, r.quote.address, { id: r.launch.poolId }, r.launch.blockNumber, true);
   if (signals.data?.activated !== false) return null;
-  return <span className="badge sw-yellow">not activated</span>;
+  return <span className="badge sw-yellow">listing pending</span>;
 }

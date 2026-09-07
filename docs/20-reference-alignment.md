@@ -1,6 +1,6 @@
 # 20 · Reference versus production
 
-The managed ticker system and the two activation buys were built from a reference that traded on the public chain on 2026-09-07 (PING priced in PONG, two activations, then a buy and a sell through an aggregator's router). This page lists every difference between that reference and what tickr deploys, why each exists, and what validates it. A difference is not a vulnerability, but nothing a difference touches inherits the reference's evidence; each is tested on its own.
+The managed ticker system and the two activation buys were built from a reference that traded on the public chain on 2026-09-07 (PING priced in PONG, two activations, then a buy and a sell through an aggregator's router). This page lists every difference between that reference and what tickr deploys, why each exists, and what validates it. A difference is not a vulnerability, but nothing a difference touches inherits the reference's evidence; each is tested on its own. On the site the activation is called the listing: "listing pending" until the two buys land, "list your coin" for the creator.
 
 ## Preserved as the reference had it
 
@@ -59,3 +59,17 @@ The managed ticker system and the two activation buys were built from a referenc
 - **Repricing** (R18-L01). The runner reports a repricing with the replacement's identity; the engine adopts it only when sender, target, calldata, value, chain and nonce are the reviewed ones, keeping the first hash alongside; a repricing into another request stops the runner for review; a repriced launch can also be matched by hand. `web/src/lib/txSteps.ts` holds the runner's settlement so the test drives the runner and the engine together.
 - **Golden fixture** (R18-L02). The offline suites replace the checked-in deployment record with the example's zeros inside their own process, so the fixture's addresses are what every module sees on any machine; the golden bytes and the Solidity test's constants are regenerated from that fixture and checked by the activation suite.
 - **Approvals** are signed inside the same lock as the launch; the documentation's claim that a wallet signs one thing at a time on the site now holds for the whole launch. An older record from a previous build (`tickr.launch.v1`) blocks a new launch until it is settled by hand. The runbook's checklist carries the acceptance gate the review asked for: a real buy and sell of the official coin through GMGN's router after its activations, plus a throwaway name and a second coin under it through the site, before the public switch.
+
+## Upload protection, 2026-09-07
+
+The image upload went through three states in one day. It began as a strict gate (twelve an hour and three a minute per address, and a build that could not reach its counter refused everything), which a hand test on the preview hit with nothing uploaded. It was then opened completely. An outside reviewer pointed out the same day that an origin header is not authentication and that an open route lets a script spend the pinning plan.
+
+What stands now, in order, all of it invisible to a creator:
+
+1. The origin check, advisory as before.
+2. A signature from the creator's wallet: one free `personal_sign` per wallet per hour, kept in the tab, naming the wallet, the chain and the expiry. The server verifies it and asks the chain that the wallet holds at least 0.0001 ETH, so a script has to fund every address it uploads from. The preview, which replays a recording and has no wallet, skips this step and keeps everything else.
+3. Shared counters in the tokens Worker, one Durable Object per name: thirty uploads an hour per address, thirty per wallet, two thousand an hour for everyone, and ten thousand a day as the hard spending budget. A site that cannot reach them counts per instance instead.
+4. A memory of pinned files by content hash, so the same bytes are never sent to Pinata or counted twice.
+5. One JSON log line per decision in the Worker's observability, and `GET /api/pin` shows the live counters.
+
+Whenever the route says no, for any reason other than the file itself, the create page stores the image with the coin on-chain, the same path it takes where pinning is not set up, so a creator is never stopped and never sees a refusal. The old burst limiter was also found never to count in production (twenty calls in a row against a limit of ten all passed) and is gone.

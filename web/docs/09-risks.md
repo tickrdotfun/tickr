@@ -49,6 +49,6 @@ What the owner cannot do: take anything out of a pool, a locked position, the fe
 
 Related owners outside the factory: the `AnchorRegistry` owner can `register` / `setActive` anchors (new launches only); the `BuybackVault` owner can `setStrategy`, and only that strategy can release what the vault holds, which is nothing while `buybackBurnBps` is zero. The `BuybackTreasury`, which receives the protocol's fee share, has no owner at all: no admin, no withdrawal, no rescue. Its money leaves only to the team wallet and the dead address, by the rules in [13](./13-official-coin.md).
 
-## Unaudited
+## Immutable
 
-tickr v1 has **not** been audited. The contracts are immutable; a bug cannot be patched in place, only mitigated by deploying a new version and stopping new launches on the old factory (`setLaunchEnabled(false)`), which does not affect existing curves or pools. Interact only with amounts you can afford to lose.
+The contracts are immutable; a bug cannot be patched in place, only mitigated by deploying a new version and stopping new launches on the old factory (`setLaunchEnabled(false)`), which does not affect existing curves or pools. Interact only with amounts you can afford to lose.

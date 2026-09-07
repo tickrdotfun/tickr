@@ -49,8 +49,8 @@ export function Notice({ kind = "info", children }: { kind?: "info" | "warn" | "
   const word = kind === "warn" ? "Note" : kind === "danger" ? "Error" : kind === "ok" ? "Done" : null;
   return (
     <div className="text-[14px] leading-snug" role={kind === "danger" ? "alert" : undefined}>
-      {word && <span className="label mr-2">{word}</span>}
-      <span className={kind === "info" ? "text-muted" : "text-white"}>{children}</span>
+      {word && <span className={`label mr-2 ${kind === "danger" ? "text-danger" : ""}`}>{word}</span>}
+      <span className={kind === "info" ? "text-muted" : kind === "danger" ? "text-danger" : "text-white"}>{children}</span>
     </div>
   );
 }

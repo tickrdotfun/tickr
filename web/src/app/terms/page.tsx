@@ -35,8 +35,7 @@ export default function TermsPage() {
         </p>
         <p>
           the website never holds your funds or your keys, never signs for you, and cannot reach into anything it has already sent. every
-          transaction is built in your browser, shown to you, and signed in your own wallet. the contracts are
-          unaudited. what each one does is written down in the <Link href="/docs">docs</Link>, and{" "}
+          transaction is built in your browser, shown to you, and signed in your own wallet. what each one does is written down in the <Link href="/docs">docs</Link>, and{" "}
           <a href="https://github.com/tickrdotfun/tickr" target="_blank" rel="noreferrer">
             the code
           </a>{" "}

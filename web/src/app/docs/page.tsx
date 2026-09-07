@@ -2,6 +2,7 @@ import Link from "next/link";
 import { DOC_GROUPS } from "@/lib/docsNav";
 import { DISCLOSURE } from "@/lib/constants";
 import { ADDRESSES, DEPLOYED } from "@/lib/addresses";
+import { DEMO } from "@/lib/demoTransport";
 import { explorerAddress } from "@/lib/chain";
 
 const CONTRACTS: [string, string][] = [
@@ -70,7 +71,7 @@ export default function DocsOverview() {
           factory has already launched, or a ticker that does not exist anywhere yet and is created on the spot.
         </p>
         <p>
-          nothing in it takes custody. the factory mints, the pool holds the supply and the liquidity, the locker holds the
+          nothing in it gives the operator custody. the factory mints, the pool holds the supply and the liquidity, the locker holds the
           position, and the escrow holds fees until whoever earned them claims them. every launch and every trade is a
           transaction you sign yourself.
         </p>
@@ -115,7 +116,6 @@ export default function DocsOverview() {
             a launch can be thin, can be sold into by its creator, and can end up worth nothing. none of that is a
             failure of the contracts.
           </li>
-          <li>none of this is audited.</li>
         </ul>
 
         <h2 id="invented-tickers-the-disclosure" className="docs-h2">invented tickers, the disclosure</h2>
@@ -150,6 +150,12 @@ export default function DocsOverview() {
         <p className="docs-note">
           read from the deployment file this build was made with, which is chain <span className="num">4663</span>.
         </p>
+        {DEMO && (
+          <p className="docs-note">
+            this is the preview. the addresses below belong to the recording it replays and are not contracts on Robinhood Chain; the
+            live addresses are published here at launch.
+          </p>
+        )}
         {DEPLOYED ? (
           <div className="table-wrap">
             <table className="docs-addr">
