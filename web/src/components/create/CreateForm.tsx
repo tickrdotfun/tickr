@@ -885,7 +885,7 @@ export function CreateForm() {
             them now, from the wallet that launched.
           </p>
         </div>
-        <ActivateCard token={activating.token} launchBlock={activating.block} title="activate your coin" />
+        <ActivateCard token={activating.token} title="activate your coin" />
       </div>
     );
   }

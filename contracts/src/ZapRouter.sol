@@ -13,7 +13,6 @@ import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {IFactory} from "./interfaces/IFactory.sol";
-import {IFeeClub} from "./interfaces/IFeeClub.sol";
 import {ITickerToken} from "./interfaces/ITickerToken.sol";
 import {LaunchedToken} from "./Types.sol";
 import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
@@ -28,11 +27,6 @@ import {IUniswapV3PoolMinimal} from "./interfaces/IUniswapV3PoolMinimal.sol";
 /// transactions and has no privileges.
 ///
 /// `previewZap` runs the same path and reverts with the amounts, so a front end can quote it with a plain eth_call.
-/// @dev The one thing the zap needs from a managed ticker: where its pool is.
-interface ITickerPool {
-    function poolKey() external view returns (PoolKey memory);
-}
-
 contract ZapRouter is IUnlockCallback, ReentrancyGuard {
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
@@ -120,60 +114,6 @@ contract ZapRouter is IUnlockCallback, ReentrancyGuard {
     function previewZap(ZapParams calldata p) external payable {
         (uint256 q, uint256 t) = _zap(p);
         revert Preview(q, t);
-    }
-
-    struct ZapTickerParams {
-        address ticker; // the invented ticker to buy: a managed wrapper with its own pool
-        address tokenIn; // address(0) = native ETH; then msg.value is the amount
-        uint256 amountIn; // for ERC-20 input; ignored for native
-        Hop[] path; // v4 hops from tokenIn to the ticker, ending with the ticker's own pool; never empty
-        uint256 minOut; // the fewest ticker tokens acceptable for the input
-        address recipient; // address(0) = msg.sender
-        uint256 deadline;
-    }
-
-    event ZappedTicker(address indexed ticker, address indexed recipient, address tokenIn, uint256 amountIn, uint256 tickerOut);
-
-    /// @notice Buy an invented ticker itself through its own dollar pool, paid straight to the recipient by the pool
-    /// manager, so the wallet is what receives it. This is the first of a coin's two activation buys: chart sites
-    /// price a name from a swap that lands in a wallet, and price the coins under it from there.
-    function zapTicker(ZapTickerParams calldata p) external payable nonReentrant returns (uint256 tickerOut) {
-        (, tickerOut) = _zapTicker(p);
-    }
-
-    /// @notice Simulate a ticker buy. Always reverts with `Preview(quoteOut, tickerOut)`.
-    function previewZapTicker(ZapTickerParams calldata p) external payable {
-        (uint256 q, uint256 t) = _zapTicker(p);
-        revert Preview(q, t);
-    }
-
-    function _zapTicker(ZapTickerParams calldata p) internal returns (uint256 quoteOut, uint256 tickerOut) {
-        if (block.timestamp > p.deadline) revert Expired();
-        if (!IFeeClub(factory.tickerLauncher()).hasClub(p.ticker)) revert UnknownToken();
-        address recipient = p.recipient == address(0) ? msg.sender : p.recipient;
-        // the route ends in the ticker's own pool, a v4 hop, so the pool manager pays the recipient directly
-        Hop calldata last = p.path[p.path.length - 1];
-        if (p.path.length == 0 || last.kind != HOP_V4 || PoolId.unwrap(last.key.toId()) != PoolId.unwrap(ITickerPool(p.ticker).poolKey().toId())) revert BadPath();
-        uint256 amountIn;
-        address payer;
-        if (p.tokenIn == address(0)) {
-            amountIn = msg.value;
-            if (amountIn == 0) revert BadValue();
-        } else {
-            if (msg.value != 0) revert BadValue();
-            amountIn = p.amountIn;
-            if (amountIn == 0) revert BadValue();
-            if (_takesDirectly(p.path[0], p.tokenIn)) payer = msg.sender;
-            else IERC20(p.tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
-        }
-        uint256 before = IERC20(p.ticker).balanceOf(recipient);
-        (address c,, uint256 intoPool,) = _walkFull(p.path, p.tokenIn, amountIn, payer, recipient);
-        if (c != p.ticker) revert BadPath();
-        uint256 a = IERC20(p.ticker).balanceOf(recipient) - before;
-        if (a < p.minOut) revert Slippage();
-        tickerOut = a;
-        quoteOut = intoPool;
-        emit ZappedTicker(p.ticker, recipient, p.tokenIn, amountIn, tickerOut);
     }
 
     /// @notice Sell a coin through its pool and leave with ETH (or any token) in one transaction.

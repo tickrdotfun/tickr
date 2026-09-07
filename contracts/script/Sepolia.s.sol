@@ -76,6 +76,15 @@ contract Sepolia is Script, DeployStack {
         return SEP_V3_FACTORY;
     }
 
+    /// Uniswap's canonical v4 Universal Router and quoter on Sepolia, from the published deployments.
+    function _universalRouter() internal pure override returns (address) {
+        return 0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b;
+    }
+
+    function _v4Quoter() internal pure override returns (address) {
+        return 0x61B3f2011A92d183C7dbaDBdA940a7555Ccf9227;
+    }
+
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(pk);
@@ -167,7 +176,8 @@ contract Sepolia is Script, DeployStack {
         vm.serializeAddress(j, "v3Factory", SEP_V3_FACTORY);
         vm.serializeAddress(j, "zapRouter", address(s.zap));
         vm.serializeAddress(j, "poolManager", SEP_POOL_MANAGER);
-        vm.serializeAddress(j, "v4Quoter", address(0)); // no quoter wired on the testnet: the site falls back to its own estimate
+        vm.serializeAddress(j, "v4Quoter", _v4Quoter());
+        vm.serializeAddress(j, "universalRouter", _universalRouter()); // no quoter wired on the testnet: the site falls back to its own estimate
         vm.serializeAddress(j, "positionManager", SEP_POSITION_MANAGER);
         vm.serializeAddress(j, "permit2", PERMIT2);
         vm.serializeAddress(j, "usdg", address(usdg));

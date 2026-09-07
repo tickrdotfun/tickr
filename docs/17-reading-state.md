@@ -77,7 +77,7 @@ function pairsOf(address ticker) view returns (address[]);
 function captainOf(address ticker, uint256 epoch) view returns (address);   // counts double in that epoch's split: the founder's coin while it trades, else the top coin
 function topOf(address ticker, uint256 epoch) view returns (address);       // the most volume under the ticker in the epoch
 function NEW_TICKER_FEE() view returns (uint256);           // 0.0015 ETH
-function INVENTORY_FLOOR() view returns (uint256);          // 1,000,000e6: the offer of every name's pool at rest
+function INVENTORY_FLOOR() view returns (uint256);          // 10,000e6: the offer of every name's pool at rest
 function predictTicker(string symbol) view returns (address); // where the name lives, invented or not
 function poolKeyOf(address ticker) view returns (PoolKey);   // the name's own pool against USDG
 // ManagedTickerToken: a one for one wrapper with its own pool

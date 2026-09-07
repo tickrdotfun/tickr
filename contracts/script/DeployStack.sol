@@ -41,6 +41,16 @@ abstract contract DeployStack {
     address internal constant RH_POOL_MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
     /// @dev Uniswap's v4 quoter on Robinhood Chain: the site asks it for executable quotes; nothing on chain depends on it.
     address internal constant RH_V4_QUOTER = 0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94;
+    /// @notice Uniswap's canonical Universal Router on Robinhood Chain: the two activation buys go through it.
+    address internal constant RH_UNIVERSAL_ROUTER = 0x8876789976dEcBfCbBbe364623C63652db8C0904;
+
+    function _universalRouter() internal view virtual returns (address) {
+        return RH_UNIVERSAL_ROUTER;
+    }
+
+    function _v4Quoter() internal view virtual returns (address) {
+        return RH_V4_QUOTER;
+    }
     address internal constant RH_POSITION_MANAGER = 0x58daec3116aae6D93017bAAea7749052E8a04fA7;
     address internal constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     address internal constant RH_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
@@ -104,7 +114,7 @@ abstract contract DeployStack {
             | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG;
         (, bytes32 hookSalt) = HookMine.find(create2Deployer, flags, keccak256(abi.encodePacked(type(ManagedTickerHook).creationCode, abi.encode(pm, tickersPred))));
         s.managedHook = new ManagedTickerHook{salt: hookSalt}(pm, tickersPred);
-        s.managedDeployer = new ManagedTickerDeployer(tickersPred, IERC20(usdg), pm, 1_000_000e6);
+        s.managedDeployer = new ManagedTickerDeployer(tickersPred, IERC20(usdg), pm, 10_000e6);
         s.tickers = new TickerLauncher(s.factory, s.registry, IERC20(usdg), ILaunchSeeder(address(s.seeder)), pm, s.managedHook, s.managedDeployer);
         require(address(s.tickers) == tickersPred, "DeployStack: ticker launcher prediction");
     }

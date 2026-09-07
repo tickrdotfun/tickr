@@ -18,6 +18,8 @@ import {ZapRouter} from "../src/ZapRouter.sol";
 import {ITickerToken} from "../src/interfaces/ITickerToken.sol";
 import {ILaunchDeployer} from "../src/interfaces/ILaunchDeployer.sol";
 import {ManagedTickerToken} from "../src/ManagedTickerToken.sol";
+import {UniversalRouterBuy, IUniversalRouter} from "./lib/UniversalRouterBuy.sol";
+import {IV4Quoter} from "v4-periphery/src/interfaces/IV4Quoter.sol";
 import {TokenParams, Socials, PairEconomics} from "../src/Types.sol";
 
 /// @notice Demo launches for a fork or a devnet, after Genesis. Every coin has a pool from its first block.
@@ -34,6 +36,8 @@ contract Seed is Script {
     Factory factory;
     LaunchSeeder seeder;
     ILaunchDeployer launchDeployer;
+    address universalRouter;
+    address quoterAddr;
     address me;
     /// @dev Every amount below is scaled by this, in basis points: 10,000 on a fork or a devnet with ETH to burn,
     /// a hundred or so on a public testnet where the deployer holds a fraction of an ETH.
@@ -57,6 +61,8 @@ contract Seed is Script {
         address chainToken = vm.keyExistsJson(j, ".demoMoon") ? j.readAddress(".demoMoon") : LIVE_CHAIN_TOKEN;
         seeder = LaunchSeeder(payable(j.readAddress(".launchSeeder")));
         launchDeployer = ILaunchDeployer(j.readAddress(".launchDeployer"));
+        universalRouter = vm.keyExistsJson(j, ".universalRouter") ? j.readAddress(".universalRouter") : address(0);
+        quoterAddr = vm.keyExistsJson(j, ".v4Quoter") ? j.readAddress(".v4Quoter") : address(0);
         LaunchLocker locker = LaunchLocker(payable(j.readAddress(".launchLocker")));
         address usdg = j.readAddress(".usdg");
         uint256 fee = factory.launchFee();
@@ -95,7 +101,7 @@ contract Seed is Script {
         );
         console.log("  4 BANANA invented, BREAD under it", banana, bread);
         // 4b. the two activation buys, as the site sends them: BANANA into this wallet through its own pool, then BREAD
-        _activate(zap, ethUsdg, banana, bread);
+        _activate(ethUsdg, banana, bread, pk);
         console.log("  4b BANANA and BREAD activated");
 
         // 5. a buy of BREAD: dollars become BANANA one for one, then BANANA buys in the pool
@@ -118,7 +124,7 @@ contract Seed is Script {
         (address ketchup, address fries,) = tickers.launch{value: fee + tickers.NEW_TICKER_FEE()}(
             "KETCHUP", _under(_params("Fries", "FRIES", "fries, priced in KETCHUP", expected, "fries"), tickers.predictTicker("KETCHUP")), 0
         );
-        _activate(zap, ethUsdg, ketchup, fries);
+        _activate(ethUsdg, ketchup, fries, pk);
         _buyWithDollars(usdg, ketchup, fries, _s(300e6));
         locker.collectFees(bread);
         console.log("  8 KETCHUP ticker, FRIES under it; BREAD fees collected", ketchup, fries);
@@ -151,18 +157,29 @@ contract Seed is Script {
         revert("seed: no salt under the ticker");
     }
 
-    /// @dev The two buys that follow a launch under a name, one transaction each: the name into this wallet through
-    /// its own pool, then the coin through the name's pool and its own. What chart sites need before they price either.
-    function _activate(ZapRouter zap, PoolKey memory ethUsdg, address ticker, address coin) internal {
-        ZapRouter.Hop[] memory toName = new ZapRouter.Hop[](2);
-        toName[0] = ZapRouter.Hop({kind: 0, key: ethUsdg, pool: address(0)});
-        toName[1] = ZapRouter.Hop({kind: 0, key: ManagedTickerToken(ticker).poolKey(), pool: address(0)});
-        zap.zapTicker{value: _s(0.005 ether)}(ZapRouter.ZapTickerParams({ticker: ticker, tokenIn: address(0), amountIn: 0, path: toName, minOut: 0, recipient: me, deadline: block.timestamp + 1 hours}));
-        ZapRouter.Hop[] memory toCoin = new ZapRouter.Hop[](3);
+    /// @dev The two buys that follow a launch under a name, one transaction each through the canonical Universal
+    /// Router with a fresh positive minimum, as the reference sent them: the name into this wallet through its own
+    /// pool, then the coin through the name's pool and its own. Skipped, with a note, where no router is recorded.
+    function _activate(PoolKey memory ethUsdg, address ticker, address coin, uint256 pk) internal {
+        if (universalRouter == address(0) || quoterAddr == address(0)) {
+            console.log("  activation skipped for", coin, ": no Universal Router or quoter in the record");
+            return;
+        }
+        PoolKey[] memory toName = new PoolKey[](2);
+        toName[0] = ethUsdg;
+        toName[1] = ManagedTickerToken(ticker).poolKey();
+        PoolKey[] memory toCoin = new PoolKey[](3);
         toCoin[0] = toName[0];
         toCoin[1] = toName[1];
-        toCoin[2] = ZapRouter.Hop({kind: 0, key: factory.poolKeyOf(coin), pool: address(0)});
-        zap.zapBuy{value: _s(0.005 ether)}(ZapRouter.ZapParams({token: coin, tokenIn: address(0), amountIn: 0, path: toCoin, minTokensOut: 0, recipient: me, deadline: block.timestamp + 1 hours}));
+        toCoin[2] = factory.poolKeyOf(coin);
+        vm.stopBroadcast();
+        uint256 minName = UniversalRouterBuy.minimum(UniversalRouterBuy.quote(IV4Quoter(quoterAddr), toName, _s(0.0005 ether)));
+        vm.startBroadcast(pk);
+        UniversalRouterBuy.buy(IUniversalRouter(universalRouter), me, toName, _s(0.0005 ether), minName, block.timestamp + 1 hours);
+        vm.stopBroadcast();
+        uint256 minCoin = UniversalRouterBuy.minimum(UniversalRouterBuy.quote(IV4Quoter(quoterAddr), toCoin, _s(0.001 ether)));
+        vm.startBroadcast(pk);
+        UniversalRouterBuy.buy(IUniversalRouter(universalRouter), me, toCoin, _s(0.001 ether), minCoin, block.timestamp + 1 hours);
     }
 
     function _params(string memory name, string memory symbol, string memory description, bytes32 expected, string memory salt)

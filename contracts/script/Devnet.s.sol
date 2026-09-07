@@ -153,6 +153,7 @@ contract Devnet is Script, DeployStack {
         vm.serializeAddress(j, "factory", address(s.factory));
         vm.serializeAddress(j, "managedTickerHook", address(s.managedHook));
         vm.serializeAddress(j, "managedTickerDeployer", address(s.managedDeployer));
+        vm.serializeAddress(j, "universalRouter", address(0)); // no canonical router on a bare devnet: the scripts skip the activation buys
         vm.serializeAddress(j, "feeEscrow", address(s.escrow));
         vm.serializeAddress(j, "launchLocker", address(s.locker));
         vm.serializeAddress(j, "launchDeployer", address(s.launchDeployer));

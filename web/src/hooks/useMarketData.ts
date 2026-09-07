@@ -254,10 +254,13 @@ export function useMarketData(window: WindowKey = "all") {
           buys: v?.buys ?? 0,
           lastBuyBlock: v?.lastBuy ?? 0n,
           createdBlock: l.blockNumber ?? 0n,
+          // a mark only for a coin under a name launched inside the window, from this window's own reads: no buy in a
+          // later block, or its name never bought into a wallet, means not activated as far as the grid can tell.
+          // nothing is remembered; a partial read says nothing
           activated:
-            l.blockNumber === undefined || l.blockNumber < cutoffBlock
+            partial || q.kind !== "ticker" || l.blockNumber === undefined || l.blockNumber < cutoffBlock
               ? undefined
-              : (q.kind !== "ticker" || activatedTickers.has(l.pairToken.toLowerCase())) && (v?.lastBuy ?? 0n) > l.blockNumber,
+              : activatedTickers.has(l.pairToken.toLowerCase()) && (v?.lastBuy ?? 0n) > l.blockNumber,
         };
       });
 

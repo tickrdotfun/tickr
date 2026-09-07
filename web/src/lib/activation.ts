@@ -1,143 +1,317 @@
-import type { Address, Hash, Hex } from "viem";
-import { ADDRESSES, ZERO, isZero, sameAddr } from "./addresses";
-import { ethUsdgKey, keyOf, v4Hop, type Hop, type V4Key } from "./route";
+import {
+  decodeAbiParameters,
+  decodeEventLog,
+  decodeFunctionData,
+  encodeAbiParameters,
+  encodeFunctionData,
+  keccak256,
+  parseAbi,
+  parseAbiParameters,
+  parseEther,
+  stringToHex,
+  zeroAddress,
+  type Address,
+  type Hash,
+  type Hex,
+} from "viem";
+import { ADDRESSES, ZERO, isZero } from "./addresses";
+import { keyOf, type V4Key } from "./route";
 
 /**
- * Activation: the two buys that follow a launch.
+ * Activation: the two buys that follow a launch, exactly as the reference sent them.
  *
- * Chart sites and trackers price an invented name from a swap that lands in a wallet after the name's pool
- * exists, and price a coin from a buy after its pool exists. The launch transaction is neither. So a coin is not
- * finished until, in transactions after the launch, its name has been bought into a wallet through the name's own
- * pool (once per name, ever) and the coin itself has been bought. The site does both from the create page, and
- * shows a coin as not activated until they have landed. The coin trades normally on tickr either way.
+ * Chart sites and trackers priced the reference's name from a swap that landed in a wallet after the name's pool
+ * existed, and its coin from a buy in a later transaction; the launch transaction, first buy included, counted for
+ * neither. So a launch under an invented name ends with two more wallet-signed transactions, one after the other,
+ * both through Uniswap's canonical Universal Router with an explicit path of authenticated pool keys:
+ *
+ *   1. native ETH through the ETH/USDG pool into the name's own pool; the name is the final output, delivered to
+ *      the creator's wallet (0.0005 ETH in the reference)
+ *   2. after 1 is confirmed and a later block exists: fresh ETH through the same two pools into the coin's pool; the
+ *      coin is delivered to the same wallet; the name bought in 1 is kept, not spent (0.001 ETH in the reference)
+ *
+ * Both stages, always, for a fresh name and for an existing one: skipping one is untested. The amounts are the
+ * reference's test parameters, not proven minimums; other amounts need their own acceptance test.
+ *
+ * Nothing here signs or sends. This module is the pure part: the calldata, the checks on it, the journal a wallet
+ * keeps of its attempts, and the verification of what a receipt shows. The hook drives it.
  */
 
-/** What each activation buy spends, in dollars, before the wallet's own rounding. */
-export const ACTIVATION_USD = 20;
+export const PHASES = ["quote", "coin"] as const;
+export type Phase = (typeof PHASES)[number];
+/** The reference's purchase amounts, in wei. */
+export const AMOUNTS: Record<Phase, bigint> = { quote: parseEther("0.0005"), coin: parseEther("0.001") };
+/** The reference tolerance on a fresh quote: one percent under it, never zero. */
+export const TOLERANCE_BPS = 100;
+/** A prepared review is good for this long; after that a fresh quote is required. */
+export const REVIEW_TTL_MS = 180_000;
+/** How long a quote's deadline runs from the block it was quoted at. */
+export const DEADLINE_SECONDS = 300;
 
-/** The one hook every name's pool runs behind, and the pool's fixed terms. */
+/** The name's own pool against USDG: fee 500, spacing 1, behind the one managed hook. */
 export const MANAGED_FEE = 500;
 export const MANAGED_TICK_SPACING = 1;
+export const MAX128 = (1n << 128n) - 1n;
+export const MAX256 = (1n << 256n) - 1n;
 
-/** A name's own pool against USDG. */
+export const isManagedHookWired = () => !isZero(ADDRESSES.managedTickerHook) && !isZero(ADDRESSES.universalRouter);
+
 export function managedKey(ticker: Address): V4Key {
   return keyOf(ticker, ADDRESSES.usdg, MANAGED_FEE, MANAGED_TICK_SPACING, ADDRESSES.managedTickerHook);
 }
 
-/** ETH into the name itself, through the live ETH/USDG pool and the name's own pool. */
-export function tickerBuyPath(ticker: Address): Hop[] {
-  return [v4Hop(ethUsdgKey()), v4Hop(managedKey(ticker))];
+export function check(ok: unknown, message: string): asserts ok {
+  if (!ok) throw new Error(message);
 }
 
-/** ETH into a coin under a name, through the name's own pool rather than by wrapping, so the trade is a trade. */
-export function coinActivationPath(ticker: Address, own: V4Key): Hop[] {
-  return [...tickerBuyPath(ticker), v4Hop(own)];
+export const same = (a?: string | null, b?: string | null) => (a || "").toLowerCase() === (b || "").toLowerCase();
+export const hex = (v: bigint | number): Hex => `0x${BigInt(v).toString(16)}`;
+export const json = (v: unknown) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x));
+export const fingerprint = (v: unknown) => keccak256(stringToHex(json(v)));
+export const isHash = (v: unknown): v is Hash => typeof v === "string" && /^0x[0-9a-f]{64}$/i.test(v);
+
+// ---------------------------------------------------------------- the route and the calldata
+
+export const EXECUTE_ABI = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"]);
+export const QUOTER_ABI = parseAbi([
+  "function quoteExactInput((address exactCurrency,(address intermediateCurrency,uint24 fee,int24 tickSpacing,address hooks,bytes hookData)[] path,uint128 exactAmount) params) returns (uint256 amountOut,uint256 gasEstimate)",
+]);
+/** UniversalRouter 2.1.1's ExactInputParams: the `minHopPriceX36` array sits between the path and the amounts. */
+export const EXACT_TYPE = {
+  name: "params",
+  type: "tuple",
+  components: [
+    { name: "currencyIn", type: "address" },
+    {
+      name: "path",
+      type: "tuple[]",
+      components: [
+        { name: "intermediateCurrency", type: "address" },
+        { name: "fee", type: "uint24" },
+        { name: "tickSpacing", type: "int24" },
+        { name: "hooks", type: "address" },
+        { name: "hookData", type: "bytes" },
+      ],
+    },
+    { name: "minHopPriceX36", type: "uint256[]" },
+    { name: "amountIn", type: "uint128" },
+    { name: "amountOutMinimum", type: "uint128" },
+  ],
+} as const;
+const COMMANDS: Hex = "0x1004"; // V4_SWAP, SWEEP
+const ACTIONS: Hex = "0x070c0f"; // SWAP_EXACT_IN, SETTLE_ALL, TAKE_ALL
+
+export type Pools = { funding: V4Key; bridge: V4Key; main: V4Key };
+
+export function poolId(k: V4Key): Hex {
+  return keccak256(encodeAbiParameters(parseAbiParameters("address,address,uint24,int24,address"), [k.currency0, k.currency1, k.fee, k.tickSpacing, k.hooks]));
 }
 
-export function zapTickerParams(ticker: Address, path: Hop[], recipient: Address, minOut = 0n) {
-  return {
-    ticker,
-    tokenIn: ZERO,
-    amountIn: 0n,
-    path,
-    minOut,
-    recipient,
-    deadline: BigInt(Math.floor(Date.now() / 1000) + 20 * 60),
-  };
+/** The three authenticated pools of a launch under a name, in route order: ETH/USDG, the name's own, the coin's own. */
+export function poolsFor(ticker: Address, main: V4Key): Pools {
+  return { funding: { currency0: ZERO, currency1: ADDRESSES.usdg, fee: 100, tickSpacing: 1, hooks: ZERO }, bridge: managedKey(ticker), main };
 }
 
-/** Wei that buys about `usd` dollars at `ethUsd`, rounded to a readable amount; a floor keeps a broken rate from sending dust. */
-export function activationWei(ethUsd: number | null | undefined, usd = ACTIVATION_USD): bigint {
-  const rate = ethUsd && ethUsd > 0 ? ethUsd : 4_000;
-  const eth = usd / rate;
-  // four significant digits, never below a ten-thousandth of an ETH
-  const rounded = Math.max(0.0001, Number(eth.toPrecision(4)));
-  return BigInt(Math.round(rounded * 1e18));
+/** The path a phase walks from native ETH, each hop checked against what the pools must be. */
+export function routeFor(p: Pools, phase: Phase) {
+  check(phase === "quote" || phase === "coin", "unknown activation phase");
+  const pools = [p.funding, p.bridge, p.main];
+  check(same(p.funding.currency0, zeroAddress) && same(p.funding.currency1, ADDRESSES.usdg) && p.funding.fee === 100 && p.funding.tickSpacing === 1 && same(p.funding.hooks, zeroAddress), "wrong funding pool");
+  check(p.bridge.fee === MANAGED_FEE && p.bridge.tickSpacing === MANAGED_TICK_SPACING && !isZero(p.bridge.hooks) && same(p.bridge.hooks, ADDRESSES.managedTickerHook), "wrong managed pool");
+  check(same(p.main.hooks, zeroAddress) && p.main.fee > 0 && p.main.fee < 1_000_000 && p.main.tickSpacing > 0 && p.main.tickSpacing <= 32_767, "wrong coin pool");
+  let input: Address = zeroAddress;
+  return pools.slice(0, phase === "quote" ? 2 : 3).map((pool) => {
+    check(BigInt(pool.currency0) < BigInt(pool.currency1), "pool currencies must be sorted");
+    check(same(input, pool.currency0) || same(input, pool.currency1), "disconnected route");
+    const output = same(input, pool.currency0) ? pool.currency1 : pool.currency0;
+    input = output;
+    return { intermediateCurrency: output, fee: pool.fee, tickSpacing: pool.tickSpacing, hooks: pool.hooks, hookData: "0x" as Hex };
+  });
 }
 
-// ---------------------------------------------------------------- the intent, persisted
+export const outputOf = (p: Pools, phase: Phase): Address => (phase === "quote" ? (same(p.bridge.currency0, ADDRESSES.usdg) ? p.bridge.currency1 : p.bridge.currency0) : same(p.main.currency0, p.bridge.currency0) || same(p.main.currency0, p.bridge.currency1) ? p.main.currency1 : p.main.currency0);
 
-export type ActivationStage = "ticker" | "coin" | "done";
+/** One percent under a positive quote, never zero: the only minimum a buy is ever sent with. */
+export function minimumOutput(quoted: bigint, slippageBps = TOLERANCE_BPS): bigint {
+  check(typeof quoted === "bigint" && quoted > 0n && quoted <= MAX128, "a positive quote is required");
+  check(Number.isInteger(slippageBps) && slippageBps >= 0 && slippageBps <= 100, "slippage cannot exceed 1%");
+  const minimum = (quoted * BigInt(10_000 - slippageBps)) / 10_000n;
+  check(minimum > 0n, "the rounded minimum is zero");
+  return minimum;
+}
 
-/**
- * Where a wallet is in a coin's activation, kept in this browser so a reload, a closed tab or a wallet that lost
- * the page resumes rather than resends. A hash recorded before the receipt is known is recovered, never resent.
- */
-export type ActivationIntent = {
-  coin: Address;
-  ticker: Address | null;
-  wallet: Address;
-  stage: ActivationStage;
-  /** the transaction of the current stage once the wallet returned it, until its receipt is known */
-  pending?: Hash;
-  tickerHash?: Hash;
-  coinHash?: Hash;
-  updatedAt: number;
+export function encodeBuy(args: { wallet: Address; pools: Pools; phase: Phase; amountIn: bigint; minimumOut: bigint; deadline: number }): Hex {
+  const path = routeFor(args.pools, args.phase);
+  const wallet = args.wallet.toLowerCase() as Address;
+  check(/^0x[0-9a-f]{40}$/.test(wallet), "malformed wallet");
+  check(![zeroAddress, ADDRESSES.universalRouter, ADDRESSES.poolManager, ...path.map((p) => p.intermediateCurrency), ...path.map((p) => p.hooks)].some((a) => same(a, wallet)), "invalid activation recipient");
+  check(args.amountIn > 0n && args.amountIn <= MAX128, "a positive input is required");
+  check(args.minimumOut > 0n && args.minimumOut <= MAX128, "a positive minimum is required");
+  check(Number.isSafeInteger(args.deadline) && args.deadline > 0, "a bounded deadline is required");
+  const output = path[path.length - 1].intermediateCurrency;
+  const params = [
+    encodeAbiParameters([EXACT_TYPE], [{ currencyIn: zeroAddress, path, minHopPriceX36: [], amountIn: args.amountIn, amountOutMinimum: args.minimumOut }]),
+    encodeAbiParameters(parseAbiParameters("address,uint256"), [zeroAddress, args.amountIn]),
+    encodeAbiParameters(parseAbiParameters("address,uint256"), [output, args.minimumOut]),
+  ];
+  const inputs = [encodeAbiParameters(parseAbiParameters("bytes,bytes[]"), [ACTIONS, params]), encodeAbiParameters(parseAbiParameters("address,address,uint256"), [zeroAddress, wallet, 0n])];
+  return encodeFunctionData({ abi: EXECUTE_ABI, functionName: "execute", args: [COMMANDS, inputs, BigInt(args.deadline)] });
+}
+
+export function decodeBuy(data: Hex) {
+  const outer = decodeFunctionData({ abi: EXECUTE_ABI, data });
+  check(outer.functionName === "execute" && outer.args[0] === COMMANDS && outer.args[1].length === 2, "unexpected router command");
+  const [actions, params] = decodeAbiParameters(parseAbiParameters("bytes,bytes[]"), outer.args[1][0]);
+  check(actions === ACTIONS && params.length === 3, "unexpected router action");
+  const swap = decodeAbiParameters([EXACT_TYPE], params[0])[0];
+  const settle = decodeAbiParameters(parseAbiParameters("address,uint256"), params[1]);
+  const take = decodeAbiParameters(parseAbiParameters("address,uint256"), params[2]);
+  const refund = decodeAbiParameters(parseAbiParameters("address,address,uint256"), outer.args[1][1]);
+  check(same(swap.currencyIn, zeroAddress) && swap.minHopPriceX36.length === 0, "unexpected swap input");
+  check(same(settle[0], zeroAddress) && settle[1] === swap.amountIn, "wrong settlement cap");
+  check(same(take[0], swap.path[swap.path.length - 1]?.intermediateCurrency || zeroAddress) && take[1] === swap.amountOutMinimum, "wrong output settlement");
+  check(same(refund[0], zeroAddress) && refund[2] === 0n, "wrong native refund");
+  return { swap, recipient: refund[1] as Address, deadline: Number(outer.args[2]) };
+}
+
+// ---------------------------------------------------------------- the journal
+
+/** The transaction as reviewed and as sent: explicit fees, gas and nonce, nothing left to the wallet's discretion. */
+export type Request = { from: Address; to: Address; data: Hex; value: Hex; nonce: Hex; chainId: number; gas: Hex; maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
+
+export type Review = {
+  phase: Phase;
+  request: Request;
+  /** the cost ceiling the person approved: value plus gas at the fee cap, with headroom */
+  maximum: string;
+  preparedAt: number;
+  ledgerFingerprint: string;
+  quote: string;
+  minimum: string;
+  deadline: number;
+  /** the confirmed hash of the quote purchase, required on the coin purchase; empty on the quote purchase */
+  predecessorHash: string;
+  pools: Pools;
+  gasEstimate: string;
 };
 
-const KEY = (chainId: number, coin: Address) => `tickr.activation.${chainId}.${coin.toLowerCase()}`;
+export type Attempt = { review: Review; createdAt: number; hash?: Hash };
+/** One wallet's record of one coin's activation, in this browser. Never cleared, never resent. */
+export type Ledger = { version: 1; chainId: number; wallet: Address; coin: Address; ticker: Address; attempts: Attempt[]; declined: Attempt[] };
 
-export function loadIntent(chainId: number, coin: Address): ActivationIntent | undefined {
-  try {
-    const raw = window.localStorage.getItem(KEY(chainId, coin));
-    if (!raw) return undefined;
-    const v = JSON.parse(raw) as ActivationIntent;
-    if (!v || !v.wallet || !v.stage) return undefined;
-    return v;
-  } catch {
-    return undefined;
-  }
+export const ledgerKey = (chainId: number, wallet: Address, coin: Address) => `tickr.activation.v2.${chainId}.${wallet.toLowerCase()}.${coin.toLowerCase()}`;
+
+export const emptyLedger = (chainId: number, wallet: Address, coin: Address, ticker: Address): Ledger => ({ version: 1, chainId, wallet, coin, ticker, attempts: [], declined: [] });
+
+export function validateReview(l: Ledger, v: Review) {
+  const t = v.request;
+  const offset = PHASES.indexOf(v.phase);
+  check(offset >= 0 && Number.isSafeInteger(v.deadline) && v.deadline > 0 && Number.isFinite(v.preparedAt), "malformed activation review");
+  check(BigInt(t.value) === AMOUNTS[v.phase], "the purchase amount differs from the disclosed one");
+  check(BigInt(v.minimum) === minimumOutput(BigInt(v.quote)), "the minimum differs from the 1% quote limit");
+  check(same(t.from, l.wallet) && same(t.to, ADDRESSES.universalRouter) && t.chainId === l.chainId, "the transaction identity changed");
+  check(v.phase === "quote" ? v.predecessorHash === "" : isHash(v.predecessorHash), "missing or unexpected preceding receipt");
+  check(BigInt(t.gas) > 0n && BigInt(t.gas) <= 32_000_000n && BigInt(t.maxFeePerGas) > 0n && BigInt(t.maxPriorityFeePerGas) === 0n, "invalid fees");
+  check(t.data === encodeBuy({ wallet: l.wallet, pools: v.pools, phase: v.phase, amountIn: AMOUNTS[v.phase], minimumOut: BigInt(v.minimum), deadline: v.deadline }), "the calldata changed");
+  check(BigInt(v.maximum) >= maximumCost(t), "the approved maximum is below the transaction's own cost");
+  check(same(decodeBuy(t.data).recipient, l.wallet), "the recipient changed");
+  check(same(outputOf(v.pools, v.phase), v.phase === "quote" ? l.ticker : l.coin), "the output is not the expected asset");
 }
 
-export function saveIntent(chainId: number, intent: ActivationIntent) {
-  try {
-    window.localStorage.setItem(KEY(chainId, intent.coin), JSON.stringify({ ...intent, updatedAt: Date.now() }));
-  } catch {
-    // storage unavailable: the page still works, it just cannot resume after a reload
+export function validateLedger(l: unknown, chainId: number, wallet: Address, coin: Address): Ledger {
+  const x = l as Ledger;
+  check(x && x.version === 1 && x.chainId === chainId && same(x.wallet, wallet) && same(x.coin, coin) && Array.isArray(x.attempts) && Array.isArray(x.declined), "another or invalid activation record exists; it is kept as it is");
+  check(x.attempts.length <= 2, "too many activation attempts recorded");
+  for (const [i, a] of x.attempts.entries()) {
+    validateReview(x, a.review);
+    check(a.review.phase === PHASES[i] && Number.isFinite(a.createdAt), "invalid activation order");
+    check(!a.hash || isHash(a.hash), "invalid saved activation hash");
+    if (i === 1) check(!!x.attempts[0].hash && same(a.review.predecessorHash, x.attempts[0].hash), "the coin review lost its preceding receipt");
   }
+  return x;
 }
 
-export function clearIntent(chainId: number, coin: Address) {
-  try {
-    window.localStorage.removeItem(KEY(chainId, coin));
-  } catch {
-    // nothing to clear
-  }
+type Store = Pick<Storage, "getItem" | "setItem">;
+
+export function loadLedger(s: Pick<Storage, "getItem">, chainId: number, wallet: Address, coin: Address, ticker: Address): Ledger {
+  const raw = s.getItem(ledgerKey(chainId, wallet, coin));
+  if (!raw) return emptyLedger(chainId, wallet, coin, ticker);
+  return validateLedger(JSON.parse(raw), chainId, wallet, coin);
 }
 
-/** A cached "already activated" answer: activation is one way, so a true answer never needs reading again. */
-const DONE_KEY = (chainId: number, what: Address) => `tickr.activated.${chainId}.${what.toLowerCase()}`;
-
-export function rememberActivated(chainId: number, what: Address) {
-  try {
-    window.localStorage.setItem(DONE_KEY(chainId, what), "1");
-  } catch {
-    // fine
-  }
+/** Save, then read back: a write that did not land is a stop, never a reason to sign. */
+export function saveLedger(s: Store, l: Ledger) {
+  validateLedger(l, l.chainId, l.wallet, l.coin);
+  const key = ledgerKey(l.chainId, l.wallet, l.coin);
+  const raw = json(l);
+  s.setItem(key, raw);
+  check(s.getItem(key) === raw, "the activation record could not be saved durably. nothing was sent; fix storage and try again.");
 }
 
-export function recallActivated(chainId: number, what: Address): boolean {
-  try {
-    return window.localStorage.getItem(DONE_KEY(chainId, what)) === "1";
-  } catch {
-    return false;
-  }
+export const maximumCost = (t: Request) => BigInt(t.value) + BigInt(t.gas) * BigInt(t.maxFeePerGas);
+export const paddedGas = (estimate: bigint) => (estimate * 120n + 99n) / 100n + 50_000n;
+export const permissionCeiling = (value: bigint, gas: bigint, fee: bigint) => ((value + gas * fee) * 125n) / 100n;
+export const reviewExpired = (v: Review, now = Date.now()) => now - v.preparedAt > REVIEW_TTL_MS || now < v.preparedAt;
+
+/** The identity of a submitted transaction against the reviewed one: sender, target, payload, nonce, value, chain. */
+export function matchIdentity(actual: { from?: string; to?: string | null; input?: string; nonce?: number | bigint; value?: bigint; chainId?: number }, expected: Request) {
+  check(actual && same(actual.from, expected.from) && same(actual.to, expected.to) && same(actual.input, expected.data), "the submitted transaction differs from the reviewed one. stop for review.");
+  check(actual.nonce !== undefined && BigInt(actual.nonce) === BigInt(expected.nonce), "the submitted nonce differs. stop for review.");
+  check(actual.value !== undefined && BigInt(actual.value) === BigInt(expected.value), "the submitted value differs. stop for review.");
+  check(actual.chainId === undefined || Number(actual.chainId) === expected.chainId, "the submitted chain differs. stop for review.");
 }
 
-/** The one activation at a time a wallet may run in this tab: a second click waits for the first to finish. */
-const locks = new Map<string, Promise<unknown>>();
-export async function serialised<T>(wallet: Address, work: () => Promise<T>): Promise<T> {
-  const k = wallet.toLowerCase();
-  const prev = locks.get(k) ?? Promise.resolve();
-  const next = prev.then(work, work);
-  locks.set(k, next.catch(() => undefined));
-  try {
-    return await next;
-  } finally {
-    if (locks.get(k) === next.catch(() => undefined)) locks.delete(k);
+// ---------------------------------------------------------------- what a receipt proves
+
+const EVENTS = parseAbi([
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+  "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+]);
+
+export type Log = { address: Address; topics: Hex[]; data: Hex };
+
+/**
+ * A phase's receipt logs must show: one ordinary swap made by the router on each pool of the route, in order, each
+ * consuming the previous one's whole output; the final output landing in the wallet, whole, at least the minimum;
+ * and on the coin phase, none of the name bought in the quote phase leaving the wallet. Returns what the wallet
+ * received.
+ */
+export function verifyTradeLogs(l: Ledger, phase: Phase, logs: Log[], minimum: bigint, pools: Pools): bigint {
+  const route = phase === "quote" ? [pools.funding, pools.bridge] : [pools.funding, pools.bridge, pools.main];
+  const output = phase === "quote" ? l.ticker : l.coin;
+  const swaps: { id: Hex; amount0: bigint; amount1: bigint }[] = [];
+  let received = 0n;
+  for (const log of logs) {
+    let d;
+    try {
+      d = decodeEventLog({ abi: EVENTS, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
+    } catch {
+      continue;
+    }
+    if (d.eventName === "Transfer" && same(log.address, output)) {
+      if (same(d.args.to, l.wallet)) received += d.args.value;
+      if (same(d.args.from, l.wallet)) received -= d.args.value;
+    }
+    if (d.eventName === "Swap" && same(log.address, ADDRESSES.poolManager) && same(d.args.sender, ADDRESSES.universalRouter)) swaps.push({ id: d.args.id, amount0: d.args.amount0, amount1: d.args.amount1 });
+    if (phase === "coin" && d.eventName === "Transfer" && same(log.address, l.ticker)) check(!same(d.args.from, l.wallet), "the coin purchase must not spend the name bought into the wallet");
   }
+  check(swaps.length === route.length, "unexpected number of router swaps");
+  let input: Address = zeroAddress;
+  let amount = AMOUNTS[phase];
+  for (const [i, key] of route.entries()) {
+    const swap = swaps[i];
+    const input0 = same(input, key.currency0);
+    const paid = input0 ? swap.amount0 : swap.amount1;
+    const out = input0 ? swap.amount1 : swap.amount0;
+    check(swap.id === poolId(key) && paid < 0n && -paid === amount && out > 0n, "a swap is not on the expected pool with the expected input");
+    input = input0 ? key.currency1 : key.currency0;
+    amount = out;
+  }
+  check(same(input, output) && amount >= minimum && received === amount, "the wallet must receive the complete final output, not an intermediate");
+  return received;
 }
 
-export const isManagedHookWired = () => !isZero(ADDRESSES.managedTickerHook);
-export const sameCoin = (a?: string, b?: string) => sameAddr(a, b);
+/** The lock every signing step of a wallet takes, across tabs, so two tabs cannot both open the wallet. */
+export const lockName = (chainId: number, wallet: Address) => `tickr-signing-${chainId}-${wallet.toLowerCase()}`;
+
 export type { Hex };

@@ -157,7 +157,7 @@ abstract contract BaseTest is Test, DeployPermit2 {
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG;
             (, bytes32 hookSalt) = HookMine.find(address(this), flags, keccak256(abi.encodePacked(type(ManagedTickerHook).creationCode, abi.encode(poolManager, tickersPred))));
             managedHook = new ManagedTickerHook{salt: hookSalt}(poolManager, tickersPred);
-            managedDeployer = new ManagedTickerDeployer(tickersPred, IERC20(address(usdg)), poolManager, 1_000_000e6);
+            managedDeployer = new ManagedTickerDeployer(tickersPred, IERC20(address(usdg)), poolManager, 10_000e6);
             tickers = new TickerLauncher(factory, registry, IERC20(address(usdg)), ILaunchSeeder(address(seeder)), poolManager, managedHook, managedDeployer);
             require(address(tickers) == tickersPred, "fixture: ticker launcher prediction");
         }

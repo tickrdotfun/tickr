@@ -29,6 +29,7 @@ type Deployments = {
   genesisPool?: string;
   managedTickerHook?: string;
   managedTickerDeployer?: string;
+  universalRouter?: string;
   v4Quoter?: string;
 };
 
@@ -64,6 +65,8 @@ export const ADDRESSES = {
   marketQuoteLauncher: pick(d.marketQuoteLauncher, process.env.NEXT_PUBLIC_MARKET_QUOTE_LAUNCHER),
   zapRouter: pick(d.zapRouter, process.env.NEXT_PUBLIC_ZAP_ROUTER),
   managedTickerHook: pick(d.managedTickerHook, process.env.NEXT_PUBLIC_MANAGED_TICKER_HOOK),
+  /** Uniswap's canonical Universal Router on this chain: what the two activation buys are sent through */
+  universalRouter: pick(d.universalRouter, process.env.NEXT_PUBLIC_UNIVERSAL_ROUTER),
   buybackTreasury: pick(d.buybackTreasury, process.env.NEXT_PUBLIC_BUYBACK_TREASURY),
   poolManager: pick(d.poolManager, process.env.NEXT_PUBLIC_POOL_MANAGER, "0x8366a39CC670B4001A1121B8F6A443A643e40951"),
   positionManager: pick(

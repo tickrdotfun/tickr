@@ -14,6 +14,9 @@ import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {ManagedTickerToken} from "../../src/ManagedTickerToken.sol";
+import {UniversalRouterBuy, IUniversalRouter} from "../../script/lib/UniversalRouterBuy.sol";
+import {IV4Quoter} from "v4-periphery/src/interfaces/IV4Quoter.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {PoolSwapTest} from "v4-core/src/test/PoolSwapTest.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {DeployStack} from "../../script/DeployStack.sol";
@@ -136,6 +139,71 @@ contract RobinhoodForkTest is Test, DeployStack {
         assertTrue(bread < banana, "the coin is currency0 of its pool");
         _assertNamePoolAtRest(ManagedTickerToken(banana));
         _roundTripThroughTheNamePool(ManagedTickerToken(banana));
+    }
+
+    /// The two activation buys exactly as the reference sent them, through Uniswap's canonical Universal Router on
+    /// this chain with the canonical quoter's fresh minimum: the name into the creator's wallet, then the coin, each
+    /// its own transaction, each an ordinary swap the router made, each delivered whole to the wallet.
+    function test_fork_activation_throughTheCanonicalUniversalRouter() public {
+        if (!live) return;
+        (,, bytes32 expected,) = s.tickers.previewLaunch("BANANA", 0);
+        uint256 value = LAUNCH_FEE + s.tickers.NEW_TICKER_FEE();
+        TokenParams memory under = _underTicker(_params("Fork Bread", "BREAD", expected, "fork-bread-ur"), "BANANA");
+        vm.prank(creator);
+        (address banana, address bread,) = s.tickers.launch{value: value}("BANANA", under, 0);
+        vm.roll(vm.getBlockNumber() + 3); vm.warp(vm.getBlockTimestamp() + 6);
+        PoolKey memory ethUsdg = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(RH_USDG), fee: 100, tickSpacing: 1, hooks: IHooks(address(0))});
+        PoolKey[] memory toName = new PoolKey[](2);
+        toName[0] = ethUsdg;
+        toName[1] = ManagedTickerToken(banana).poolKey();
+        PoolKey[] memory toCoin = new PoolKey[](3);
+        toCoin[0] = toName[0];
+        toCoin[1] = toName[1];
+        toCoin[2] = s.factory.poolKeyOf(bread);
+        // activation 1: 0.0005 ETH, the name to the wallet
+        (uint256 got,) = _activateThrough(toName, banana, 0.0005 ether);
+        emit log_named_uint("activation 1: BANANA delivered to the wallet", got);
+        vm.roll(vm.getBlockNumber() + 1);
+        // activation 2: 0.001 ETH of fresh ETH, the coin to the wallet, the name kept; the name the route bought on
+        // its way now sits in the coin's pool, and that amount comes from the route's own swap log, not from the wrapper
+        (uint256 coins, uint256 nameIntoCoinPool) = _activateThrough(toCoin, bread, 0.001 ether);
+        emit log_named_uint("activation 2: BREAD delivered to the wallet", coins);
+        emit log_named_uint("activation 2: BANANA the route put into BREAD's pool", nameIntoCoinPool);
+        assertEq(ManagedTickerToken(banana).balanceOf(creator), got, "the name bought in activation 1 is kept, not spent");
+        assertGt(nameIntoCoinPool, 0);
+        _assertBacked(ManagedTickerToken(banana), got + nameIntoCoinPool);
+    }
+
+    /// one activation buy through the canonical router: a fresh quote, one percent under it as the minimum, the
+    /// swaps the router made on exactly the given pools, the output landing whole in the wallet
+    function _activateThrough(PoolKey[] memory pools, address output, uint256 eth) internal returns (uint256 delivered, uint256 bridgeOut) {
+        uint256 quoted = UniversalRouterBuy.quote(IV4Quoter(RH_V4_QUOTER), pools, eth);
+        uint256 minOut = UniversalRouterBuy.minimum(quoted);
+        assertGt(minOut, 0, "a positive minimum, always");
+        uint256 before = IERC20(output).balanceOf(creator);
+        vm.recordLogs();
+        vm.prank(creator);
+        UniversalRouterBuy.buy(IUniversalRouter(RH_UNIVERSAL_ROUTER), creator, pools, eth, minOut, vm.getBlockTimestamp() + 300);
+        delivered = IERC20(output).balanceOf(creator) - before;
+        assertGe(delivered, minOut, "delivered at least the minimum");
+        assertEq(delivered, quoted, "the canonical quote is what the wallet received");
+        // the router's own swaps, one per pool, in order
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 swaps;
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].emitter != RH_POOL_MANAGER || logs[i].topics[0] != keccak256("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)")) continue;
+            if (address(uint160(uint256(logs[i].topics[2]))) != RH_UNIVERSAL_ROUTER) continue; // the wrapper's own re-centring swap is not the router's
+            assertEq(logs[i].topics[1], PoolId.unwrap(pools[swaps].toId()), "each swap on the next pool of the route");
+            if (swaps == 1) {
+                // the name's pool: what left it is what the route carried on, in the name's units
+                (int128 amount0, int128 amount1) = abi.decode(logs[i].data, (int128, int128));
+                bool nameIs0 = Currency.unwrap(pools[1].currency0) != RH_USDG;
+                int128 out = nameIs0 ? amount0 : amount1;
+                bridgeOut = uint256(uint128(out > 0 ? out : -out));
+            }
+            swaps++;
+        }
+        assertEq(swaps, pools.length, "one ordinary swap per pool, made by the router");
     }
 
     /// the name's pool on the canonical pool manager: bound to the one hook, at one dollar, the fee's real dollars as surplus

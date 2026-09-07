@@ -70,11 +70,12 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
     uint256 public constant NEW_TICKER_FEE = 0.0015 ether;
     /// @notice The fewest dollars the fee must buy for the wrapper to open; the wrapper's own minimum.
     uint256 public constant MIN_DONATION = 1_000_000;
-    /// @notice The inventory every ticker's pool offers at rest, in the wrapper's six decimals: one million
-    /// dollars' worth, so a single buy of up to that much fills whole while nothing is in circulation; the offer
-    /// grows by four times whatever is out. Inventory is the wrapper's own unsold tokens, backed by nothing and
-    /// owed to nobody until sold, when the dollars paid for them become their backing.
-    uint256 public constant INVENTORY_FLOOR = 1_000_000e6;
+    /// @notice The inventory every ticker's pool offers at rest, in the wrapper's six decimals: ten thousand
+    /// dollars' worth, the reference's floor, so a single buy of up to that much fills whole while nothing is in
+    /// circulation; the offer grows by four times whatever is out, and a bigger buy wraps one for one instead.
+    /// Inventory is the wrapper's own unsold tokens, backed by nothing and owed to nobody until sold, when the
+    /// dollars paid for them become their backing. This is not ten thousand dollars deposited anywhere.
+    uint256 public constant INVENTORY_FLOOR = 10_000e6;
     /// @dev A ticker's address always starts with this nibble, so a coin's can sort below it fifteen times in sixteen.
     uint160 internal constant TICKER_PREFIX = 0xF;
 

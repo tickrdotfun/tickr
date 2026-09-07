@@ -31,6 +31,7 @@ export const DOC_GROUPS: DocGroup[] = [
       { slug: "anchors", file: "05-anchors.md", title: "invented tickers", blurb: "a quote asset a creator names, worth one USDG each. inventing one, launching under one, why nobody owns it, the dollar pool and the club that shares its fees." },
       { slug: "coin-quotes", file: "10-coin-quotes.md", title: "tickr coins", blurb: "mode 3. price a launch in a coin this factory already launched, and the guardrails on it." },
       { slug: "market-quotes", file: "19-market-quotes.md", title: "any token with a market", blurb: "mode 5. price a launch in any token on the chain with a deep enough Uniswap v3 pool against WETH or USDG." },
+      { slug: "reference-alignment", file: "20-reference-alignment.md", title: "reference versus production", blurb: "what the managed ticker system keeps from the reference that traded, what differs and why, and how each difference is tested." },
       { slug: "stock-quotes", file: "11-stock-quotes.md", title: "Stock Token quotes", blurb: "mode 4. the opening market cap is sized from the asset's live Chainlink feed." },
       { slug: "zap", file: "12-zap.md", title: "buying with ETH", blurb: "any coin, one transaction, paid in ETH, whatever it is quoted in." },
     ],

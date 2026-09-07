@@ -101,7 +101,6 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `TokenLaunched(address,bytes32,address,address,uint256,uint24,uint256)` | `0xb6aa2732938645ba6006aecc1a69e2e2c105447698bfeceb2fd347532ae40954` | Factory |
 | `Transfer(address,address,uint256)` | `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef` | Token, ManagedTickerToken |
 | `Zapped(address,address,address,uint256,uint256,uint256)` | `0xe91c019e21e619ffcc1911755ca8385b08392696a46dbfc31b4cc69804161ad2` | ZapRouter |
-| `ZappedTicker(address,address,address,uint256,uint256)` | `0x66fa2f9dad61e8911997fee3d4e8fbadd52d806dba0afd736b95ba3a5bc009b0` | ZapRouter |
 | `ZapSold(address,address,address,uint256,uint256,uint256)` | `0xcae331be1761c82e841551cd62fb652b07ae6f51962c767cfc8e6d4b11fe4a8f` | ZapRouter |
 
 ### Errors

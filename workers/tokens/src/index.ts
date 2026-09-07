@@ -342,12 +342,13 @@ export default {
   async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(refresh(env).then((o) => console.log(`tokens: ${o.tokens.length} of ${o.stats.candidates} candidates`)));
   },
-  /** A manual run, for a deploy or a check: `curl https://<worker>/refresh`. Reading is what the site does. */
+  /** A manual run, for a deploy or a check: `curl -H "x-refresh-key: ..." https://<worker>/refresh`. Reading is what the site does. */
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/refresh") {
       // a manual run is ours to trigger: the schedule does it otherwise
-      if (!env.REFRESH_KEY || url.searchParams.get("key") !== env.REFRESH_KEY) return new Response("not found", { status: 404 });
+      // the key travels in a header: a query string lands in logs, caches and browser history
+      if (!env.REFRESH_KEY || req.headers.get("x-refresh-key") !== env.REFRESH_KEY || url.searchParams.has("key")) return new Response("not found", { status: 404 });
       const out = await refresh(env);
       return Response.json({ ok: true, ...out.stats, tokens: out.tokens.length, stored: out.stored, keeping: out.keeping });
     }

@@ -5,6 +5,7 @@ import {BaseTest} from "./Base.t.sol";
 import {Token} from "../src/Token.sol";
 import {ManagedTickerToken} from "../src/ManagedTickerToken.sol";
 import {TickerLauncher} from "../src/TickerLauncher.sol";
+import {ManagedTickerHook} from "../src/ManagedTickerHook.sol";
 import {TokenParams} from "../src/Types.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
@@ -66,7 +67,7 @@ contract TickerTest is BaseTest {
         (uint256 backing, uint256 circulation) = banana.accounting();
         assertLe(circulation, DUST, "nobody holds BANANA yet: only the position maths' rounding");
         assertGt(backing, banana.MIN_DONATION() - 1, "the fee bought at least the minimum");
-        assertGe(banana.inventoryCapacity(), tickers.INVENTORY_FLOOR(), "a million dollars' worth on offer at rest");
+        assertGe(banana.inventoryCapacity(), tickers.INVENTORY_FLOOR(), "ten thousand dollars' worth on offer at rest");
         // one position minted through the position manager: the coin's own, in the locker. the wrapper holds its
         // pool positions itself, not as NFTs
         assertEq(posm.nextTokenId(), nextId + 1);
@@ -201,8 +202,11 @@ contract TickerTest is BaseTest {
         usdg.mint(bob, cap + 1);
         vm.startPrank(bob);
         usdg.approve(address(swapRouter), type(uint256).max);
-        vm.expectRevert();
-        swapRouter.swap(key, SwapParams({zeroForOne: usdgIs0, amountSpecified: -int256(cap + 1), sqrtPriceLimitX96: usdgIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1}), PoolSwapTest.TestSettings(false, false), "");
+        try swapRouter.swap(key, SwapParams({zeroForOne: usdgIs0, amountSpecified: -int256(cap + 1), sqrtPriceLimitX96: usdgIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1}), PoolSwapTest.TestSettings(false, false), "") {
+            revert("a buy above the offer went through");
+        } catch (bytes memory reason) {
+            assertTrue(_has(reason, ManagedTickerToken.CapacityExceeded.selector), "CapacityExceeded, by name");
+        }
         vm.stopPrank();
         (uint160 sqrtP,,,) = poolManager.getSlot0(key.toId());
         assertEq(sqrtP, banana.PARITY(), "nothing moved");
@@ -213,11 +217,22 @@ contract TickerTest is BaseTest {
         PoolKey memory key = PoolKey({currency0: Currency.wrap(address(usdg)), currency1: Currency.wrap(address(nvda)), fee: 500, tickSpacing: 1, hooks: managedHook});
         uint160 parity = banana.PARITY();
         vm.prank(bob);
-        vm.expectRevert();
-        poolManager.initialize(key, parity);
+        try poolManager.initialize(key, parity) {
+            revert("a stranger opened a pool behind the hook");
+        } catch (bytes memory reason) {
+            assertTrue(_has(reason, ManagedTickerHook.UnknownPool.selector), "UnknownPool, by name");
+        }
         vm.prank(bob);
-        vm.expectRevert();
+        vm.expectRevert(ManagedTickerHook.NotIssuer.selector);
         managedHook.register(banana);
+    }
+
+    /// @dev Whether revert data carries `sel` anywhere: the pool manager wraps a hook's revert with the inner reason inside.
+    function _has(bytes memory data, bytes4 sel) internal pure returns (bool) {
+        for (uint256 i; i + 4 <= data.length; i++) {
+            if (bytes4(uint32(uint8(data[i])) << 24 | uint32(uint8(data[i + 1])) << 16 | uint32(uint8(data[i + 2])) << 8 | uint32(uint8(data[i + 3]))) == sel) return true;
+        }
+        return false;
     }
 
     // ---------------------------------------------------------------- the club

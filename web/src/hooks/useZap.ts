@@ -15,9 +15,12 @@ const TOKEN_ALLOWANCE_SLOT = 1n;
 
 /** Recipient used for quoting before a wallet is connected: the coin refuses transfers to the zero address. */
 const PREVIEW_RECIPIENT: Address = "0x000000000000000000000000000000000000dEaD";
+/** A quote is a simulation, never sent: a fixed far-off deadline keeps its calldata the same from one call to the
+ *  next, so a recorded preview replays and two quotes of one route are one read. A real send gets a real deadline. */
+const PREVIEW_DEADLINE = 4_102_444_800n; // 2100-01-01
 
 /** A buy: `tokenIn` is what the caller pays (ETH by default), `path` ends in the coin's own pool. */
-export function zapParams(token: Address, path: Hop[], recipient: Address, minTokensOut = 0n, tokenIn: Address = ZERO, amountIn = 0n) {
+export function zapParams(token: Address, path: Hop[], recipient: Address, minTokensOut = 0n, tokenIn: Address = ZERO, amountIn = 0n, deadline?: bigint) {
   return {
     token,
     tokenIn,
@@ -25,7 +28,7 @@ export function zapParams(token: Address, path: Hop[], recipient: Address, minTo
     path,
     minTokensOut,
     recipient,
-    deadline: BigInt(Math.floor(Date.now() / 1000) + 20 * 60),
+    deadline: deadline ?? BigInt(Math.floor(Date.now() / 1000) + 20 * 60),
   };
 }
 
@@ -38,7 +41,7 @@ export async function previewZapOnce(client: Client, token: Address, path: Hop[]
       abi: ZapRouterAbi,
       address: ADDRESSES.zapRouter,
       functionName: "previewZap",
-      args: [zapParams(token, path, from ?? PREVIEW_RECIPIENT)],
+      args: [zapParams(token, path, from ?? PREVIEW_RECIPIENT, 0n, ZERO, 0n, PREVIEW_DEADLINE)],
       value: valueWei,
       account: from,
     });
@@ -81,7 +84,7 @@ export async function previewZapSellOnce(client: Client, token: Address, path: H
       abi: ZapRouterAbi,
       address: ADDRESSES.zapRouter,
       functionName: "previewZapSell",
-      args: [zapSellParams(token, amountIn, path, from, 0n, tokenOut)],
+      args: [zapSellParams(token, amountIn, path, from, 0n, tokenOut, PREVIEW_DEADLINE)],
       account: from,
       stateOverride: [{ address: token, stateDiff: [{ slot: allowanceSlot(from, ADDRESSES.zapRouter), value: toHex(maxUint256, { size: 32 }) }] }],
     });
@@ -99,7 +102,7 @@ export async function previewZapSellOnce(client: Client, token: Address, path: H
 }
 
 /** A sell: `path` starts with the coin's own pool and ends where `tokenOut` is (ETH by default). */
-export function zapSellParams(token: Address, amountIn: bigint, path: Hop[], recipient: Address, minOut = 0n, tokenOut: Address = ZERO) {
+export function zapSellParams(token: Address, amountIn: bigint, path: Hop[], recipient: Address, minOut = 0n, tokenOut: Address = ZERO, deadline?: bigint) {
   return {
     token,
     amountIn,
@@ -107,7 +110,7 @@ export function zapSellParams(token: Address, amountIn: bigint, path: Hop[], rec
     tokenOut,
     minOut,
     recipient,
-    deadline: BigInt(Math.floor(Date.now() / 1000) + 20 * 60),
+    deadline: deadline ?? BigInt(Math.floor(Date.now() / 1000) + 20 * 60),
   };
 }
 

@@ -6,17 +6,18 @@ import { Notice, Spinner } from "./ui";
 
 export function TxStatus({ status, hash, error, step }: { status: S; hash?: string; error?: string; step?: string }) {
   if (status === "idle") return null;
-  if (status === "error")
-    return (
-      <Notice kind="danger">
-        <span className="break-words">{error ?? "Transaction failed"}</span>
-      </Notice>
-    );
   const link = hash ? (
     <a className="ml-1" href={explorerTx(hash)} target="_blank" rel="noreferrer">
       view tx
     </a>
   ) : null;
+  if (status === "error")
+    return (
+      <Notice kind="danger">
+        <span className="break-words">{error ?? "Transaction failed"}</span>
+        {link}
+      </Notice>
+    );
   if (status === "success")
     return (
       <Notice kind="ok">

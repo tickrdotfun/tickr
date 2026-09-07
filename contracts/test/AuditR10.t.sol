@@ -285,7 +285,7 @@ contract AuditR10Test is BaseTest {
             uint160 flags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG;
             (, bytes32 hookSalt) = HookMine.find(address(this), flags, keccak256(abi.encodePacked(type(ManagedTickerHook).creationCode, abi.encode(poolManager, otherPred))));
             ManagedTickerHook otherHook = new ManagedTickerHook{salt: hookSalt}(poolManager, otherPred);
-            ManagedTickerDeployer otherDeployer = new ManagedTickerDeployer(otherPred, IERC20(address(usdg)), poolManager, 1_000_000e6);
+            ManagedTickerDeployer otherDeployer = new ManagedTickerDeployer(otherPred, IERC20(address(usdg)), poolManager, 10_000e6);
             other = new TickerLauncher(IFactory(address(factory)), registry, IERC20(address(usdg)), seeder, poolManager, otherHook, otherDeployer);
             assertEq(address(other), otherPred);
         }

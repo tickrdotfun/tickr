@@ -29,7 +29,15 @@ cd "$ROOT/contracts"
 # the chain enforces EIP-170 (24,576 bytes of runtime) and foundry.toml lifts the test limit, so check here
 forge build --sizes --json 2>/dev/null | python3 -c '
 import json,sys
-over=[(k,v["runtime_size"]) for k,v in json.load(sys.stdin).items() if v["runtime_size"]>24576]
+d=json.load(sys.stdin); found=[]
+def walk(name, v):
+    if isinstance(v, dict):
+        if isinstance(v.get("runtime_size"), int): found.append((name, v["runtime_size"]))
+        else:
+            for k, x in v.items(): walk(k, x)
+walk("", d)
+assert found, "the size report listed no contracts: check `forge build --sizes --json`"
+over=[(k,n) for k,n in found if n>24576]
 for k,n in over: print("  %s is %d bytes, over the 24,576 the chain enforces; the fork would refuse to create it"%(k,n))
 sys.exit(1 if over else 0)' || exit 1
 echo "▸ deploying tickr.fun"

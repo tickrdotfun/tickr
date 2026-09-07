@@ -16,7 +16,9 @@ import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
-import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {SwapParams, ModifyLiquidityParams} from "v4-core/src/types/PoolOperation.sol";
+import {IUnlockCallback} from "v4-core/src/interfaces/callback/IUnlockCallback.sol";
+import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {PoolSwapTest} from "v4-core/src/test/PoolSwapTest.sol";
 
 /// The managed wrapper's pool in production: every invented name runs one, behind the one hook, and coins under
@@ -101,7 +103,7 @@ contract ManagedTickerTest is BaseTest {
     function test_managed_theOfferGrowsWithWhatIsOut() public {
         uint256 floor = tickers.INVENTORY_FLOOR();
         assertApproxEqAbs(banana.inventoryCapacity(), floor, 4 * DUST, "the floor at rest");
-        uint256 got = _buy(bob, 50_000e6);
+        uint256 got = _buy(bob, 5_000e6);
         assertApproxEqAbs(banana.inventoryCapacity(), floor + 4 * got, 4 * DUST, "four times the circulation on top");
         // a buy the size of the whole offer fills whole
         uint256 cap = banana.inventoryCapacity();
@@ -113,15 +115,17 @@ contract ManagedTickerTest is BaseTest {
 
     function test_managed_aSellAboveTheCirculationIsRefused() public {
         uint256 got = _buy(bob, 1_000e6);
-        // bob cannot sell more than exists: the swap reverts whole, whatever he holds
-        deal(address(banana), bob, got + 1_000e6, true);
+        // nobody can sell more than is in circulation: the wrapper refuses before anything moves, with its own error
         vm.prank(bob);
-        vm.expectRevert();
-        swapRouter.swap(key, SwapParams({zeroForOne: !usdgIs0, amountSpecified: -int256(got + 1_000e6), sqrtPriceLimitX96: !usdgIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1}), PoolSwapTest.TestSettings(false, false), "");
+        try swapRouter.swap(key, SwapParams({zeroForOne: !usdgIs0, amountSpecified: -int256(got + 1_000e6), sqrtPriceLimitX96: !usdgIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1}), PoolSwapTest.TestSettings(false, false), "") {
+            revert("a sell above the circulation went through");
+        } catch (bytes memory reason) {
+            assertTrue(_has(reason, ManagedTickerToken.CapacityExceeded.selector), "CapacityExceeded");
+        }
     }
 
     function test_managed_redeemPullsDollarsOutOfThePool_andTheNextSwapRebuildsIt() public {
-        uint256 got = _buy(bob, 20_000e6);
+        uint256 got = _buy(bob, 5_000e6);
         // the dollars bob paid sit on the pool's cash side, not idle in the wrapper
         assertLt(usdg.balanceOf(address(banana)), got, "not idle");
         uint256 before = usdg.balanceOf(bob);
@@ -184,69 +188,36 @@ contract ManagedTickerTest is BaseTest {
     }
 
     function test_managed_activation_theNameLandsInTheWallet_thenTheCoin() public {
-        // 1. the name itself, bought through its own pool, paid to alice by the pool manager
-        ZapRouter.Hop[] memory toName = new ZapRouter.Hop[](2);
-        toName[0] = _v4(ethUsdgKey);
-        toName[1] = _v4(key);
-        ZapRouter.ZapTickerParams memory tp = ZapRouter.ZapTickerParams({ticker: address(banana), tokenIn: address(0), amountIn: 0, path: toName, minOut: 0, recipient: alice, deadline: vm.getBlockTimestamp() + 60});
-        uint256 previewed;
-        vm.prank(alice);
-        try zap.previewZapTicker{value: 0.01 ether}(tp) {
-            revert("preview must revert");
-        } catch (bytes memory reason) {
-            bytes memory data = new bytes(reason.length - 4);
-            for (uint256 i; i < data.length; i++) data[i] = reason[i + 4];
-            (, previewed) = abi.decode(data, (uint256, uint256));
-        }
-        vm.prank(alice);
-        uint256 got = zap.zapTicker{value: 0.01 ether}(tp);
-        assertEq(got, previewed, "the preview is the buy");
+        // 1. the name itself, bought through its own pool, paid to alice by the pool manager, in its own transaction
+        usdg.mint(alice, 100e6);
+        vm.startPrank(alice);
+        usdg.approve(address(swapRouter), type(uint256).max);
+        vm.stopPrank();
+        uint256 got = _buy(alice, 20e6);
         assertEq(banana.balanceOf(alice), got, "the wallet holds the name");
         assertGt(got, 19e6, "about twenty dollars of it");
         _solvent();
-        // 2. the coin, in a second transaction
+        // 2. the coin, through the name's pool and its own, in a second transaction; the name from step 1 is kept
         ZapRouter.Hop[] memory path = new ZapRouter.Hop[](3);
         path[0] = _v4(ethUsdgKey);
         path[1] = _v4(key);
         path[2] = _v4(factory.poolKeyOf(address(bread)));
         vm.prank(alice);
-        uint256 out = zap.zapBuy{value: 0.01 ether}(ZapRouter.ZapParams({token: address(bread), tokenIn: address(0), amountIn: 0, path: path, minTokensOut: 0, recipient: alice, deadline: vm.getBlockTimestamp() + 60}));
+        uint256 out = zap.zapBuy{value: 0.01 ether}(ZapRouter.ZapParams({token: address(bread), tokenIn: address(0), amountIn: 0, path: path, minTokensOut: 1, recipient: alice, deadline: vm.getBlockTimestamp() + 60}));
         assertGt(out, 0);
+        assertEq(banana.balanceOf(alice), got, "the name bought first is not spent by the coin buy");
         _solvent();
     }
 
-    function test_managed_zapTickerRefusesAnythingButANameAndItsOwnPool() public {
-        ZapRouter.Hop[] memory toName = new ZapRouter.Hop[](2);
-        toName[0] = _v4(ethUsdgKey);
-        toName[1] = _v4(key);
-        // not a name
-        vm.prank(alice);
-        vm.expectRevert(ZapRouter.UnknownToken.selector);
-        zap.zapTicker{value: 0.01 ether}(ZapRouter.ZapTickerParams({ticker: address(bread), tokenIn: address(0), amountIn: 0, path: toName, minOut: 0, recipient: alice, deadline: vm.getBlockTimestamp() + 60}));
-        // a route that does not end in the name's pool
-        ZapRouter.Hop[] memory wrong = new ZapRouter.Hop[](1);
-        wrong[0] = _v4(ethUsdgKey);
-        vm.prank(alice);
-        vm.expectRevert(ZapRouter.BadPath.selector);
-        zap.zapTicker{value: 0.01 ether}(ZapRouter.ZapTickerParams({ticker: address(banana), tokenIn: address(0), amountIn: 0, path: wrong, minOut: 0, recipient: alice, deadline: vm.getBlockTimestamp() + 60}));
-    }
-
     function test_managed_oneVisitPerTransaction() public {
-        // ETH -> USDG -> BANANA -> USDG, all inside one unlock: the name's pool twice in one transaction is refused
-        ZapRouter.Hop[] memory twice = new ZapRouter.Hop[](3);
-        twice[0] = _v4(ethUsdgKey);
-        twice[1] = _v4(key);
-        twice[2] = _v4(key);
-        vm.prank(alice);
-        vm.expectRevert();
-        zap.zapTicker{value: 0.01 ether}(ZapRouter.ZapTickerParams({ticker: address(banana), tokenIn: address(0), amountIn: 0, path: twice, minOut: 0, recipient: alice, deadline: vm.getBlockTimestamp() + 60}));
-        // once is fine, and the flag is a transaction's: the next transaction visits again
-        ZapRouter.Hop[] memory once = new ZapRouter.Hop[](2);
-        once[0] = _v4(ethUsdgKey);
-        once[1] = _v4(key);
-        vm.prank(alice);
-        uint256 got = zap.zapTicker{value: 0.01 ether}(ZapRouter.ZapTickerParams({ticker: address(banana), tokenIn: address(0), amountIn: 0, path: once, minOut: 0, recipient: alice, deadline: vm.getBlockTimestamp() + 60}));
-        assertGt(got, 0);
+        // two swaps on the name's pool inside one unlock: the second is refused with the wrapper's own error
+        TwoVisits visits = new TwoVisits(poolManager);
+        usdg.mint(address(visits), 1_000e6);
+        bytes memory reason = visits.run(key, usdgIs0, 100e6);
+        assertTrue(_has(reason, ManagedTickerToken.MultipleBridgeVisits.selector), "MultipleBridgeVisits");
+        // one visit per transaction is fine
+        uint256 got = _buy(bob, 100e6);
+        assertGt(got, 99e6);
         _solvent();
     }
 
@@ -263,10 +234,14 @@ contract ManagedTickerTest is BaseTest {
     }
 
     function test_hook_onlyTheWrapperTouchesItsOwnLiquidity() public {
-        vm.prank(bob);
-        vm.expectRevert();
-        poolManager.unlock("");
-        // nobody can add liquidity to the name's pool from outside: the hook refuses any sender but the wrapper
+        // an outsider adding liquidity to the name's pool, inside its own unlock: the hook's own refusal, by name
+        Intruder intruder = new Intruder(poolManager);
+        usdg.mint(address(intruder), 1_000e6);
+        deal(address(banana), address(intruder), 1_000e6, true);
+        bytes memory reason = intruder.add(key, 1e12);
+        assertTrue(_has(reason, ManagedTickerHook.NotTheWrapper.selector), "NotTheWrapper on add");
+        reason = intruder.remove(key, 1);
+        assertTrue(_has(reason, ManagedTickerHook.NotTheWrapper.selector), "NotTheWrapper on remove");
         assertEq(address(managedHook.tokenOf(key.toId())), address(banana));
     }
 
@@ -286,5 +261,83 @@ contract ManagedTickerTest is BaseTest {
 
     function _v4(PoolKey memory k) internal pure returns (ZapRouter.Hop memory h) {
         h = ZapRouter.Hop({kind: 0, key: k, pool: address(0)});
+    }
+
+    /// @dev Whether revert data carries `sel` anywhere: the pool manager wraps a hook's revert in its own error,
+    /// with the inner reason inside, so the wrapper's selector is what proves which check fired.
+    function _has(bytes memory data, bytes4 sel) internal pure returns (bool) {
+        if (data.length < 4) return false;
+        for (uint256 i; i + 4 <= data.length; i++) {
+            if (bytes4(uint32(uint8(data[i])) << 24 | uint32(uint8(data[i + 1])) << 16 | uint32(uint8(data[i + 2])) << 8 | uint32(uint8(data[i + 3]))) == sel) return true;
+        }
+        return false;
+    }
+}
+
+/// @dev Two swaps on the same name's pool inside one unlock, the way a split route would visit it twice.
+contract TwoVisits is IUnlockCallback {
+    IPoolManager immutable pm;
+    PoolKey key;
+    bool usdgIs0;
+    uint256 amount;
+
+    constructor(IPoolManager pm_) {
+        pm = pm_;
+    }
+
+    function run(PoolKey memory k, bool usdgIs0_, uint256 amount_) external returns (bytes memory reason) {
+        key = k;
+        usdgIs0 = usdgIs0_;
+        amount = amount_;
+        try pm.unlock("") {
+            revert("two visits went through");
+        } catch (bytes memory r) {
+            reason = r;
+        }
+    }
+
+    function unlockCallback(bytes calldata) external returns (bytes memory) {
+        require(msg.sender == address(pm));
+        // first visit: dollars in, the name out
+        BalanceDelta d = pm.swap(key, SwapParams({zeroForOne: usdgIs0, amountSpecified: -int256(amount), sqrtPriceLimitX96: usdgIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1}), "");
+        uint256 got = uint256(uint128(usdgIs0 ? d.amount1() : d.amount0()));
+        // second visit in the same unlock: the name back to dollars
+        pm.swap(key, SwapParams({zeroForOne: !usdgIs0, amountSpecified: -int256(got), sqrtPriceLimitX96: !usdgIs0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1}), "");
+        return "";
+    }
+}
+
+/// @dev An outsider that tries to add to or remove from a name's pool positions inside its own unlock.
+contract Intruder is IUnlockCallback {
+    IPoolManager immutable pm;
+    PoolKey key;
+    int256 delta;
+
+    constructor(IPoolManager pm_) {
+        pm = pm_;
+    }
+
+    function add(PoolKey memory k, uint256 liquidity) external returns (bytes memory) {
+        return _try(k, int256(liquidity));
+    }
+
+    function remove(PoolKey memory k, uint256 liquidity) external returns (bytes memory) {
+        return _try(k, -int256(liquidity));
+    }
+
+    function _try(PoolKey memory k, int256 d) internal returns (bytes memory reason) {
+        key = k;
+        delta = d;
+        try pm.unlock("") {
+            revert("an outsider touched the name's liquidity");
+        } catch (bytes memory r) {
+            reason = r;
+        }
+    }
+
+    function unlockCallback(bytes calldata) external returns (bytes memory) {
+        require(msg.sender == address(pm));
+        pm.modifyLiquidity(key, ModifyLiquidityParams({tickLower: -2, tickUpper: 2, liquidityDelta: delta, salt: 0}), "");
+        return "";
     }
 }

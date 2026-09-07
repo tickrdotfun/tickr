@@ -68,7 +68,7 @@ struct ZapSellParams {
 |---|---|
 | ETH | none, the coin's pool is called directly |
 | USDG | ETH/USDG (fee 0.01%) |
-| an invented ticker (paired with USDG) | ETH/USDG, then the ticker's own pool (a v4 hop, fee 500, spacing 1, hooks = `ManagedTickerHook`) or wrap into the ticker one for one, whichever pays more; the site quotes both |
+| an invented ticker (paired with USDG) | ETH/USDG, then the ticker's own pool (a v4 hop, fee 500, spacing 1, hooks = `ManagedTickerHook`) or wrap into the ticker one for one, whichever pays more; the site quotes both. A buy above the pool's offer wraps |
 | a coin launched here | that coin's pool, no hook |
 | a Stock Token | the deepest pool against ETH: native ETH on v4 or WETH on v3, across the standard fee tiers |
 
@@ -84,18 +84,6 @@ Where no route is known the trade panel falls back to paying in the quote asset 
 | The v3 swap callback comes from the pool being swapped, and never asks for more than the hop holds | `OnlyPool`, `InsufficientLiquidity` |
 | Every hop fills completely | `InsufficientLiquidity` (a partial hop would strand funds in the router) |
 
-## Buying a name itself
+## The activation buys
 
-`zapTicker(ZapTickerParams)` buys an invented ticker through its own pool, with the pool manager paying the recipient directly, and `previewZapTicker` reverts with `Preview(quoteOut, tickerOut)` like the other previews. The route must end in the name's pool. This is the first of the two activation buys every launch under a name ends with, see [05](./05-anchors.md): chart sites price a name from a swap that lands in a wallet after the name's pool exists, and a route that nets the name through the pool manager on its way to a coin is not that. A name's pool takes one visit per transaction: a route through the same name's pool twice reverts.
-
-```solidity
-struct ZapTickerParams {
-    address ticker;      // the invented ticker
-    address tokenIn;     // address(0) = ETH, sent as value
-    uint256 amountIn;    // for an ERC-20 input
-    Hop[] path;          // v4 hops from tokenIn to the ticker, ending in the ticker's own pool
-    uint256 minOut;      // the fewest ticker tokens acceptable
-    address recipient;   // address(0) = msg.sender
-    uint256 deadline;
-}
-```
+The two buys that end a launch under a name ([05](./05-anchors.md)) do not go through tickr's zap: they are sent through Uniswap's canonical Universal Router (`universalRouter` in the deployment record) with an explicit path of the launch's own pool keys, as the reference did. The calldata is `execute(0x1004, [v4 swap (actions 0x070c0f: exact input, settle all, take all), sweep], deadline)` with native ETH in, the last pool's currency as the output and the wallet as the recipient; `contracts/script/lib/UniversalRouterBuy.sol` builds it for the scripts and the fork test, `web/src/lib/activation.ts` for the site, byte for byte the same. The minimum is one percent under a fresh quote from Uniswap's v4 quoter (`v4Quoter` in the record) and is never zero. A name's pool takes one visit per transaction: a route through the same name's pool twice reverts.

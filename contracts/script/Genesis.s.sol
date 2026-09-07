@@ -14,7 +14,8 @@ import {LaunchSeeder} from "../src/LaunchSeeder.sol";
 import {TokenParams, Socials} from "../src/Types.sol";
 import {Token} from "../src/Token.sol";
 import {ILaunchDeployer} from "../src/interfaces/ILaunchDeployer.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
+import {UniversalRouterBuy, IUniversalRouter} from "./lib/UniversalRouterBuy.sol";
+import {IV4Quoter} from "v4-periphery/src/interfaces/IV4Quoter.sol";
 import {ManagedTickerToken} from "../src/ManagedTickerToken.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 
@@ -40,10 +41,13 @@ import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 /// a name. The salt is ground here, off chain, against the deployed LaunchDeployer's own prediction, and the script
 /// refuses to launch if the prediction does not come out that way.
 ///
-/// After the launch come the two activation buys, each its own transaction: FUN itself, bought through its own pool
-/// and paid to the deployer's wallet, then TICKR. Chart sites price a name from a swap that lands in a wallet after
-/// the pool exists, and price the coin from a buy after its pool exists; the launch transaction is neither.
-/// env: GENESIS_ACTIVATION_ETH (ETH for each of the two buys, default 0.005).
+/// After the launch come the two activation buys, each its own transaction through Uniswap's canonical Universal
+/// Router, exactly as the reference sent them: FUN itself, bought through the live ETH/USDG pool and FUN's own pool
+/// and paid to the deployer's wallet, then TICKR through FUN's pool and its own, with fresh ETH. Each buy carries a
+/// positive minimum from a fresh quote, one percent under it; no quote, no buy. Chart sites price a name from a swap
+/// that lands in a wallet after the pool exists, and a coin from a buy after its pool exists; the launch is neither.
+/// env: GENESIS_QUOTE_BUY_ETH (the FUN buy, default 0.0005), GENESIS_COIN_BUY_ETH (the TICKR buy, default 0.001):
+/// the reference's amounts; anything else needs its own acceptance test.
 contract Genesis is Script {
     using stdJson for string;
 
@@ -64,9 +68,17 @@ contract Genesis is Script {
         Factory factory = Factory(payable(j.readAddress(".factory")));
         TickerLauncher tickers = TickerLauncher(j.readAddress(".tickerLauncher"));
         LaunchSeeder seeder = LaunchSeeder(payable(j.readAddress(".launchSeeder")));
-        ZapRouter zap = ZapRouter(payable(j.readAddress(".zapRouter")));
         address usdg = j.readAddress(".usdg");
-        uint256 activationEth = vm.envOr("GENESIS_ACTIVATION_ETH", uint256(0.005 ether));
+        address router = vm.keyExistsJson(j, ".universalRouter") ? j.readAddress(".universalRouter") : address(0);
+        address quoter = vm.keyExistsJson(j, ".v4Quoter") ? j.readAddress(".v4Quoter") : address(0);
+        uint256 quoteBuyEth = vm.envOr("GENESIS_QUOTE_BUY_ETH", uint256(0.0005 ether));
+        uint256 coinBuyEth = vm.envOr("GENESIS_COIN_BUY_ETH", uint256(0.001 ether));
+        // the two activation buys are part of genesis: without the canonical router and quoter in the record nothing
+        // is sent at all. a bare local devnet may say so explicitly, and only off the public chain
+        bool skipActivation = vm.envOr("GENESIS_ALLOW_NO_ACTIVATION", false);
+        if (router == address(0) || quoter == address(0)) {
+            require(skipActivation && block.chainid != 4663, "genesis: the record has no Universal Router or quoter; the activation buys cannot be sent, so nothing is");
+        }
 
         require(factory.canLaunch(me), "genesis: deployer cannot launch");
         require(!factory.launchEnabled(), "genesis: launches are already open; genesis must come first");
@@ -129,9 +141,14 @@ contract Genesis is Script {
         // 5. exactly the disclosed share to the treasury; the crumbs the search overshot by stay with the deployer
         if (treasury != me) IERC20(tickr).transfer(treasury, got < target ? got : target);
 
-        // 6. the two activation buys, one transaction each, both to the deployer's own wallet: FUN through its own
-        //    pool first, then TICKR through FUN's pool and its own. from here chart sites can price both
-        _activate(zap, factory, ethUsdg, fun, tickr, activationEth, me);
+        // 6. the two activation buys, one transaction each, both to the deployer's own wallet through the canonical
+        //    Universal Router: FUN through its own pool first, then TICKR through FUN's pool and its own
+        bool activated = router != address(0) && quoter != address(0);
+        if (activated) {
+            _activate(IUniversalRouter(router), IV4Quoter(quoter), factory, ethUsdg, fun, tickr, quoteBuyEth, coinBuyEth, me, pk);
+        } else {
+            console.log("  GENESIS ACTIVATION NOT SENT (local rehearsal only, GENESIS_ALLOW_NO_ACTIVATION): the official coin is not activated");
+        }
 
         // 7. open launches to everyone, and take the deployer's own pass away: from here it is a wallet like any other
         factory.setLaunchEnabled(true);
@@ -141,23 +158,34 @@ contract Genesis is Script {
         vm.writeJson(vm.toString(tickr), path, ".genesisToken");
         vm.writeJson(vm.toString(fun), path, ".genesisTicker");
         vm.writeJson(vm.toString(poolId), path, ".genesisPool");
+        vm.writeJson(activated ? "true" : "false", path, ".genesisActivated");
         console.log("  genesis launches open; recorded in", path);
     }
 
-    /// @dev The two activation buys, as the site sends them for every launch under a name: the name into the wallet
-    /// through its own pool, then the coin through the name's pool and its own. Two transactions under a broadcast.
-    function _activate(ZapRouter zap, Factory factory, PoolKey memory ethUsdg, address fun, address tickr, uint256 eth, address me) internal {
-        ZapRouter.Hop[] memory toFun = new ZapRouter.Hop[](2);
-        toFun[0] = ZapRouter.Hop({kind: 0, key: ethUsdg, pool: address(0)});
-        toFun[1] = ZapRouter.Hop({kind: 0, key: ManagedTickerToken(fun).poolKey(), pool: address(0)});
-        uint256 funGot = zap.zapTicker{value: eth}(ZapRouter.ZapTickerParams({ticker: fun, tokenIn: address(0), amountIn: 0, path: toFun, minOut: 0, recipient: me, deadline: block.timestamp + 30 minutes}));
-        console.log("  genesis activation 1: FUN to the wallet", funGot);
-        ZapRouter.Hop[] memory toTickr = new ZapRouter.Hop[](3);
+    /// @dev The two activation buys, as the reference sent them and as the site sends them for every launch under
+    /// a name: the name into the wallet through its own pool, then the coin through the name's pool and its own.
+    /// Two transactions under the broadcast; each quote is taken outside it, so nothing but the buys is sent, and a
+    /// zero quote stops the script before anything is signed.
+    function _activate(IUniversalRouter router, IV4Quoter quoter, Factory factory, PoolKey memory ethUsdg, address fun, address tickr, uint256 quoteBuyEth, uint256 coinBuyEth, address me, uint256 pk) internal {
+        PoolKey[] memory toFun = new PoolKey[](2);
+        toFun[0] = ethUsdg;
+        toFun[1] = ManagedTickerToken(fun).poolKey();
+        PoolKey[] memory toTickr = new PoolKey[](3);
         toTickr[0] = toFun[0];
         toTickr[1] = toFun[1];
-        toTickr[2] = ZapRouter.Hop({kind: 0, key: factory.poolKeyOf(tickr), pool: address(0)});
-        uint256 tickrGot = zap.zapBuy{value: eth}(ZapRouter.ZapParams({token: tickr, tokenIn: address(0), amountIn: 0, path: toTickr, minTokensOut: 0, recipient: me, deadline: block.timestamp + 30 minutes}));
-        console.log("  genesis activation 2: TICKR to the wallet", tickrGot);
+        toTickr[2] = factory.poolKeyOf(tickr);
+        vm.stopBroadcast();
+        uint256 minFun = UniversalRouterBuy.minimum(UniversalRouterBuy.quote(quoter, toFun, quoteBuyEth));
+        vm.startBroadcast(pk);
+        uint256 funBefore = IERC20(fun).balanceOf(me);
+        UniversalRouterBuy.buy(router, me, toFun, quoteBuyEth, minFun, block.timestamp + 30 minutes);
+        console.log("  genesis activation 1: FUN to the wallet", IERC20(fun).balanceOf(me) - funBefore, "minimum", minFun);
+        vm.stopBroadcast();
+        uint256 minTickr = UniversalRouterBuy.minimum(UniversalRouterBuy.quote(quoter, toTickr, coinBuyEth));
+        vm.startBroadcast(pk);
+        uint256 tickrBefore = IERC20(tickr).balanceOf(me);
+        UniversalRouterBuy.buy(router, me, toTickr, coinBuyEth, minTickr, block.timestamp + 30 minutes);
+        console.log("  genesis activation 2: TICKR to the wallet", IERC20(tickr).balanceOf(me) - tickrBefore, "minimum", minTickr);
     }
 
     /// @dev Finds the ETH whose dollars buy `target` coins, by doing the whole thing in a simulation that is thrown
