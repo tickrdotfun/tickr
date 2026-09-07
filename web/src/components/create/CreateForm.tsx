@@ -598,6 +598,23 @@ export function CreateForm() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, chainId, client]);
+  // a launch that is pending, in a block waiting for one more, or not yet visible is read again every few seconds
+  // until it settles: reads only, nothing is ever resent. a reverted launch waits for the creator instead
+  const reReads = useRef(0);
+  useEffect(() => {
+    if (!pendingLaunch || DEMO) {
+      reReads.current = 0;
+      return;
+    }
+    if (/reverted on chain/.test(pendingNote)) return;
+    if (reReads.current >= 120) return; // ten minutes of reads; after that the buttons remain
+    const t = setTimeout(() => {
+      reReads.current += 1;
+      void reconcile();
+    }, 5_000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingLaunch, pendingNote]);
 
   /** Builds the exact call a launch makes, once, so the pre-flight and the signature cannot disagree. */
   async function prepare(useSeed: Hex = seed): Promise<Prepared> {
