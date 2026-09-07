@@ -24,7 +24,7 @@ ETH (config economics), USDG and any ERC-20 the owner approves with `setPairToke
 
 ## 6. Fees
 
-Launch fee 0.0005 ETH to the protocol at creation. Pool fee 1% base plus creator tax 0 to 2% (contract cap 10%), the pool's own LP fee. `LaunchLocker.collectFees` splits the base part 50 / 10 / 40 creator / club / protocol under a ticker and 60 / 40 elsewhere; the tax part is the creator's; the coin side splits the same way, the creator's share and the tax to the escrow in the coin, the protocol's and the club's shares burned to `0xdEaD`; everything for the creator and the protocol lands in `FeeEscrow`, pull only. See [06](./06-fees.md).
+Launch fee 0.0005 ETH to the protocol at creation. Pool fee 1% base plus creator tax 0 to 2% at launch (the owner can raise that ceiling for later launches, never above 10%; TICKR carries 2%), the pool's own LP fee. `LaunchLocker.collectFees` splits the base part 50 / 10 / 40 creator / club / protocol under a ticker and 60 / 40 elsewhere; the tax part is the creator's; the coin side splits the same way, the creator's share and the tax to the escrow in the coin, the protocol's and the club's shares burned to `0xdEaD`; everything for the creator and the protocol lands in `FeeEscrow`, pull only. See [06](./06-fees.md).
 
 ## 7. Contracts
 

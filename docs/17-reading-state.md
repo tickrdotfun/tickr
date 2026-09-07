@@ -75,7 +75,7 @@ function tickerCount() view returns (uint256);
 function tickerAt(uint256 i) view returns (address);
 function pairsOf(address ticker) view returns (address[]);
 function captainOf(address ticker, uint256 epoch) view returns (address);   // counts double in that epoch's split: the founder's coin while it trades, else the top coin
-function topOf(address ticker, uint256 epoch) view returns (address);       // the most volume under the ticker in the epoch
+function topOf(address ticker, uint256 epoch) view returns (address);       // the most booked volume under the ticker in the epoch
 function NEW_TICKER_FEE() view returns (uint256);           // 0.0015 ETH
 function INVENTORY_FLOOR() view returns (uint256);          // 10,000e6: the offer of every name's pool at rest
 function predictTicker(string symbol) view returns (address); // where the name lives, invented or not
@@ -97,7 +97,7 @@ function issuer() view returns (address);                   // the ticker launch
 
 `totalSupply()` of a wrapper counts its own unsold inventory, which is neither owed to anyone nor backed until sold; read `circulatingSupply()` for what is out.
 
-The club: `pot(ticker, epoch, coin)`, `volumeOf(coin, epoch)`, `clubVolume(ticker, epoch)`, `claimable(member, payers, epoch)`, `claimClub(member, payers, epoch)`, `sweepDeadPot(coin, epoch)`, `currentEpoch()`; epochs are thirty days. See [05 invented tickers](./05-anchors.md).
+The club: `pot(ticker, epoch, coin)`, `volumeOf(coin, epoch)` (booked when the coin's fees are collected, as the quote fees collected divided by the pool fee rate: buy volume in the quote, in the epoch of the collection), `clubVolume(ticker, epoch)`, `claimable(member, payers, epoch)`, `claimClub(member, payers, epoch)`, `sweepDeadPot(coin, epoch)`, `currentEpoch()`; epochs are thirty days. See [05 invented tickers](./05-anchors.md).
 
 ## The coin itself
 

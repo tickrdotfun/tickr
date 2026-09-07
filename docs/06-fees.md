@@ -8,7 +8,7 @@ Three inputs, one place they land, one function that splits them.
 | --- | --- | --- |
 | launch fee | 0.0005 ETH | once, at creation, to the protocol |
 | new ticker fee | 0.0015 ETH more | once, when a ticker is invented; it becomes the working dollars of the ticker's own pool |
-| pool fee | 1% base plus the creator's tax, 0 to 2% | every buy and sell, taken by the pool from the swap's input |
+| pool fee | 1% base plus the creator's tax, 0 to 2% at launch (the owner can raise that ceiling for later launches, never above 10%; TICKR itself carries 2%) | every buy and sell, taken by the pool from the swap's input |
 
 The pool fee is the pool's own LP fee, fixed when the pool is created: `(baseFeeBps + creatorTaxBps) * 100` in Uniswap's hundredths of a bip, so 10000 for 1%. It is part of the pool key and can never change. Buys pay it in the pair, sells pay it in the coin, and it accrues to the locked launch position.
 
@@ -38,7 +38,7 @@ The policy in force is copied into the launch record at creation. If the pair is
 
 `FeesCollected` reports every figure of a collection. `LaunchLocker.pendingFees(token)` shows what is owed before one.
 
-The protocol's 40% is paid to the `BuybackTreasury`, not to a wallet: half of it buys and burns TICKR, half funds the team. See [13 the official coin](./13-official-coin.md). Inside a coin's first five seconds, a buy pays a snipe tax on the coin side too, burned to the dead address like every other coin-side fee; see [02 lifecycle](./02-lifecycle.md). The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
+The protocol's 40% is paid to the `BuybackTreasury`, not to a wallet: half of it buys and burns TICKR, half funds the team. The half and half split between buybacks and the team applies to revenue the treasury can convert to USDG, which is USDG, ETH and invented tickers; fees paid in an asset it cannot convert at par, a Stock Token or a coin used as a quote, are forwarded to the team in full; and the protocol's and the club's sell-side shares, paid in the launched coin, are burned by the locker directly and never reach the treasury. See [13 the official coin](./13-official-coin.md). Inside a coin's first five seconds, a buy pays a snipe tax on the coin side too, burned to the dead address like every other coin-side fee; see [02 lifecycle](./02-lifecycle.md). The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
 
 ## Who collects
 
@@ -54,7 +54,7 @@ The creator fee wallet can hand its role to another wallet with `transferCreator
 
 ## The ticker club
 
-Under an invented ticker, 10% of the base fee of every coin goes into that coin's pot for the current thirty day epoch, and the creators of the other coins under the same ticker claim from it in proportion to their recorded volume. Details in [05 anchors](./05-anchors.md).
+Under an invented ticker, 10% of the base fee of every coin goes into that coin's pot for the current thirty day epoch, and the creators of the other coins under the same ticker claim from it in proportion to their booked volume: when a coin's fees are collected, the locker books the quote fees collected divided by the pool fee rate as that coin's volume for the window of the collection. so it stands for buy volume in the quote, since only buys pay fees in the quote, and a coin's weight for a window depends on when someone collected. Details in [05 anchors](./05-anchors.md).
 
 ## BuybackVault
 

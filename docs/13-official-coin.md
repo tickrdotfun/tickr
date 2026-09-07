@@ -11,7 +11,7 @@ tickr has one coin of its own. Its ticker is **TICKR**, it is priced in **FUN**,
 | Supply | 1,000,000,000, all of it in the locked pool at launch; nobody holds any at creation, and the only way to hold some in the launch transaction is a first buy from the curve like anyone else |
 | Fee split | 50% creator, 10% ticker club, 40% protocol, frozen at launch, the same as every coin under a ticker |
 | Creator | the team. The creator share of TICKR's fees goes to the team's fee wallet |
-| Creator tax | 2%, on every trade, all of it to the team's fee wallet, shown on every trade like any creator tax |
+| Creator tax | 2%, the launch-time ceiling, on every trade, all of it to the team's fee wallet, shown on every trade like any creator tax |
 | Allocation, airdrop, vesting | none |
 
 ## How it was launched
@@ -28,7 +28,7 @@ After launch the team sends that 5% to the dead address by hand and lists the tr
 
 ## Buybacks
 
-The protocol's share of every fee, and every launch fee, is paid to a contract, `BuybackTreasury`, not to a wallet. It is the protocol fee recipient from the first launch, frozen into TICKR and every coin after it. The treasury has no owner and no way to withdraw: money leaves it two ways only, to the team wallet and to the dead address.
+The protocol's share of every fee, and every launch fee, is paid to a contract, `BuybackTreasury`, not to a wallet. It is the protocol fee recipient from the first launch, frozen into TICKR and every coin after it. The treasury has no owner and no way to withdraw: money leaves it two ways only, to the team wallet and to the dead address. The half and half split between buybacks and the team applies to revenue the treasury can convert to USDG, which is USDG, ETH and invented tickers; fees paid in an asset it cannot convert at par, a Stock Token or a coin used as a quote, are forwarded to the team in full; and the protocol's and the club's sell-side shares, paid in the launched coin, are burned by the locker directly and never reach the treasury.
 
 The treasury binds itself to the ticker launcher the first time `collect` or `buy` runs after deployment (`launcher()`, event `LauncherBound`); from then on what FUN is, which coin is official and which wrappers convert cannot be moved by the factory owner. Anyone may call `collect(tokens)`. It claims what the escrow holds for the treasury, turns what it can into dollars (an invented ticker unwraps at par, ETH goes through the live ETH/USDG pool), sends half of the dollars to the team wallet, and sets the other half aside. Anything it cannot convert, a Stock Token or a coin used as a quote, goes whole to the team wallet, since the treasury has no honest price for it.
 

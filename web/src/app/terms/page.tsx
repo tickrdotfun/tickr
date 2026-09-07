@@ -67,7 +67,7 @@ export default function TermsPage() {
             10% to the ticker club and 40% to the protocol. on any other pair, 60% to the creator and 40% to the protocol. the coin side of
             every sell splits the same way: the creator&apos;s share is theirs, the rest is burned.
           </li>
-          <li>an optional creator tax, chosen by the creator at launch, capped by the factory. it goes entirely to the creator&apos;s fee wallet.</li>
+          <li>an optional creator tax, chosen by the creator at launch, up to 2% at launch; the owner can raise that ceiling for later launches, never above 10%. it goes entirely to the creator&apos;s fee wallet.</li>
           <li>
             a snipe tax on buys in a coin&apos;s first five seconds: 99% in the launch second, falling to nothing by the fifth. it is burned. the
             launcher&apos;s wallet and its fee wallet do not pay it, and sells never do.
@@ -76,7 +76,7 @@ export default function TermsPage() {
         <p>
           every one of these is visible in the transaction before you sign it. tickr takes no share of any coin&apos;s supply, at launch or ever.
           the ticker club is described in the <Link href="/docs/anchors">docs</Link>: it pays the creators of other coins under the same
-          ticker, by their trading volume. the founder&apos;s coin is captain of the club by default and counts double while it trades; it owns
+          ticker, by the buy volume their fee collections stand for. the founder&apos;s coin is captain of the club by default and counts double while it trades; it owns
           nothing and has no say over any other coin.
         </p>
       </section>

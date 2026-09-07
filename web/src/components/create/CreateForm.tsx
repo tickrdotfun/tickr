@@ -405,7 +405,7 @@ export function CreateForm() {
     if (!logo.trim()) return "Add an image for your coin.";
     if (!description.trim()) return "Write a description for your coin.";
     if (feeWallet && !isAddress(feeWallet)) return "Fee wallet is not a valid address.";
-    if (taxBps > maxTaxBps) return `Creator tax exceeds the factory max (${bpsToPct(maxTaxBps)}).`;
+    if (taxBps > maxTaxBps) return `Creator tax is above the ceiling, ${bpsToPct(maxTaxBps)} right now.`;
     if (!config.data?.enabled) return "Selected launch config is disabled.";
     if (tab === "official") {
       if (isZero(ADDRESSES.stockQuoteLauncher)) return "Stock Token launches are not available yet.";
@@ -1466,7 +1466,7 @@ export function CreateForm() {
             </Collapse>
           </div>
           <div className="module mt-8">
-            <div className="label label-muted">creator tax, your cut of every trade</div>
+            <div className="label label-muted">creator tax, your cut of every trade, up to {bpsToPct(maxTaxBps)} right now</div>
             <div className="flex items-center gap-5 mt-4">
               <input
                 type="range"

@@ -36,7 +36,7 @@ import {ManagedTickerDeployer} from "./ManagedTickerDeployer.sol";
 /// Nobody owns a ticker: no owner slot, no rights over any other coin, no permission to ask before joining. What a
 /// ticker has is a club: every coin priced in it pays the club's slice of its trade fee (10% of the 1% at deploy)
 /// into a pot for that ticker, and the pot is shared by the creators of the *other* coins under the same ticker,
-/// by their pool volume over the same thirty days. A coin never pays its own creator through the club; that is
+/// by the buy volume their fee collections stand for, over the same thirty days. A coin never pays its own creator through the club; that is
 /// what the creator's 60% is for. No volume in the window, no share.
 ///
 /// Every club has a captain, and the captain counts double when a pot is split. The founder's coin, the first
@@ -45,8 +45,9 @@ import {ManagedTickerDeployer} from "./ManagedTickerDeployer.sol";
 /// trades in. Any volume keeps the seat; there is no floor. The captain has nothing else: it cannot touch anyone's
 /// fees, it keeps nobody out, and it owns nothing.
 ///
-/// Time is cut into epochs of thirty days. Volume is recorded in the epoch it trades; club fees are booked in
-/// the epoch they are swept. An epoch's pot is claimable once the epoch has closed, so nothing about a claim
+/// Time is cut into epochs of thirty days. Volume is booked when a coin's fees are collected, in that epoch: the
+/// locker reports the quote fees collected divided by the pool fee rate, so it stands for buy volume in the quote
+/// and depends on when someone collected. Club fees are booked in the epoch they are swept. An epoch's pot is claimable once the epoch has closed, so nothing about a claim
 /// can move after it becomes claimable. This contract has no owner.
 contract TickerLauncher is ReentrancyGuard, IFeeClub {
     using SafeERC20 for IERC20;
@@ -87,9 +88,9 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
 
     /// @notice Club fees booked: ticker => epoch => paying coin => amount of the ticker.
     mapping(address => mapping(uint256 => mapping(address => uint256))) public pot;
-    /// @notice Pool volume in the ticker: coin => epoch => amount.
+    /// @notice Buy volume in the ticker, booked at fee collection: coin => epoch => amount.
     mapping(address => mapping(uint256 => uint256)) public volumeOf;
-    /// @notice Pool volume of every coin under a ticker: ticker => epoch => amount.
+    /// @notice Booked volume of every coin under a ticker: ticker => epoch => amount.
     mapping(address => mapping(uint256 => uint256)) public clubVolume;
     /// @notice The coin with the most volume under a ticker in an epoch, kept as volume lands, so nothing ever loops
     /// over the coins under a ticker. Ties keep the incumbent.
@@ -162,7 +163,7 @@ contract TickerLauncher is ReentrancyGuard, IFeeClub {
         return _tickers[i];
     }
 
-    /// @notice Every coin launched under `ticker`, oldest first. Graduated or not; the club weighs only pool volume.
+    /// @notice Every coin launched under `ticker`, oldest first. Graduated or not; the club weighs only the volume its collections book.
     function pairsOf(address ticker) external view returns (address[] memory) {
         return _pairsOf[ticker];
     }

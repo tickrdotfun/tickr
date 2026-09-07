@@ -30,7 +30,7 @@ function claim() returns (uint256);                                             
 function claimToken(address token) returns (uint256);                               // any ERC-20
 ```
 
-A collection splits by the terms frozen at launch, [06 fees](./06-fees.md). The coin side, every fee taken in the launched coin on sells, splits like the quote side: the creator's share and the tax go to the escrow in the coin, the protocol's and the club's shares are burned to `0x000000000000000000000000000000000000dEaD`; nobody is paid in the coin, so the burned supply of a coin is that address's balance. What a collection produced is in the `FeesCollected` event.
+A collection splits by the terms frozen at launch, [06 fees](./06-fees.md). The coin side, every fee taken in the launched coin on sells, splits like the quote side: the creator's share and the tax go to the escrow in the coin, the protocol's and the club's shares are burned to `0x000000000000000000000000000000000000dEaD`; nobody is paid in the coin, so the burned supply of a coin is that address's balance. What a collection produced is in the `FeesCollected` event. Under an invented ticker a collection also books the coin's club volume for the current epoch: the quote fees collected divided by the pool fee rate, so buy volume in the quote, booked when collected and not when traded.
 
 ## A coin under an invented name
 

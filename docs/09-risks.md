@@ -5,7 +5,7 @@ Read this before launching, buying, or integrating. Nothing here is advice.
 ## Market and token risks
 
 - **Names and symbols are not unique.** Anyone can launch "PEPE" with the same logo. The only identity is the token address. Verify it against `Factory.getLaunchedToken(token).exists` and the `TokenLaunched` log from the tickr factory address before trading.
-- **Creator tax.** A launch may carry a `creatorTaxBps` of up to `maxCreatorTaxBps()` (2% at deploy, 10% is the contract's cap) on every trade in its pool and every pool swap, forever. Read `getLaunchedToken(token).creatorTaxBps` before buying. It cannot be changed after creation, in either direction.
+- **Creator tax.** A launch may carry a `creatorTaxBps` of up to `maxCreatorTaxBps()` (2% at launch; the owner can raise that ceiling for later launches, never above 10%; TICKR itself carries 2%) on every trade in its pool and every pool swap, forever. Read `getLaunchedToken(token).creatorTaxBps` before buying. It cannot be changed after creation, in either direction.
 
 ## Pair risks
 
@@ -31,7 +31,7 @@ The factory is `Ownable2Step`. The owner can change the terms of future launches
 | power | function | reach |
 | --- | --- | --- |
 | Launch fee | `setLaunchFee` | Future launches only. |
-| Creator tax ceiling | `setMaxCreatorTaxBps` | Future launches only; the contract caps it at 10%, the deployed value is 2%. |
+| Creator tax ceiling | `setMaxCreatorTaxBps` | Future launches only. 2% at launch; the owner can raise it, never above 10%. A launch keeps the tax it was created with. |
 | Launch configs | `addLaunchConfig`, `setLaunchConfig` | Supply, base fee, opening quote reserve and tick spacing of future launches. |
 | Pair economics | `setPairTokenEconomics` | Which ERC-20s can be a pair through the factory and their opening quote reserve; future launches only. Revoking USDG stops USDG-quoted launches through the factory and, since invented tickers read it, new ticker launches too. |
 | Open or close launching | `setLaunchEnabled`, `setWhitelistedLauncher` | New launches only. Every existing pool keeps trading. A factory is born closed; genesis opens it and removes the deployer's own pass, so closing again later closes it for everyone. |

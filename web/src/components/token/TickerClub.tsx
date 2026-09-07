@@ -9,8 +9,8 @@ import { fmtAmount, pct, shortAddr } from "@/lib/format";
 import { TxStatus } from "../TxStatus";
 
 /**
- * The ticker club, as the table it is: every coin under this ticker, its thirty-day pool volume, and the weight
- * that volume gives it in the club's pots. The captain, the founder's coin while it trades, counts double. Nobody
+ * The ticker club, as the table it is: every coin under this ticker, the buy volume its fee collections booked over
+ * thirty days, and the weight that volume gives it in the club's pots. The captain, the founder's coin while it trades, counts double. Nobody
  * owns the ticker; this is the only thing a coin under it earns from the others.
  */
 export function TickerClub({ d }: { d: TokenData }) {
@@ -41,7 +41,7 @@ export function TickerClub({ d }: { d: TokenData }) {
   return (
     <div className="club">
       <p className="detail-note detail-note-tight">
-        10% of every fee under {qs} is shared by the creators of the other coins under it, by thirty-day volume. the founder&apos;s coin is captain and counts double while it trades.
+        10% of every fee under {qs} is shared by the creators of the other coins under it, by the buy volume their fee collections stand for, over the same thirty days. the founder&apos;s coin is captain and counts double while it trades.
       </p>
 
       {!c ? (
