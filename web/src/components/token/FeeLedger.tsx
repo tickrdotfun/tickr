@@ -45,18 +45,18 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
           label: "collect fees",
           request: async (w) => {
             const call = { abi: LaunchLockerAbi, address: ADDRESSES.launchLocker, functionName: "collectFees", args: [launch.token] } as const;
-            let gas: bigint | undefined;
-            if (client && user) {
-              try {
-                const d2 = gasWithHeadroom(await client.estimateContractGas({ ...call, account: user }));
-                if (!d2.ok) throw new Error(d2.reason);
-                gas = d2.gas;
-              } catch (e) {
-                // an estimate that will not resolve is not a reason to send blind; the wallet's own is the floor
-                if (e instanceof Error && /more gas than is safe/.test(e.message)) throw e;
-              }
-            }
-            return w({ ...call, ...(gas ? { gas } : {}) });
+            // No fallback to the wallet's own estimate. The wallet estimates without headroom and is subject
+            // to the same race: a sell landing between its estimate and inclusion adds the burn leg and the
+            // transaction fails on gas, having paid for the whole limit. If the limit cannot be established
+            // here, the collection does not go out.
+            if (!client) throw new Error("cannot reach the chain to size this transaction. try again in a moment.");
+            if (!user) throw new Error("connect a wallet to collect fees.");
+            const estimate = await client.estimateContractGas({ ...call, account: user }).catch(() => {
+              throw new Error("could not work out the gas this collection needs. try again in a moment.");
+            });
+            const sized = gasWithHeadroom(estimate);
+            if (!sized.ok) throw new Error(sized.reason);
+            return w({ ...call, gas: sized.gas });
           },
         },
       ])

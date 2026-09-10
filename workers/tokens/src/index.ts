@@ -8,12 +8,12 @@
  *
  * It holds no keys and signs nothing. Everything it reads is public.
  */
-import { createPublicClient, erc20Abi, getAddress, http, parseAbi, type Address, type PublicClient } from "viem";
+import { createPublicClient, encodeFunctionData, erc20Abi, getAddress, http, keccak256, parseAbi, type Address, type PublicClient } from "viem";
 
 /** Addresses arrive from configuration, where the checksum casing may be anything. */
 const addr = (a: string): Address => getAddress(a.toLowerCase());
 
-import { gasWithHeadroom, decideStart, afterResolve, type Pending } from "./keeper-policy";
+import { gasWithHeadroom, afterResolve, acquire, record, clear, release, type Pending, type LockState } from "./keeper-policy";
 
 type Env = {
   TICKR_KV: KVNamespace;
@@ -344,6 +344,10 @@ export class PinCounter {
   }
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    // the keeper's lease and its pending write live here rather than in KV: KV is eventually consistent, so two
+    // runs starting together can both read "no lease" and both proceed. A durable object answers one request at
+    // a time, which is what makes the check and the set a single indivisible step.
+    if (url.pathname.startsWith("/keeper")) return this.keeper(url, req);
     const limit = Number(url.searchParams.get("limit") ?? "30");
     const windowMs = Number(url.searchParams.get("window") ?? "3600000");
     const peek = url.searchParams.get("peek") === "1";
@@ -359,6 +363,33 @@ export class PinCounter {
       await this.state.storage.put("buckets", kept);
     }
     return Response.json({ allowed, count: allowed && !peek ? count + 1 : count, limit });
+  }
+
+  async keeper(url: URL, req: Request): Promise<Response> {
+    const state = ((await this.state.storage.get<LockState>("keeper")) ?? {}) as LockState;
+    const op = url.searchParams.get("op");
+    if (op === "acquire") {
+      const a = acquire(state, Date.now(), Number(url.searchParams.get("lease") ?? 300_000));
+      if (!a.ok) return Response.json({ ok: false, reason: a.reason });
+      await this.state.storage.put("keeper", a.state);
+      return Response.json({ ok: true, resolveFirst: a.resolveFirst ?? null });
+    }
+    if (op === "record") {
+      const p = (await req.json()) as Pending;
+      const r = record(state, p);
+      if (!r.ok) return Response.json({ ok: false, reason: r.reason });
+      await this.state.storage.put("keeper", r.state);
+      return Response.json({ ok: true });
+    }
+    if (op === "clear") {
+      await this.state.storage.put("keeper", clear(state));
+      return Response.json({ ok: true });
+    }
+    if (op === "release") {
+      await this.state.storage.put("keeper", release(state));
+      return Response.json({ ok: true });
+    }
+    return Response.json({ ok: false, reason: "unknown op" }, { status: 400 });
   }
 }
 async function counted(env: Env, name: string, rule: Rule, peek = false): Promise<Counted> {
@@ -469,104 +500,115 @@ async function keep(env: Env): Promise<string[]> {
   const wallet = createWalletClient({ account, chain, transport: paced });
   const pub = createPublicClient({ chain, transport: paced });
   const locker = env.KEEPER_LOCKER as `0x${string}`, treasury = env.KEEPER_TREASURY as `0x${string}`, coin = env.KEEPER_COIN as `0x${string}`, name = env.KEEPER_NAME as `0x${string}`;
-  const PENDING_KEY = "keeper:pending", LOCK_KEY = "keeper:lock";
-  const now = Date.now();
+  const lockStub = env.PIN_COUNTER.get(env.PIN_COUNTER.idFromName("keeper-lease"));
+  const lease = async (op: string, body?: unknown) =>
+    (await lockStub.fetch(new Request(`https://keeper/keeper?op=${op}`, body ? { method: "POST", body: JSON.stringify(body) } : undefined))).json() as Promise<{
+      ok: boolean;
+      reason?: string;
+      resolveFirst?: Pending | null;
+    }>;
 
-  // one run at a time. two overlapping runs would each read the same nonce and send against it.
-  const lockUntil = Number((await env.TICKR_KV.get(LOCK_KEY)) ?? 0) || undefined;
-  const carried = JSON.parse((await env.TICKR_KV.get(PENDING_KEY)) ?? "null") as Pending | null;
-  const start = decideStart(now, lockUntil, carried ?? undefined);
-  if (!start.run) {
-    out.push(`keeper: ${start.reason}`);
+  const got = await lease("acquire");
+  if (!got.ok) {
+    out.push(`keeper: ${got.reason}`);
     return out;
   }
-  await env.TICKR_KV.put(LOCK_KEY, String(now + 5 * 60_000), { expirationTtl: 600 });
 
-  // anything an earlier run left in flight is settled before this one writes
   let mayWrite = true;
-  if (start.resolveFirst) {
-    const p = start.resolveFirst;
+  // anything an earlier run signed is settled before this one signs anything
+  if (got.resolveFirst) {
+    const p = got.resolveFirst;
     let outcome;
     try {
       const rc = await pub.waitForTransactionReceipt({ hash: p.hash as `0x${string}`, timeout: 60_000 });
       outcome = { settled: true as const, status: rc.status };
-    } catch (e) {
-      outcome = { settled: false as const, reason: (e as Error).message?.slice(0, 60) ?? "no receipt" };
+    } catch {
+      // no receipt under that hash. if the account has moved past its nonce, something else took it and this
+      // attempt can never land; otherwise it may still be in flight and nothing more may be sent.
+      const seen = await pub.getTransactionCount({ address: account.address }).catch(() => undefined);
+      outcome =
+        seen !== undefined && seen > p.nonce
+          ? { settled: true as const, status: "reverted" as const }
+          : { settled: false as const, reason: "no receipt and the nonce is still open" };
     }
     const d = afterResolve(outcome);
     out.push(`${p.label} (from an earlier run): ${d.note} ${p.hash}`);
-    if (d.clear) await env.TICKR_KV.delete(PENDING_KEY);
+    if (d.clear) await lease("clear");
     mayWrite = d.mayWrite;
   }
 
   /**
-   * One write, recorded before it is waited on.
+   * One write: signed here, recorded, then broadcast.
    *
-   * The hash is persisted the moment it exists, so a run that dies between sending and confirming leaves
-   * something the next run can reconcile. Nothing is ever sent again from here; an attempt that does not
-   * resolve stops this run and every write after it.
+   * The order is the point. A broadcast the node accepted whose answer never came back is indistinguishable
+   * from one that never left, so the hash is computed and stored before anyone has seen the transaction. Any
+   * outcome that is not a clean receipt stops this run and every write after it.
    */
-  const step = async (label: string, fn: () => Promise<`0x${string}`>) => {
+  const step = async (label: string, call: { address: `0x${string}`; abi: readonly unknown[]; functionName: string; args?: readonly unknown[] }) => {
     if (!mayWrite) {
       out.push(`${label}: not attempted, an earlier send is unresolved`);
       return;
     }
-    let hash: `0x${string}`;
+    let signed: `0x${string}`, hash: `0x${string}`, nonce: number;
     try {
-      hash = await fn();
+      const estimate = await pub.estimateContractGas({ ...call, account } as Parameters<typeof pub.estimateContractGas>[0]);
+      const g = gasWithHeadroom(estimate);
+      if (!g.ok) {
+        out.push(`${label}: not sent (${g.reason})`);
+        return;
+      }
+      nonce = await pub.getTransactionCount({ address: account.address, blockTag: "pending" });
+      const data = encodeFunctionData({ abi: call.abi, functionName: call.functionName, args: call.args } as Parameters<typeof encodeFunctionData>[0]);
+      const request = await wallet.prepareTransactionRequest({ to: call.address, data, gas: g.gas, nonce, account, chain });
+      signed = await wallet.signTransaction(request as Parameters<typeof wallet.signTransaction>[0]);
+      hash = keccak256(signed);
     } catch (e) {
+      // nothing was broadcast: preparing or signing failed, so no transaction exists to be ambiguous about
       out.push(`${label}: not sent (${(e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 80)})`);
       return;
     }
-    await env.TICKR_KV.put(PENDING_KEY, JSON.stringify({ label, hash, at: Date.now() } satisfies Pending));
+
+    const rec = await lease("record", { label, hash, nonce, at: Date.now() } satisfies Pending);
+    if (!rec.ok) {
+      out.push(`${label}: not sent (${rec.reason})`);
+      mayWrite = false;
+      return;
+    }
+
+    try {
+      await pub.sendRawTransaction({ serializedTransaction: signed });
+    } catch (e) {
+      // the node refused, or the answer was lost. Either way this transaction may be in flight under a hash we
+      // already hold, so it is left recorded and nothing else is written.
+      mayWrite = false;
+      out.push(`${label}: send ambiguous ${hash} (${(e as Error).message?.slice(0, 60)}); later steps skipped`);
+      return;
+    }
+
     try {
       const rc = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 });
-      await env.TICKR_KV.delete(PENDING_KEY);
+      await lease("clear");
       out.push(`${label}: ${rc.status} ${hash}`);
     } catch (e) {
-      // the send happened and its answer did not. the record stays, and nothing else is written until it settles.
       mayWrite = false;
       out.push(`${label}: unresolved ${hash} (${(e as Error).message?.slice(0, 60)}); later steps skipped`);
     }
   };
 
-  /**
-   * The gas limit for a write: estimated at the last moment, doubled, and refused if that does not fit.
-   *
-   * Clipping to the ceiling would send less gas than the estimate asked for, which buys a failure. Over the
-   * ceiling the work is larger than the keeper should send unattended.
-   */
-  const gasFor = async (params: Parameters<typeof pub.estimateContractGas>[0]) => {
-    const estimate = await pub.estimateContractGas({ ...params, account } as Parameters<typeof pub.estimateContractGas>[0]);
-    const d = gasWithHeadroom(estimate);
-    if (!d.ok) throw new Error(d.reason);
-    return d.gas;
-  };
-
   // 1. the pool's fees, only when there is something to collect
   const pending = await pub.readContract({ address: locker, abi: LOCKER_ABI, functionName: "pendingFees", args: [coin] }).catch(() => [0n, 0n] as const);
-  if (pending[0] > 0n || pending[1] > 0n) {
-    await step("collectFees", async () => {
-      const call = { address: locker, abi: LOCKER_ABI, functionName: "collectFees", args: [coin] } as const;
-      return wallet.writeContract({ ...call, gas: await gasFor(call) });
-    });
-  }
+  if (pending[0] > 0n || pending[1] > 0n) await step("collectFees", { address: locker, abi: LOCKER_ABI, functionName: "collectFees", args: [coin] });
   else out.push("collectFees: nothing pending");
   // 2. the treasury's cut, converted
-  await step("treasury.collect", async () => {
-    const call = { address: treasury, abi: TREASURY_ABI, functionName: "collect", args: [[name]] } as const;
-    return wallet.writeContract({ ...call, gas: await gasFor(call) });
-  });
+  await step("treasury.collect", { address: treasury, abi: TREASURY_ABI, functionName: "collect", args: [[name]] });
   // 3. a buy, when its interval has passed and dollars are set aside
   const [next, earmarked] = await Promise.all([
     pub.readContract({ address: treasury, abi: TREASURY_ABI, functionName: "nextBuyAt" }).catch(() => 0n),
     pub.readContract({ address: treasury, abi: TREASURY_ABI, functionName: "earmarkedUsdg" }).catch(() => 0n),
   ]);
-  if (earmarked > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next) await step("treasury.buy", async () => {
-    const call = { address: treasury, abi: TREASURY_ABI, functionName: "buy" } as const;
-    return wallet.writeContract({ ...call, gas: await gasFor(call) });
-  });
+  if (earmarked > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next) await step("treasury.buy", { address: treasury, abi: TREASURY_ABI, functionName: "buy" });
   else out.push(`treasury.buy: waiting (earmarked ${earmarked}, next at ${next})`);
+  await lease("release");
   return out;
 }
 

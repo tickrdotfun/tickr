@@ -29,8 +29,15 @@ export function gasWithHeadroom(estimate: bigint, ceiling: bigint = GAS_CEILING)
   return { ok: true, gas: padded };
 }
 
-/** A write this keeper sent and has not yet seen resolve. */
-export type Pending = { label: string; hash: string; at: number };
+/**
+ * A write this keeper has signed. Recorded BEFORE the broadcast, never after.
+ *
+ * A broadcast the node accepted whose answer was lost looks, from here, exactly like one that never left. The
+ * only way to recognise it later is to know the hash beforehand, which is why the transaction is signed locally
+ * first: the hash of a signed transaction is fixed before anyone sees it. The nonce is kept alongside so a run
+ * can tell "it landed" from "that nonce is still free".
+ */
+export type Pending = { label: string; hash: string; nonce: number; at: number };
 
 export type StartDecision =
   | { run: true; resolveFirst?: Pending }
@@ -61,4 +68,54 @@ export function afterResolve(o: ResolveOutcome): { clear: boolean; mayWrite: boo
   if (o.settled) return { clear: true, mayWrite: true, note: `resolved: ${o.status}` };
   // still unknown: keep the record and write nothing this run
   return { clear: false, mayWrite: false, note: `unresolved (${o.reason}); no writes until it settles` };
+}
+
+
+/* ------------------------------------------------------------------ the lease and the record, as transitions
+
+   These run inside a Durable Object, one instance, one request at a time. Expressed as pure functions so the
+   ordering they depend on can be tested directly rather than inferred from a live worker.
+   ------------------------------------------------------------------ */
+
+export type LockState = { leaseUntil?: number; pending?: Pending };
+
+export type Acquired =
+  | { ok: true; state: LockState; resolveFirst?: Pending }
+  | { ok: false; reason: string };
+
+/**
+ * Take the lease, or refuse.
+ *
+ * Two runs firing together both reach this; the object serialises them, so the first sets `leaseUntil` and the
+ * second sees it and is turned away. A lease that has expired is taken over: a run that died holding one must
+ * not lock the keeper out forever. Whatever the last run left pending comes back with the lease, because it has
+ * to be settled before this run writes anything.
+ */
+export function acquire(state: LockState, now: number, leaseMs: number): Acquired {
+  if (state.leaseUntil !== undefined && state.leaseUntil > now) {
+    return { ok: false, reason: `another run holds the lease for ${Math.ceil((state.leaseUntil - now) / 1000)}s` };
+  }
+  return {
+    ok: true,
+    state: { ...state, leaseUntil: now + leaseMs },
+    ...(state.pending ? { resolveFirst: state.pending } : {}),
+  };
+}
+
+/** Record a signed write. Refuses to overwrite one that is still unsettled. */
+export function record(state: LockState, p: Pending): { ok: boolean; state: LockState; reason?: string } {
+  if (state.pending) {
+    return { ok: false, state, reason: `a write is already pending (${state.pending.label} ${state.pending.hash})` };
+  }
+  return { ok: true, state: { ...state, pending: p } };
+}
+
+export function clear(state: LockState): LockState {
+  const { pending: _drop, ...rest } = state;
+  return rest;
+}
+
+export function release(state: LockState): LockState {
+  const { leaseUntil: _drop, ...rest } = state;
+  return rest;
 }
