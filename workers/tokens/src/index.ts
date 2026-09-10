@@ -366,9 +366,18 @@ export class PinCounter {
   }
 
   async keeper(url: URL, req: Request): Promise<Response> {
-    const state = ((await this.state.storage.get<LockState>("keeper")) ?? {}) as LockState;
     const op = url.searchParams.get("op");
     const token = url.searchParams.get("token") ?? "";
+
+    // The body is drained BEFORE the state is read, and nothing is awaited between the read and the write.
+    //
+    // Reading a request body is inbound I/O and can take arbitrarily long; awaiting it after loading the state
+    // leaves a window in which another run can take the lease over. The ownership check would then run against
+    // a snapshot in which this run still held it, and a stale run's write would be accepted. Storage calls are
+    // gated by the object, so read → decide → put is indivisible; the body is the one await that is not.
+    const body = op === "record" ? ((await req.json()) as Pending) : undefined;
+
+    const state = ((await this.state.storage.get<LockState>("keeper")) ?? {}) as LockState;
     if (op === "acquire") {
       const a = acquire(state, Date.now(), Number(url.searchParams.get("lease") ?? 300_000), token);
       if (!a.ok) return Response.json({ ok: false, reason: a.reason });
@@ -376,7 +385,8 @@ export class PinCounter {
       return Response.json({ ok: true, token: a.token, resolveFirst: a.resolveFirst ?? null });
     }
     if (op === "record") {
-      const r = record(state, (await req.json()) as Pending, token);
+      if (!body) return Response.json({ ok: false, reason: "no write was supplied" });
+      const r = record(state, body, token);
       if (!r.ok) return Response.json({ ok: false, reason: r.reason });
       await this.state.storage.put("keeper", r.state);
       return Response.json({ ok: true });
@@ -452,32 +462,47 @@ const TREASURY_ABI = [{ type: "function", name: "collect", stateMutability: "non
   { type: "function", name: "nextBuyAt", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "earmarkedUsdg", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] }] as const;
 /**
- * The transaction from `who` that used `nonce`, found by walking back over recent blocks.
+ * The transaction from `who` that used `nonce`, and what it did.
  *
- * There is no way to ask a node "which transaction had this nonce"; the only honest answer comes from looking.
- * The window is bounded, so a nonce consumed long ago is reported as not found rather than searched for
- * forever, and not found means the keeper stays blocked rather than assuming.
+ * There is no way to ask a node "which transaction had this nonce", so it has to be found. A linear walk back
+ * from the head is the obvious way and the wrong one here: reconciliation happens on the *next* scheduled run,
+ * ten minutes later, and at roughly a tenth of a second per block that is about six thousand blocks ago. A
+ * window of a couple of hundred blocks covers twenty seconds and would therefore never find anything, leaving
+ * the keeper permanently blocked for a reason that sounded like caution but was arithmetic.
+ *
+ * Instead: `getTransactionCount` at a past block says how many transactions the account had sent by then, which
+ * is monotonic, so the block that consumed a given nonce can be found by bisection in about fifteen calls
+ * however far back it is. Only that one block is then fetched in full.
  */
 async function findByNonce(
-  pub: { getBlock: (a: { blockNumber: bigint; includeTransactions: true }) => Promise<{ transactions: { from: string; nonce: number; hash: `0x${string}` }[] }>; getTransactionReceipt: (a: { hash: `0x${string}` }) => Promise<{ status: "success" | "reverted" }> },
-  who: string,
+  pub: {
+    getTransactionCount: (a: { address: `0x${string}`; blockNumber: bigint }) => Promise<number>;
+    getBlock: (a: { blockNumber: bigint; includeTransactions: true }) => Promise<{ transactions: { from: string; nonce: number; hash: `0x${string}` }[] }>;
+    getTransactionReceipt: (a: { hash: `0x${string}` }) => Promise<{ status: "success" | "reverted" }>;
+  },
+  who: `0x${string}`,
   nonce: number,
   head: bigint,
-  window = 200n,
+  lookback = 60_000n,
 ): Promise<{ hash: `0x${string}`; status: "success" | "reverted" } | undefined> {
-  const lower = head > window ? head - window : 0n;
-  for (let n = head; n >= lower; n--) {
-    const block = await pub.getBlock({ blockNumber: n, includeTransactions: true }).catch(() => undefined);
-    if (!block) continue;
-    const hit = block.transactions.find((t) => t.from?.toLowerCase() === who.toLowerCase() && t.nonce === nonce);
-    if (hit) {
-      const rc = await pub.getTransactionReceipt({ hash: hit.hash }).catch(() => undefined);
-      if (!rc) return undefined;
-      return { hash: hit.hash, status: rc.status };
-    }
-    if (n === 0n) break;
+  let lo = head > lookback ? head - lookback : 0n;
+  let hi = head;
+  // the account must already have been past this nonce by `hi`, and not yet past it at `lo`
+  const atLo = await pub.getTransactionCount({ address: who, blockNumber: lo }).catch(() => undefined);
+  if (atLo === undefined || atLo > nonce) return undefined; // consumed before the window: not ours to guess at
+  while (lo < hi) {
+    const mid = lo + (hi - lo) / 2n;
+    const count = await pub.getTransactionCount({ address: who, blockNumber: mid }).catch(() => undefined);
+    if (count === undefined) return undefined;
+    if (count > nonce) hi = mid;
+    else lo = mid + 1n;
   }
-  return undefined;
+  const block = await pub.getBlock({ blockNumber: lo, includeTransactions: true }).catch(() => undefined);
+  if (!block) return undefined;
+  const hit = block.transactions.find((t) => t.from?.toLowerCase() === who.toLowerCase() && t.nonce === nonce);
+  if (!hit) return undefined;
+  const rc = await pub.getTransactionReceipt({ hash: hit.hash }).catch(() => undefined);
+  return rc ? { hash: hit.hash, status: rc.status } : undefined;
 }
 
 async function keep(env: Env): Promise<string[]> {
@@ -543,6 +568,21 @@ async function keep(env: Env): Promise<string[]> {
       new Request(`https://keeper/keeper?op=${op}&token=${myToken}${extra}`, body ? { method: "POST", body: JSON.stringify(body) } : undefined),
     )).json() as Promise<{ ok: boolean; reason?: string; resolveFirst?: Pending | null }>;
 
+  /**
+   * Something a person has to look at.
+   *
+   * A blocked keeper stops collecting fees and stops the buyback, and it will stay stopped until someone
+   * resolves the transaction it is waiting on: by design, since the alternative is guessing. So it is logged as
+   * its own structured record rather than as one line among the run's notes, with the hash and nonce needed to
+   * look it up and the reason it could not be settled.
+   */
+  const alerts: Record<string, unknown>[] = [];
+  const alert = (what: string, fields: Record<string, unknown>) => {
+    const a = { alert: "keeper blocked", what, account: account.address, ...fields, at: new Date().toISOString() };
+    alerts.push(a);
+    console.error(JSON.stringify(a));
+  };
+
   const got = await lease("acquire");
   if (!got.ok) {
     out.push(`keeper: ${got.reason}`);
@@ -567,7 +607,7 @@ async function keep(env: Env): Promise<string[]> {
       if (seen === undefined || seen <= p.nonce) {
         outcome = { settled: false as const, reason: "no receipt, and that nonce is still unused" };
       } else {
-        const found = await findByNonce(pub, account.address, p.nonce, await pub.getBlockNumber().catch(() => 0n));
+        const found = await findByNonce(pub as never, account.address, p.nonce, await pub.getBlockNumber().catch(() => 0n));
         if (!found) {
           outcome = {
             settled: false as const,
@@ -582,6 +622,7 @@ async function keep(env: Env): Promise<string[]> {
     const d = afterResolve(outcome);
     out.push(`${p.label} (from an earlier run): ${d.note} ${p.hash}`);
     if (d.clear) await lease("clear", `&hash=${p.hash}`);
+    else alert(`${p.label} is unresolved`, { hash: p.hash, nonce: p.nonce, sentAt: new Date(p.at).toISOString(), detail: d.note });
     mayWrite = d.mayWrite;
   }
 
@@ -630,6 +671,7 @@ async function keep(env: Env): Promise<string[]> {
       // already hold, so it is left recorded and nothing else is written.
       mayWrite = false;
       out.push(`${label}: send ambiguous ${hash} (${(e as Error).message?.slice(0, 60)}); later steps skipped`);
+      alert(`${label} may or may not have been broadcast`, { hash, nonce, detail: (e as Error).message?.slice(0, 120) });
       return;
     }
 
@@ -640,6 +682,7 @@ async function keep(env: Env): Promise<string[]> {
     } catch (e) {
       mayWrite = false;
       out.push(`${label}: unresolved ${hash} (${(e as Error).message?.slice(0, 60)}); later steps skipped`);
+      alert(`${label} was sent but never confirmed`, { hash, nonce, detail: (e as Error).message?.slice(0, 120) });
     }
   };
 
@@ -657,6 +700,7 @@ async function keep(env: Env): Promise<string[]> {
   if (earmarked > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next) await step("treasury.buy", { address: treasury, abi: TREASURY_ABI, functionName: "buy" });
   else out.push(`treasury.buy: waiting (earmarked ${earmarked}, next at ${next})`);
   await lease("release");
+  if (alerts.length > 0) out.unshift(`BLOCKED: ${alerts.length} unresolved; the keeper will not write again until settled`);
   return out;
 }
 

@@ -157,6 +157,64 @@ try {
     assert.ok(/another run holds the lease/.test(third.reason));
   });
 
+  await t("a record whose body arrives late, after a takeover, is refused", async () => {
+    const i = inst("slowbody");
+
+    // run A takes a short lease
+    const a = await call("acquire", { ...i, token: A, lease: "40" });
+    assert.equal(a.ok, true);
+
+    // A starts recording, but its body trickles in. This is the window that used to be exploitable: the state
+    // was read first, so the ownership check saw A still holding the lease no matter what happened meanwhile.
+    const payload = JSON.stringify({ label: "collectFees", hash: "0xslow", nonce: 21, at: 1 });
+    let releaseBody;
+    const bodyArrived = new Promise((r) => { releaseBody = r; });
+    const slow = new ReadableStream({
+      async pull(c) {
+        await bodyArrived;
+        c.enqueue(new TextEncoder().encode(payload));
+        c.close();
+      },
+    });
+    const qs = new URLSearchParams({ op: "record", ...i, token: A }).toString();
+    const inFlight = worker.fetch(`https://x/?${qs}`, { method: "POST", body: slow, duplex: "half" });
+
+    // while A's body is still in the air, its lease lapses and B takes over
+    await new Promise((r) => setTimeout(r, 80));
+    const b = await call("acquire", { ...i, token: B });
+    assert.equal(b.ok, true, "B takes over the expired lease");
+
+    // now A's body finally lands
+    releaseBody();
+    const late = await (await inFlight).json();
+
+    assert.equal(late.ok, false, "the late write must be refused: A no longer holds the lease");
+    assert.ok(/taken over/.test(late.reason), late.reason);
+
+    const s2 = await call("peek", i);
+    assert.equal(s2.state.owner, B, "the lease is B's");
+    assert.equal(s2.state.pending, undefined, "and A's write was never recorded");
+  });
+
+  await t("the same run, body delayed but lease still held, still works", async () => {
+    const i = inst("slowbody-ok");
+    const a = await call("acquire", { ...i, token: A });
+    assert.equal(a.ok, true);
+    const payload = JSON.stringify({ label: "collectFees", hash: "0xfine", nonce: 22, at: 2 });
+    let go;
+    const gate = new Promise((r) => { go = r; });
+    const slow = new ReadableStream({
+      async pull(c) { await gate; c.enqueue(new TextEncoder().encode(payload)); c.close(); },
+    });
+    const qs = new URLSearchParams({ op: "record", ...i, token: A }).toString();
+    const inFlight = worker.fetch(`https://x/?${qs}`, { method: "POST", body: slow, duplex: "half" });
+    await new Promise((r) => setTimeout(r, 60));
+    go();
+    const r = await (await inFlight).json();
+    assert.equal(r.ok, true, "a slow body is not itself a failure");
+    assert.equal((await call("peek", i)).state.pending.hash, "0xfine");
+  });
+
   console.log(`\ndurable object: ${n} checks passed`);
 } finally {
   try { await worker.stop(); } catch {}
