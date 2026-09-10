@@ -215,6 +215,30 @@ try {
     assert.equal((await call("peek", i)).state.pending.hash, "0xfine");
   });
 
+  await t("one failed run is quiet, two in a row raise an alarm", async () => {
+    const one = await (await worker.fetch("https://x/?op=policy&outcomes=could not")).json();
+    assert.equal(one.alarms[0], undefined, "a single failure is not yet a pattern");
+
+    const two = await (await worker.fetch("https://x/?op=policy&outcomes=could not,could not")).json();
+    assert.ok(/2 consecutive runs could not do any work/.test(two.alarms[1]), two.alarms[1]);
+    assert.ok(/estimate would not resolve/.test(two.alarms[1]), "the alarm says what went wrong");
+
+    const reset = await (await worker.fetch("https://x/?op=policy&outcomes=could not,worked,could not")).json();
+    assert.equal(reset.alarms[2], undefined, "a run that worked clears the streak");
+    assert.equal(reset.history.consecutiveNoWork, 1);
+
+    const idle = await (await worker.fetch("https://x/?op=policy&outcomes=nothing to do,nothing to do,nothing to do")).json();
+    assert.equal(idle.alarms.filter(Boolean).length, 0, "having nothing to do is not a failure");
+  });
+
+  await t("a balance below one cycle is reported before the cycle is tried", async () => {
+    const short = await (await worker.fetch("https://x/?op=policy&balance=50362000000000&need=460000000000000")).json();
+    assert.ok(/below the 460000000000000 wei one cycle needs/.test(short.low), short.low);
+
+    const fine = await (await worker.fetch("https://x/?op=policy&balance=1500000000000000&need=460000000000000")).json();
+    assert.equal(fine.low, null, "a funded keeper says nothing");
+  });
+
   console.log(`\ndurable object: ${n} checks passed`);
 } finally {
   try { await worker.stop(); } catch {}

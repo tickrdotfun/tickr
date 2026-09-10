@@ -13,7 +13,7 @@ import { createPublicClient, encodeFunctionData, erc20Abi, getAddress, http, kec
 /** Addresses arrive from configuration, where the checksum casing may be anything. */
 const addr = (a: string): Address => getAddress(a.toLowerCase());
 
-import { gasWithHeadroom, afterResolve, acquire, record, clear, release, type Pending, type LockState } from "./keeper-policy";
+import { gasWithHeadroom, afterResolve, acquire, record, clear, release, noteRun, balanceWarning, type Pending, type LockState, type RunHistory, type WorkOutcome } from "./keeper-policy";
 
 type Env = {
   TICKR_KV: KVNamespace;
@@ -577,11 +577,16 @@ async function keep(env: Env): Promise<string[]> {
    * look it up and the reason it could not be settled.
    */
   const alerts: Record<string, unknown>[] = [];
-  const alert = (what: string, fields: Record<string, unknown>) => {
-    const a = { alert: "keeper blocked", what, account: account.address, ...fields, at: new Date().toISOString() };
-    alerts.push(a);
+  const alert = (what: string, fields: Record<string, unknown>, kind: "keeper blocked" | "keeper needs attention" = "keeper blocked") => {
+    const a = { alert: kind, what, account: account.address, ...fields, at: new Date().toISOString() };
+    if (kind === "keeper blocked") alerts.push(a);
     console.error(JSON.stringify(a));
   };
+
+  // what this run managed, and what the ones before it managed
+  const HISTORY_KEY = "keeper:history";
+  const history = JSON.parse((await env.TICKR_KV.get(HISTORY_KEY)) ?? "null") as RunHistory | null;
+  let didWork = false, couldNot = 0, firstProblem: string | undefined;
 
   const got = await lease("acquire");
   if (!got.ok) {
@@ -644,6 +649,7 @@ async function keep(env: Env): Promise<string[]> {
       const g = gasWithHeadroom(estimate);
       if (!g.ok) {
         out.push(`${label}: not sent (${g.reason})`);
+        couldNot++; firstProblem ??= `${label}: ${g.reason}`;
         return;
       }
       nonce = await pub.getTransactionCount({ address: account.address, blockTag: "pending" });
@@ -653,7 +659,9 @@ async function keep(env: Env): Promise<string[]> {
       hash = keccak256(signed);
     } catch (e) {
       // nothing was broadcast: preparing or signing failed, so no transaction exists to be ambiguous about
-      out.push(`${label}: not sent (${(e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 80)})`);
+      const why = (e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 80);
+      out.push(`${label}: not sent (${why})`);
+      couldNot++; firstProblem ??= `${label}: ${why}`;
       return;
     }
 
@@ -678,6 +686,7 @@ async function keep(env: Env): Promise<string[]> {
     try {
       const rc = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 });
       await lease("clear", `&hash=${hash}`);
+      didWork = true;
       out.push(`${label}: ${rc.status} ${hash}`);
     } catch (e) {
       mayWrite = false;
@@ -699,6 +708,21 @@ async function keep(env: Env): Promise<string[]> {
   ]);
   if (earmarked > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next) await step("treasury.buy", { address: treasury, abi: TREASURY_ABI, functionName: "buy" });
   else out.push(`treasury.buy: waiting (earmarked ${earmarked}, next at ${next})`);
+  // a balance that cannot cover a cycle is worth saying before it is worth failing over
+  const bal = await pub.getBalance({ address: account.address }).catch(() => 0n);
+  const NEED_WEI = 460_000_000_000_000n; // one cycle's limits at twice the base fee, measured on a fork
+  const low = balanceWarning(bal, NEED_WEI);
+  if (low) {
+    out.push(low);
+    alert("the keeper cannot afford a full cycle", { balanceWei: bal.toString(), needWei: NEED_WEI.toString(), fundAt: account.address }, "keeper needs attention");
+  }
+
+  const outcome: WorkOutcome = didWork ? "worked" : couldNot > 0 ? "could not" : "nothing to do";
+  const noted = noteRun(history ?? { consecutiveNoWork: 0 }, outcome, firstProblem);
+  await env.TICKR_KV.put(HISTORY_KEY, JSON.stringify(noted.history));
+  if (noted.alarm) alert("the keeper has stopped doing work", { detail: noted.alarm, runs: noted.history.consecutiveNoWork }, "keeper needs attention");
+  out.push(`run outcome: ${outcome}${noted.alarm ? `, ${noted.alarm}` : ""}`);
+
   await lease("release");
   if (alerts.length > 0) out.unshift(`BLOCKED: ${alerts.length} unresolved; the keeper will not write again until settled`);
   return out;

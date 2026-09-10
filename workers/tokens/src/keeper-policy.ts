@@ -155,3 +155,37 @@ export function release(state: LockState, token: string): { ok: true; state: Loc
   const { leaseUntil: _l, owner: _o, ...rest } = state;
   return { ok: true, state: rest };
 }
+
+
+/* ------------------------------------------------------------------ noticing a keeper that does nothing
+
+   A run that sends nothing is not obviously wrong: there may simply be no fees to collect and no buy due. But a
+   run that *wanted* to work and could not is a different thing, and two of those in a row is a keeper that has
+   quietly stopped. Neither shows up as an error, so neither would be noticed.
+   ------------------------------------------------------------------ */
+
+/** What a run did, kept across runs so a pattern can be seen. */
+export type RunHistory = { consecutiveNoWork: number; lastNote?: string };
+
+export type WorkOutcome = "worked" | "nothing to do" | "could not";
+
+/**
+ * Whether this run should raise an alarm, given what it managed and what the runs before it managed.
+ *
+ * "could not" is a preparation failure: an estimate that would not resolve, a gas limit the balance cannot
+ * cover, a call that reverts before it is sent. One is noise. Two in a row is the keeper not running, and it
+ * will stay that way until someone looks.
+ */
+export function noteRun(history: RunHistory, outcome: WorkOutcome, detail?: string): { history: RunHistory; alarm?: string } {
+  if (outcome !== "could not") return { history: { consecutiveNoWork: 0, lastNote: detail } };
+  const n = history.consecutiveNoWork + 1;
+  const next = { consecutiveNoWork: n, lastNote: detail };
+  if (n >= 2) return { history: next, alarm: `${n} consecutive runs could not do any work (${detail ?? "no detail"})` };
+  return { history: next };
+}
+
+/** The balance below which a run cannot be expected to complete, and should say so before it tries. */
+export function balanceWarning(balanceWei: bigint, needWei: bigint): string | undefined {
+  if (balanceWei >= needWei) return undefined;
+  return `keeper balance ${balanceWei} wei is below the ${needWei} wei one cycle needs`;
+}
