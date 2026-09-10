@@ -4,7 +4,7 @@ There is no curve contract. The launch position is the curve: one Uniswap v4 pos
 
 ## The opening price
 
-Each pair has a `phantomQuote`, call it `P`: 1.68 ETH for ETH, 3,236 USDG for USDG and invented tickers, and for a Stock Token or a coin the amount its launcher derives from the live price at launch (see [04](./04-custom-pairs.md), [10](./10-coin-quotes.md), [11](./11-stock-quotes.md)). With `S` the supply, always 1,000,000,000 coins, the pool opens at
+Each pair has a `phantomQuote`, call it `P`: 1.68 ETH for ETH, 3,236 USDG for USDG and redeemable names, 3,236 of the name for a fixed-inventory name, and for a Stock Token or a coin the amount its launcher derives from the live price at launch (see [04](./04-custom-pairs.md), [10](./10-coin-quotes.md), [11](./11-stock-quotes.md)). With `S` the supply, always 1,000,000,000 coins, the pool opens at
 
 ```
 p0 = P / S    quote per coin
@@ -32,7 +32,7 @@ For the ETH pair, `P = 1.68 ETH`:
 | 5 ETH | 26.6 ETH | 74.9% |
 | 20 ETH | 280 ETH | 92.3% |
 
-For the USDG pair and every invented ticker, `P = 3,236 USDG`:
+For the USDG pair and every redeemable name, `P = 3,236 USDG`:
 
 | quote in `q` | market cap | sold |
 | --- | --- | --- |
@@ -41,11 +41,17 @@ For the USDG pair and every invented ticker, `P = 3,236 USDG`:
 | 8,090 USDG | 39,640 USDG | 71.4% |
 | 50,000 USDG | 875,900 USDG | 93.9% |
 
+Under a fixed-inventory name the same table applies with `P = 3,236` of the name. `MarketTickerLauncher.economics()`
+hands the launch USDG's own `phantomQuote` with the name's decimals, which are also 6, so a market opens at parity
+in raw units. The number is the same; what it is worth is not. 3,236 USDG is 3,236 dollars by construction, and
+3,236 of a fixed-inventory name is 3,236 dollars only while that name happens to trade at a dollar. Read the
+opening market cap of such a coin in the name, and convert it through the name's own pool if you want dollars.
+
 Nothing about this is special to tickr. It is the standard shape of a one-sided Uniswap v3 or v4 position, which is how most launchpads open a token. The table is before fees: a buy pays the LP fee on the quote it puts in and the remainder moves the price, so `q` is the quote net of fees.
 
 ## Fees in the math
 
-The pool's LP fee is `(100 + creatorTaxBps)` in bps, so 1% with no tax and up to 3% with the maximum tax. Uniswap takes it from the input of every swap: a buy of `x` quote moves the price with `x * (1 - fee)` and books `x * fee` of quote to the position; a sell of `y` coins moves the price with `y * (1 - fee)` and books `y * fee` of coins to the position. Those booked amounts are what `LaunchLocker.collectFees` pays out.
+The pool's LP fee is `(baseFeeBps + creatorTaxBps)` in bps. On the standard path the base is 100, so 1% with no tax and up to 3% with the maximum tax. Under a fixed-inventory name the base is a frozen 82 and the creator tax is always zero, so the fee is exactly 0.82% and nothing else is possible. Uniswap takes it from the input of every swap: a buy of `x` quote moves the price with `x * (1 - fee)` and books `x * fee` of quote to the position; a sell of `y` coins moves the price with `y * (1 - fee)` and books `y * fee` of coins to the position. Those booked amounts are what `LaunchLocker.collectFees` pays out.
 
 ## Reading the price
 

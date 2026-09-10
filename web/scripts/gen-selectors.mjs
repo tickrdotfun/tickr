@@ -39,6 +39,14 @@ const OURS = [
   "ZapRouter",
   "BuybackTreasury",
   "BuybackVault",
+  // the market release: the second kind of name, its issuer, the registry that tells the kinds apart,
+  // the router that refuses an exhausted route, and the treasury that converts a name through its own market
+  "MarketTickerLauncher",
+  "MarketTickerDeployer",
+  "QuoteMarketLocker",
+  "QuoteRegistry",
+  "MarketZapRouter",
+  "BuybackTreasuryV2",
 ];
 const UNISWAP = { name: "PoolManager", events: ["Initialize", "ModifyLiquidity", "Swap"] };
 

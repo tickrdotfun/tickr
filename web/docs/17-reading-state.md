@@ -65,7 +65,7 @@ function balanceOf(address recipient) view returns (uint256);                   
 function balanceOfToken(address recipient, address token) view returns (uint256);   // any ERC-20
 ```
 
-## Invented tickers
+## Redeemable names
 
 ```solidity
 // TickerLauncher
@@ -97,7 +97,27 @@ function issuer() view returns (address);                   // the ticker launch
 
 `totalSupply()` of a wrapper counts its own unsold inventory, which is neither owed to anyone nor backed until sold; read `circulatingSupply()` for what is out.
 
-The club: `pot(ticker, epoch, coin)`, `volumeOf(coin, epoch)` (booked when the coin's fees are collected, as the quote fees collected divided by the pool fee rate: buy volume in the quote, in the epoch of the collection), `clubVolume(ticker, epoch)`, `claimable(member, payers, epoch)`, `claimClub(member, payers, epoch)`, `sweepDeadPot(coin, epoch)`, `currentEpoch()`; epochs are thirty days. See [05 invented tickers](./05-anchors.md).
+The club: `pot(ticker, epoch, coin)`, `volumeOf(coin, epoch)` (booked when the coin's fees are collected, as the quote fees collected divided by the pool fee rate: buy volume in the quote, in the epoch of the collection), `clubVolume(ticker, epoch)`, `claimable(member, payers, epoch)`, `claimClub(member, payers, epoch)`, `sweepDeadPot(coin, epoch)`, `currentEpoch()`; epochs are thirty days. See [05 redeemable names](./05-anchors.md).
+
+## Which kind of name a quote asset is
+
+Do not infer it from the token. Ask the registry, which answers by provenance: which issuer deployed the name.
+
+```solidity
+QuoteRegistry.kindOf(address name) returns (uint8)
+// 0 unknown          neither issuer made it, or it predates the registry
+// 1 redeemable       TickerLauncher: a one-for-one USDG wrapper, mint and redeem
+// 2 fixed inventory  MarketTickerDeployer: 500,000,000 at 6 decimals, its own market, no redeem
+```
+
+`0` is not an error and must not be treated as one. FUN, the name TICKR is priced in, returns `0` because it
+predates the registry, and everything on chain that reads this treats an unclassified name the way it always
+did: as a redeemable wrapper, which is what FUN is. `TickerLauncher.isTicker(addr)` still answers the same
+question for the redeemable kind alone and is what the site keys its pricing on today.
+
+Pricing consequence worth knowing before you integrate: a redeemable name is worth one USDG by construction, so
+you may price it at a dollar. A fixed-inventory name is worth whatever its own USDG pool says, so you must read
+that pool. Pricing one at a dollar is wrong and will misreport every coin quoted in it.
 
 ## The coin itself
 

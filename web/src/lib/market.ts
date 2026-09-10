@@ -308,7 +308,8 @@ async function usdRates(
     });
   }
 
-  // an invented ticker is a one-for-one wrapper of USDG, so its price is USDG's price, by construction
+  // a redeemable name is a one-for-one wrapper of USDG, so its price is USDG's price, by construction. this is
+  // keyed on TickerLauncher.isTicker, so a fixed-inventory name never reaches here and is never priced at a dollar
   const tickers = quotes.filter((a) => info.get(a.toLowerCase())?.kind === "ticker");
   if (tickers.length) {
     const usdgRate = out.get(ADDRESSES.usdg.toLowerCase());

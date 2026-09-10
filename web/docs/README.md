@@ -14,7 +14,7 @@ Source: [github.com/tickrdotfun/tickr](https://github.com/tickrdotfun/tickr). Th
 | [03 Price and market cap](./03-curve-math.md) | the one-sided position as a constant product curve, opening market caps, fees in the math |
 | [04 ETH, USDG and Stock Tokens](./04-custom-pairs.md) | mode 1. the three official quote assets, per-asset economics, the `expectedEconomics` pin, native vs ERC-20 calling conventions |
 | [20 Reference versus production](./20-reference-alignment.md) | what the managed ticker system keeps from the reference that traded, what differs and why, and what each difference is validated by |
-| [05 Invented tickers](./05-anchors.md) | a ticker is a one-for-one wrapper of USDG. inventing one, launching under one, why nobody owns it, the name's own pool, the club, the required disclosure |
+| [05 Invented names](./05-anchors.md) | the two kinds of name: a redeemable one-for-one wrapper of USDG, and a fixed-inventory name worth what its market says. inventing one, launching under one, why nobody owns it, the name's own pool, the club, the required disclosure |
 | [06 Fees](./06-fees.md) | launch fee, the pool fee, creator tax, the 50/10/40 split, collecting, burning, claims, where the protocol share goes |
 | [07 Addresses](./07-addresses.md) | chain facts, canonical Uniswap v4 and v3 addresses on Robinhood Chain, the contract table |
 | [09 Risks](./09-risks.md) | what can go wrong, the exact list of owner powers, immutability |
@@ -33,4 +33,4 @@ Source: [github.com/tickrdotfun/tickr](https://github.com/tickrdotfun/tickr). Th
 
 - "Quote" is the asset a curve is priced in: native ETH (`address(0)`) or an approved ERC-20. "Token" / "meme" is the launched ERC-20.
 - All bps values are out of `10_000`.
-- Solidity signatures are quoted as they appear in `contracts/src/`. Addresses marked "TBD" are filled from `contracts/deployments/4663.json`, which `contracts/script/Deploy.s.sol` writes after deployment.
+- Solidity signatures are quoted as they appear in `contracts/src/`. Every address in [07 addresses](./07-addresses.md) is the live one on chain 4663 and matches `contracts/deployments/4663.json`, which is what the site is built from.

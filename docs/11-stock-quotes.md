@@ -56,9 +56,14 @@ ERC-8056: Stock Tokens implement `uiMultiplier()`, crypto assets do not. That yi
 (bytes32 expectedEconomics, PairEconomics memory econ, uint256 priceUsd)
     = stockQuoteLauncher.previewLaunch(launchConfigId, stockToken);
 
-// params.expectedEconomics = expectedEconomics
-stockQuoteLauncher.launchWithStockQuote{value: factory.launchFee()}(
-);
+// params.expectedEconomics = expectedEconomics, so the launch reverts if the feed moved since the preview
+(address token, bytes32 poolId) =
+    stockQuoteLauncher.launchWithStockQuote{value: factory.launchFee()}(params, launchConfigId, stockToken);
+
+// or with the creator's first buy in the same transaction: `stockIn` of the Stock Token, approved to the launcher first
+(address token2, bytes32 poolId2, uint256 tokensOut) = stockQuoteLauncher.launchWithStockQuoteAndBuy{
+    value: factory.launchFee()
+}(params, launchConfigId, stockToken, stockIn, minTokensOut);
 ```
 
 Event: `StockQuoteLaunched(token, poolId, stockToken, priceUsd, phantomQuote)`. For a first buy in the same
@@ -66,8 +71,10 @@ transaction, use `launchWithStockQuoteAndBuy`, described below.
 
 ## What it inherits
 
-launch trades against, and its pool is paired against it. `StockQuoteLauncher` holds no funds and has no
-privilege beyond being a registrar on the factory.
+Everything the factory gives every launch: the same pool, the same locked position, the same fee split, and the
+same snipe tax and launch protection. The creator is paid in the Stock Token their launch trades against, and its
+pool is paired against it. `StockQuoteLauncher` holds no funds and has no privilege beyond being a registrar on
+the factory.
 
 ## Risks
 
@@ -76,4 +83,16 @@ feed goes stale, new launches against that asset are refused, but launches alrea
 threshold was fixed at creation. The owner can deactivate an asset, which stops new launches only.
 
 ## The creator's first buy, the dev buy
+
+`launchWithStockQuoteAndBuy` launches and buys in one transaction. Approve the launcher for `coinIn` of the Stock Token first, and send `factory.launchFee()` as value; anything else reverts `BadValue`.
+
+The launcher pulls `coinIn` from you, launches, then swaps it in the new pool through `LaunchSeeder.swapExactIn`
+with the coin delivered **to you**, not to itself. So the snipe tax and the launch-block caps see your wallet, the
+same as any other buyer, and `minTokensOut` is yours to set: pass a real one, since a first buy on a brand new
+pool has no reference price to fall back on. What the pool did not take is returned to you, measured against the
+launcher's balance before your funds arrived, so nothing it held beforehand can leave with the refund.
+
+It emits `FirstBuy(token, quoteIn, tokensOut)` alongside the launch event. The launcher holds no funds between
+transactions and has no privilege beyond being a registrar on the factory.
+
 

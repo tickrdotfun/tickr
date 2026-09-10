@@ -18,7 +18,7 @@ A buy is `zeroForOne = true` when the pair is currency0, which is always the cas
 
 ## From ETH into anything
 
-To route from ETH into a coin quoted in something else, use `ZapRouter`, described in [12 buying with ETH](./12-zap.md). A route is a list of hops that ends at the coin's own pool: `kind` 0 for a v4 pool key, 1 for a v3 pool address, 2 for a wrap into an invented ticker. `previewZap` and `previewZapSell` revert with `Preview(quoteOut, amountOut)`, readable with `eth_call`.
+To route from ETH into a coin quoted in something else, use `ZapRouter`, described in [12 buying with ETH](./12-zap.md). A route is a list of hops that ends at the coin's own pool: `kind` 0 for a v4 pool key, 1 for a v3 pool address, 2 for a wrap into a redeemable name. A fixed-inventory name has no wrap hop: route through its own USDG pool as an ordinary v4 hop (fee 500, spacing 10, no hook), and expect price impact on that leg as well as on the coin's. `previewZap` and `previewZapSell` revert with `Preview(quoteOut, amountOut)`, readable with `eth_call`.
 
 ## Collecting fees and claiming
 
@@ -30,7 +30,7 @@ function claim() returns (uint256);                                             
 function claimToken(address token) returns (uint256);                               // any ERC-20
 ```
 
-A collection splits by the terms frozen at launch, [06 fees](./06-fees.md). The coin side, every fee taken in the launched coin on sells, splits like the quote side: the creator's share and the tax go to the escrow in the coin, the protocol's and the club's shares are burned to `0x000000000000000000000000000000000000dEaD`; nobody is paid in the coin, so the burned supply of a coin is that address's balance. What a collection produced is in the `FeesCollected` event. Under an invented ticker a collection also books the coin's club volume for the current epoch: the quote fees collected divided by the pool fee rate, so buy volume in the quote, booked when collected and not when traded.
+A collection splits by the terms frozen at launch, [06 fees](./06-fees.md). The coin side, every fee taken in the launched coin on sells, splits like the quote side: the creator's share and the tax go to the escrow in the coin, the protocol's and the club's shares are burned to `0x000000000000000000000000000000000000dEaD`; nobody is paid in the coin, so the burned supply of a coin is that address's balance. What a collection produced is in the `FeesCollected` event. Under a redeemable name a collection also books the coin's club volume for the current epoch: the quote fees collected divided by the pool fee rate, so buy volume in the quote, booked when collected and not when traded.
 
 ## A coin under an invented name
 

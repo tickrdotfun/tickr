@@ -4,7 +4,7 @@ Everything below is a property of the contracts, not a promise. Each one names t
 
 ## 1. No custody by the operator
 
-Non-custodial for the operator: the pools, the locked positions, the escrow and the name wrappers hold assets by code, and nobody at tickr can move them. The site never holds funds or keys. Every transaction is built in the browser, shown, and signed in the user's own wallet. On chain, the only places money sits are the coin's Uniswap v4 pool (owned by nobody), the locked position that holds it (owned by `LaunchLocker`, which has no function to move it), the fee escrow (`FeeEscrow`, pull only: a recipient claims its own balance and nothing else moves), and a ticker's USDG reserve (`TickerToken`, redeemable one for one by whoever holds the wrapper).
+Non-custodial for the operator: the pools, the locked positions, the escrow and the name wrappers hold assets by code, and nobody at tickr can move them. The site never holds funds or keys. Every transaction is built in the browser, shown, and signed in the user's own wallet. On chain, the only places money sits are the coin's Uniswap v4 pool (owned by nobody), the locked position that holds it (owned by `LaunchLocker`, which has no function to move it), the fee escrow (`FeeEscrow`, pull only: a recipient claims its own balance and nothing else moves), and a redeemable name's USDG reserve (`TickerToken`, redeemable one for one by whoever holds the wrapper). A fixed-inventory name holds no reserve at all: its supply sits in its own pool and there is nothing to redeem.
 
 ## 2. Atomic flows
 

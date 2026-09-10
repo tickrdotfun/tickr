@@ -7,7 +7,8 @@ tickr has one coin of its own. Its ticker is **TICKR**, it is priced in **FUN**,
 | | |
 | --- | --- |
 | Coin | TICKR, name `tickr`, 18 decimals |
-| Pair | FUN, an invented ticker: a one-for-one wrapper of USDG |
+| Pair | FUN, a redeemable name: a one-for-one wrapper of USDG. FUN predates the market release, so it stays this kind for as long as it exists; `QuoteRegistry.kindOf(FUN)` returns 0, unclassified, and everything that reads it treats an unclassified name as redeemable, which is what FUN is |
+| Its treasury | `BuybackTreasury` `0x60C1276f...`, the first one. TICKR's policy was frozen to it at launch and cannot be repointed. `BuybackTreasuryV2` is for launches made from the market release on and has no bearing on TICKR |
 | Supply | 1,000,000,000, all of it in the locked pool at launch; nobody holds any at creation, and the only way to hold some in the launch transaction is a first buy from the curve like anyone else |
 | Fee split | 50% creator, 10% ticker club, 40% protocol, frozen at launch, the same as every coin under a ticker |
 | Creator | the team. The creator share of TICKR's fees goes to the team's fee wallet |
@@ -29,15 +30,32 @@ On launch night that 5% went into the pool instead of the fire: all 50,000,000 T
 
 ## Buybacks
 
-The protocol's share of every fee, and every launch fee, is paid to a contract, `BuybackTreasury`, not to a wallet. It is the protocol fee recipient from the first launch, frozen into TICKR and every coin after it. The treasury has no owner and no way to withdraw: money leaves it two ways only, to the team wallet and to the dead address. The half and half split between buybacks and the team applies to revenue the treasury can convert to USDG, which is USDG, ETH and invented tickers; fees paid in an asset it cannot convert at par, a Stock Token or a coin used as a quote, are forwarded to the team in full; and the protocol's and the club's sell-side shares, paid in the launched coin, are burned by the locker directly and never reach the treasury.
+The protocol's share of every fee, and every launch fee, is paid to a contract, `BuybackTreasury`, not to a wallet. It is the protocol fee recipient from the first launch, frozen into TICKR and every coin after it. The treasury has no owner and no way to withdraw: money leaves it two ways only, to the team wallet and to the dead address. The half and half split between buybacks and the team applies to revenue the treasury can convert to USDG, which is USDG, ETH and redeemable names; fees paid in an asset it cannot convert at par, a Stock Token or a coin used as a quote, are forwarded to the team in full; and the protocol's and the club's sell-side shares, paid in the launched coin, are burned by the locker directly and never reach the treasury.
 
-The treasury binds itself to the ticker launcher the first time `collect` or `buy` runs after deployment (`launcher()`, event `LauncherBound`); from then on what FUN is, which coin is official and which wrappers convert cannot be moved by the factory owner. Anyone may call `collect(tokens)`. It claims what the escrow holds for the treasury, turns what it can into dollars (an invented ticker unwraps at par, ETH goes through the live ETH/USDG pool), sends half of the dollars to the team wallet, and sets the other half aside. Anything it cannot convert, a Stock Token or a coin used as a quote, goes whole to the team wallet, since the treasury has no honest price for it.
+The treasury binds itself to the ticker launcher the first time `collect` or `buy` runs after deployment (`launcher()`, event `LauncherBound`); from then on what FUN is, which coin is official and which wrappers convert cannot be moved by the factory owner. Anyone may call `collect(tokens)`. It claims what the escrow holds for the treasury, turns what it can into dollars (a redeemable name unwraps at par, ETH goes through the live ETH/USDG pool), sends half of the dollars to the team wallet, and sets the other half aside. Anything it cannot convert, a Stock Token or a coin used as a quote, goes whole to the team wallet, since the treasury has no honest price for it.
 
 Anyone may then call `buy()`, at most once every ten minutes. It spends at most 5% of the dollars set aside, sized so that the buy moves TICKR's pool by no more than 300 basis points at the liquidity in range when it is sized, and the swap itself carries that price as its limit: the pool stops there whatever its liquidity turns out to be, and the FUN it did not take comes back as dollars and stays earmarked. It turns those dollars into FUN, buys TICKR in the TICKR/FUN pool, and sends the TICKR to `0x000000000000000000000000000000000000dEaD`. The size, the limit and the least it will accept are computed on chain from the pool as it stands when `buy` is called: a caller chooses none of them, and what one call can do is bounded by the tranche, the interval and the price limit. The treasury has no oracle. TICKR trades in one pool, so the pool's price is the only price there is, and a buy starts from wherever that price is; someone who moves it before a buy pays the pool's fee both ways to move it and can catch at most one tranche, at most once every ten minutes, inside the bound. The ETH conversion in `collect` runs on the same interval through the deepest pool on the chain. Every buy is a `BoughtAndBurned` event, and the TICKR page shows the running total.
 
 the burn share starts at 50%, can be raised by the owner after a three-day delay, and can never be lowered. `buybackShareBps` is the share in force; `proposeBuybackShare(bps)` is the factory owner's proposal, upward only and at most all of it, and `applyBuybackShare()` puts it in force once `SHARE_DELAY` has passed, by anyone. A newer proposal replaces a pending one and the delay starts again. Burning takes coins out of circulation. It does not guarantee a higher price.
 
 ## The FUN club
+
+FUN is a redeemable name, so it has a ticker club like any other, and TICKR is in it.
+
+10% of the base fee of every coin launched under FUN is booked to that club when the fees are collected, in
+30-day epochs (`TickerLauncher.EPOCH`). Members claim their share of each pot by booked volume, and the club's
+captain counts double. TICKR is the founder's coin, the first launched under FUN, so it is captain in every epoch
+it has volume in; in an epoch where it has none, the coin with the most volume under FUN takes the seat instead,
+and TICKR gets it back in any later epoch it trades in.
+
+The captain seat is a weight in a division and nothing else. It carries no say over any other coin, no access to
+any fee but its own share, and no control over the name. Nobody owns FUN. See
+[05 anchors](./05-anchors.md) for how the club, the captain and the sweep work in full.
+
+One practical note: a pot is booked to the epoch its collection happens in, not the epoch the trades happened in,
+and nothing collects automatically any more. A coin that wants its fees booked where they were earned has to call
+`collectFees` before the epoch closes.
+
 
 
 ## Where to find it
@@ -46,7 +64,7 @@ The deployment record (`contracts/deployments/<chainId>.json`) carries `genesisT
 
 ## Why FUN has a pool, and the two buys after genesis
 
-Chart sites price a pair by walking from its quote token to a dollar through pools, and they only trust a price they have seen trade into a wallet. FUN is worth the dollar it wraps, but without a pool those sites cannot show TICKR/FUN in dollars, and without a trade that lands in a wallet after the pool exists they show nothing at all. So FUN, like every invented ticker, runs its own FUN/USDG pool at one dollar from the moment it is invented ([05](./05-anchors.md)), and genesis ends with two more transactions from the deployer through Uniswap's canonical Universal Router, each with a fresh positive minimum from Uniswap's quoter: FUN bought through that pool into the deployer's wallet, then TICKR bought through FUN's pool and its own. The launch transaction itself, first buy included, is not a trade those sites count; the two after it are. Every coin launched on the site goes through the same two buys, from the create page, before it is shown as done. A confirmed sequence is not a listing: chart sites index on their own clock, and nothing here promises one.
+Chart sites price a pair by walking from its quote token to a dollar through pools, and they only trust a price they have seen trade into a wallet. FUN is worth the dollar it wraps, but without a pool those sites cannot show TICKR/FUN in dollars, and without a trade that lands in a wallet after the pool exists they show nothing at all. So FUN, like every redeemable name, runs its own FUN/USDG pool at one dollar from the moment it is invented ([05](./05-anchors.md)), and genesis ends with two more transactions from the deployer through Uniswap's canonical Universal Router, each with a fresh positive minimum from Uniswap's quoter: FUN bought through that pool into the deployer's wallet, then TICKR bought through FUN's pool and its own. The launch transaction itself, first buy included, is not a trade those sites count; the two after it are. Every coin launched on the site goes through the same two buys, from the create page, before it is shown as done. A confirmed sequence is not a listing: chart sites index on their own clock, and nothing here promises one.
 
 ## Its address
 

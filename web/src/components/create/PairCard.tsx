@@ -10,7 +10,7 @@ import { OfficialBadge } from "../QuoteChip";
 
 const KIND_LINE: Record<PairKind, string> = {
   stock: "official Stock Token, in the Robinhood Assets registry",
-  ticker: "invented ticker: a one-for-one wrapper of USDG",
+  ticker: "redeemable name: a one-for-one wrapper of USDG",
   coin: "a coin launched on tickr",
   usdg: "USDG, the dollar stablecoin on Robinhood Chain",
   native: "native ETH",

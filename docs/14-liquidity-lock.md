@@ -26,7 +26,26 @@ This is a property of the code, not a promise. The source has no such function, 
 
 ## What is not locked
 
-Anyone may add liquidity to a tickr pool and remove their own again. Only the launch position and the remainder are held by the locker. An invented ticker's own pool is different: its positions are held by the wrapper itself, and nobody else can add to or remove from that pool at all; see [05 invented tickers](./05-anchors.md). A coin's price is set by everything in the pool, locked and not.
+Anyone may add liquidity to a tickr pool and remove their own again. Only the launch position and the remainder are held by the locker. The two kinds of name differ here. A redeemable name's own pool is held by the wrapper itself behind `ManagedTickerHook`, and nobody else can add to or remove from that pool at all. A fixed-inventory name's pool has no hook, so anyone may add liquidity to it and remove their own again, exactly like a coin's pool; what they cannot touch is the name's own issuance, which is locked as described below. See [05 anchors](./05-anchors.md). A coin's price is set by everything in the pool, locked and not.
+
+## A fixed-inventory name's own supply
+
+Held harder than a coin's, by a contract that is deliberately empty.
+
+`MarketTickerDeployer.create` mints the whole 500,000,000 issuance to itself and it leaves only into the name's
+opening position, which is minted straight to a `QuoteMarketLocker` deployed for that one name. That contract has
+two storage slots, a `record` function that can be called once, and `onERC721Received`. It has no transfer, no
+approve, no burn, no decrease, no rescue, no owner and no admin. Nothing was omitted by accident: any line that
+could move the position is a line that could take the principal back out, so the absence of code is the guarantee.
+
+One consequence to be aware of: **the name market's own fees are not collectable by anybody.** `LaunchLocker` can
+collect a coin's fees because it has a function for it; this contract has none, so the fees a name's pool earns
+accrue in the position and stay there. They are not lost to a party, they are simply not withdrawable. If fee
+collection is ever wanted it has to arrive as a separate reviewed contract that can show it touches accrued fees
+and never liquidity.
+
+`QuoteMarketCreated` records the locker's address and the position id, so both can be read without an indexer, and
+`QuoteMarketLocker.tokenId` and `.token` read them back off the locker itself.
 
 ## How to check
 

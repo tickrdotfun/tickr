@@ -1,20 +1,28 @@
-# 05 · Anchors: official assets and invented tickers
+# 05 · Anchors: official assets and invented names
 
 > On the create page this is the "invent a name" option: the name is the quote asset your coin is priced in, the second half of the pair, not your coin's own ticker.
 
-A launch is priced in whatever it is quoted in. That quote is either an **official anchor** (ETH, USDG, an official Stock Token) or an **invented ticker**: a token somebody named on tickr, which is a one-for-one wrapper of USDG carrying that name.
+A launch is priced in whatever it is quoted in. That quote is either an **official anchor** (ETH, USDG, an official Stock Token) or an **invented name**: a token somebody named on tickr.
 
-> BANANA and BREAD run through this page as one worked example, and that is all they are: two names somebody typed. There is no official ticker and no reserved list beyond the anchors below. Any name that is free is yours to use.
+There are two kinds of invented name, and they behave differently.
 
-|  | Official anchor | Invented ticker |
-| --- | --- | --- |
-| Quote asset | ETH, USDG, or an official Stock Token issued by Robinhood Assets, listed in `AnchorRegistry` | A `ManagedTickerToken`: 1 BANANA is redeemable for exactly 1 USDG, mint and redeem one for one between transactions (while the pool manager is locked), and the name runs its own pool at a dollar |
-| Entry point | `Factory.launchToken` / `LaunchAndBuyRouter.launchAndBuy` | `TickerLauncher.launch(symbol, ...)`: existing ticker or brand new, same call |
-| Pair approval | Global (`approvedPairTokens == true`) | Never global. Each coin under it is priced in it through the registrar path, on USDG's economics |
-| Issuer | Robinhood Assets for Stock Tokens; native / stablecoin issuer otherwise | Nobody. The wrapper has no owner and no admin function |
-| Who holds the ticker | n/a | Whoever minted some and has not redeemed it yet. Nobody at birth; a first buy in `launchAndBuy` mints some against the caller's USDG and spends it on the coin's curve like any other buy |
-| What it is worth | Its market | Exactly its counter asset, by construction |
-| UI | Official badge | `YOURCOIN/BANANA` with the badge **creator-issued** |
+- A **redeemable name** is a one-for-one wrapper of USDG. One BANANA is worth one dollar because the contract holds the dollar. Every name made before the market release is this kind, FUN included.
+- A **fixed-inventory name** has 500,000,000 of itself and nothing behind it. It is worth whatever its own market says. This is what the create page makes now.
+
+Which kind a name is, is decided when it is created and never changes. `QuoteRegistry.kindOf(name)` answers it by
+provenance, from which issuer made the name, so nothing has to trust a name's own answer about itself.
+
+> BANANA and BREAD run through this page as one worked example, and that is all they are: two names somebody typed. There is no official name and no reserved list beyond the anchors below. Any name that is free is yours to use.
+
+|  | Official anchor | Redeemable name | Fixed-inventory name |
+| --- | --- | --- | --- |
+| Quote asset | ETH, USDG, or an official Stock Token issued by Robinhood Assets, listed in `AnchorRegistry` | A `ManagedTickerToken`: 1 BANANA is redeemable for exactly 1 USDG, mint and redeem one for one between transactions (while the pool manager is locked), and the name runs its own pool at a dollar | A fixed supply of 500,000,000 at 6 decimals in its own USDG pool. No mint, no redeem, no backing |
+| Entry point | `Factory.launchToken` / `LaunchAndBuyRouter.launchAndBuy` | `TickerLauncher.launch(symbol, ...)`: existing name or brand new, same call | `MarketTickerLauncher`: existing name or brand new, same call |
+| Pair approval | Global (`approvedPairTokens == true`) | Never global. Each coin under it is priced in it through the registrar path, on USDG's economics | Never global. Same registrar path |
+| Issuer | Robinhood Assets for Stock Tokens; native / stablecoin issuer otherwise | Nobody. The wrapper has no owner and no admin function | Nobody. `MarketTickerDeployer` issues it and holds no power over it after |
+| Who holds the name | n/a | Whoever minted some and has not redeemed it yet. Nobody at birth | Whoever bought some. The whole supply starts in the name's own pool |
+| What it is worth | Its market | Exactly its counter asset, by construction | Its market, and nothing guarantees a floor |
+| UI | Official badge | `YOURCOIN/BANANA` with the badge **creator-issued** | `YOURCOIN/BANANA` with the badge **creator-issued** |
 
 ## AnchorRegistry
 
@@ -32,11 +40,11 @@ function isApproved(address token) external view returns (bool);   // active anc
 function isReservedTicker(string ticker) external view returns (bool);
 ```
 
-The registry is the list of real assets. It answers two questions: *is this a real anchor?* (`isApproved`) and *is this symbol spoken for?* (`isReservedTicker`). Every anchor's ticker is reserved, so an invented ticker cannot be called NVDA, USDG or ETH.
+The registry is the list of real assets. It answers two questions: *is this a real anchor?* (`isApproved`) and *is this symbol spoken for?* (`isReservedTicker`). Every anchor's ticker is reserved, so an invented name cannot be called NVDA, USDG or ETH.
 
-## What an invented ticker is
+## What a redeemable name is
 
-A one-for-one wrapper of USDG.
+A one-for-one wrapper of USDG. Every name invented before the market release is one of these, and no name made after it is.
 
 ```
 contract ManagedTickerToken is ERC20 {
@@ -55,7 +63,7 @@ It is not a stablecoin in the sense that ever goes wrong. Nothing maintains a pr
 
 ## Why the price holds
 
-A ticker's value is not defended on someone else's market, and it is not discovered by one. It is defined by the contract, in two ways that back each other up.
+A redeemable name's value is not defended on someone else's market, and it is not discovered by one. It is defined by the contract, in two ways that back each other up.
 
 <figure class="doc-fig"><!-- alt:
                     mint
@@ -92,9 +100,51 @@ The name's own pool, described further down, is the second way: the wrapper keep
 
 This is what "only the coin is speculative" means in the contracts rather than in the copy: the pair is defined, and the coin is discovered.
 
+## What a fixed-inventory name is
+
+The kind the create page makes now. There is no wrapper, no counter asset held, and no redeem.
+
+```
+supply    500,000,000 at 6 decimals, minted once, at birth
+pool      the name against USDG, no hook: fee 500, tick spacing 10, width 30
+inventory the whole supply opens in that pool, on the sell side
+mint      none after birth
+redeem    none, ever
+backing   none
+```
+
+Every one of these names runs its own USDG market, and the price of the name is whatever that market says. Buying
+the name moves it up, selling it moves it down. Nothing defends a dollar, because nothing is holding a dollar.
+
+That is the whole difference, and it is the point. A redeemable name is a receipt for a dollar, so a coin priced
+in one is really priced in dollars wearing a name. A fixed-inventory name is an asset in its own right, so a coin
+priced in one rises and falls against that name, not against the dollar. `YOURCOIN/BANANA` becomes a real pair.
+
+What it costs you, said plainly: a coin priced in a fixed-inventory name has no floor underneath its quote asset.
+If the name falls, the coin's dollar value falls with it even when the coin held its price in the name. A
+redeemable name cannot do that. Neither behaviour is safer than the other in general, they are different trades,
+and the create page lets you pick.
+
+The name's pool carries no hook. A redeemable name's pool is managed by its wrapper through `ManagedTickerHook`,
+which tops up the offer and re-centres at a dollar. A fixed-inventory name has nothing to re-centre to, so there is
+nothing to manage and no hook to run.
+
+### Telling the two apart
+
+`QuoteRegistry.kindOf(name)` classifies by provenance: which issuer deployed the name, not what the name claims.
+
+```
+0  unknown          not issued by either launcher, or older than the registry
+1  redeemable       issued by TickerLauncher, a one-for-one USDG wrapper
+2  fixed inventory  issued by MarketTickerDeployer, its own market
+```
+
+Kind `0` matters. FUN, the name TICKR is priced in, predates the registry and reads `0`. Everything that has to
+know treats an unclassified name the way it always did, as a redeemable wrapper, because that is what it is.
+
 ## A coin under a ticker
 
-A coin priced in an invented ticker is an ordinary launch whose pair is the wrapper. `TickerLauncher.launch(symbol, coin, launchConfigId)` creates the ticker if it is new and calls `Factory.launchTokenWithPair` with the USDG economics: the pool opens at 3,236 of the wrapper per billion coins, the entire supply locked in it from the first block. `launchAndBuy(symbol, coin, launchConfigId, usdgIn, minTokensOut)` does the same and then the creator's first buy: `usdgIn` USDG is pulled from the caller, wrapped one for one, and spent in the new pool. That first buy is paid in USDG the caller already holds, so from the site it is one approval and one launch, then the two listing buys: nothing here promises the reference's exact count of signatures for every mode, only its order.
+A coin priced in a redeemable name is an ordinary launch whose pair is the wrapper. `TickerLauncher.launch(symbol, coin, launchConfigId)` creates the ticker if it is new and calls `Factory.launchTokenWithPair` with the USDG economics: the pool opens at 3,236 of the wrapper per billion coins, the entire supply locked in it from the first block. `launchAndBuy(symbol, coin, launchConfigId, usdgIn, minTokensOut)` does the same and then the creator's first buy: `usdgIn` USDG is pulled from the caller, wrapped one for one, and spent in the new pool. That first buy is paid in USDG the caller already holds, so from the site it is one approval and one launch, then the two listing buys: nothing here promises the reference's exact count of signatures for every mode, only its order.
 
 Buying such a coin from the site is one transaction paid in ETH or USDG: the zap turns ETH into USDG through the live pool, turns that into the ticker, through the ticker's own pool or by wrapping one for one, whichever gives more, and buys from the coin's pool. Selling runs the same route backwards and ends in USDG or ETH. Nobody has to hold the wrapper.
 
@@ -113,7 +163,7 @@ There is no owner slot, no role, and no line in any later pair's fee split for w
 
 - The club's 10% of the quote side, what buys pay, is booked per paying coin into `pot(ticker, window, coin)`, in the window the fee is swept, and held by the launcher in the ticker itself; the coin side's club share is burned by the locker and never pooled. Said plainly: a pot lands in the window of the sweep, not of the trades behind it. Anyone may sweep at any time, so a sweep just after a window closes books those fees to the new window. Volumes, which decide the weights, are booked the same way: when a coin's fees are collected, the locker books the quote fees collected divided by the pool fee rate as that coin's volume for the window of the collection. so it stands for buy volume in the quote, since only buys pay fees in the quote, and a coin's weight for a window depends on when someone collected.
 - A coin never pays its own creator through the club. Its share of another coin's pot is `pot × its weight / the total weight under the ticker`, the payer's weight included. A coin's weight is its booked window volume, and the captain's is twice its volume, so the total weight is the window's volume plus the captain's volume once more. The payer's own share of its pot goes to the protocol through `sweepDeadPot`, so a coin with dust volume earns dust, and a coin with no volume in the window earns nothing.
-- Every club has a captain, decided per window from that window's final booked volumes, so from what was collected in the window, not from trades nobody collected for. The founder's coin, the first launched under the ticker, is captain whenever it has any volume in the window; there is no floor. In a window where it has none, the coin with the most volume under the ticker is captain instead (`topOf`, kept as volume lands, ties to the incumbent), and the founder is captain again in any later window it trades in. Worked example: BREAD founded BANANA, PEEL and CHIP joined, and in one window each of the three traded 1,000 BANANA. Weights are 2,000 for BREAD, 1,000 for PEEL and 1,000 for CHIP, 4,000 in all: of CHIP's pot, BREAD's creator claims a half, PEEL's a quarter, and CHIP's own quarter goes to the protocol. Had BREAD not traded that window, PEEL and CHIP would have tied at 1,000 and the first to record volume would have kept the seat. The seat is a weight and nothing more: the captain has no say over any coin and no access to any fee but its own share. A pot is booked to the window the collection happens in, not the window the trades happened in: a collection held back past a window boundary lands in the next window's pot, with that window's weights and captain. Anyone may call `collectFees` at any time, so a coin that wants its fees booked where they were earned has only to collect before the window closes, and the keeper collects on a schedule. Claims and the protocol sweep pay by amount, so a pot that grows after a claim is still claimable for the rest.
+- Every club has a captain, decided per window from that window's final booked volumes, so from what was collected in the window, not from trades nobody collected for. The founder's coin, the first launched under the ticker, is captain whenever it has any volume in the window; there is no floor. In a window where it has none, the coin with the most volume under the ticker is captain instead (`topOf`, kept as volume lands, ties to the incumbent), and the founder is captain again in any later window it trades in. Worked example: BREAD founded BANANA, PEEL and CHIP joined, and in one window each of the three traded 1,000 BANANA. Weights are 2,000 for BREAD, 1,000 for PEEL and 1,000 for CHIP, 4,000 in all: of CHIP's pot, BREAD's creator claims a half, PEEL's a quarter, and CHIP's own quarter goes to the protocol. Had BREAD not traded that window, PEEL and CHIP would have tied at 1,000 and the first to record volume would have kept the seat. The seat is a weight and nothing more: the captain has no say over any coin and no access to any fee but its own share. A pot is booked to the window the collection happens in, not the window the trades happened in: a collection held back past a window boundary lands in the next window's pot, with that window's weights and captain. Anyone may call `collectFees` at any time, so a coin that wants its fees booked where they were earned has only to collect before the window closes. Nothing collects on a schedule any more: the keeper that used to is switched off, so a coin that does not collect for itself is not collected for. Claims and the protocol sweep pay by amount, so a pot that grows after a claim is still claimable for the rest.
 - No volume in the window, no share. A pot with nobody to go to (no other coin traded that window) goes to the protocol, `sweepDeadPot`.
 - Claims open when the window closes, so nothing about a claim can move after it becomes claimable. Anyone may call; the money goes to the member's current fee recipient.
 
@@ -143,9 +193,9 @@ Symbols are claimed once, case-insensitively: BANANA, banana and Banana are one 
 
 ## Required disclosure
 
-Any surface that shows an invented ticker shows this, verbatim:
+Shown verbatim on the docs index and the terms page:
 
-> Not issued by Robinhood Assets. Not a Stock Token. No mint/redeem against listed shares. An invented ticker is a one-for-one wrapper of USDG: it is worth exactly what it wraps.
+> Not issued by Robinhood Assets. Not a Stock Token. No mint/redeem against listed shares. A name invented on tickr is not the asset it is named after: a redeemable name is worth exactly the USDG it wraps, a fixed-inventory name has no backing and is worth only what its own market says.
 
 ## What it inherits
 
@@ -157,7 +207,7 @@ A coin priced in a ticker cannot itself be a quote. `CoinQuoteLauncher.quotePric
 
 ## The name's own pool
 
-A ticker is redeemable one for one for the USDG it wraps, not a promise of a US dollar, and a name with no market is a name no chart can price and no router can reach. So every invented ticker runs its own Uniswap v4 pool against USDG from the moment it is invented, at a fixed 0.05% fee, behind one hook shared by every ticker, `ManagedTickerHook`. The pool is an ordinary pool with ordinary swaps, no custom accounting and no dynamic fee, so any router that trades Uniswap v4 can trade it; whether a third party routes through it, lists it, or shows it the right way round is that party's choice, not something the contracts can promise. The hook only hands each pool's callbacks to the wrapper that owns it.
+A ticker is redeemable one for one for the USDG it wraps, not a promise of a US dollar, and a name with no market is a name no chart can price and no router can reach. So every redeemable name runs its own Uniswap v4 pool against USDG from the moment it is invented, at a fixed 0.05% fee, behind one hook shared by every one of them, `ManagedTickerHook`. A fixed-inventory name runs its own USDG pool too, at the same 0.05% fee but with tick spacing 10 and no hook, because it has no dollar to be re-centred on. The pool is an ordinary pool with ordinary swaps, no custom accounting and no dynamic fee, so any router that trades Uniswap v4 can trade it; whether a third party routes through it, lists it, or shows it the right way round is that party's choice, not something the contracts can promise. The hook only hands each pool's callbacks to the wrapper that owns it.
 
 What the wrapper does with them. Its unsold inventory is the buy side: tokens it mints to itself, owed to nobody and backed by nothing until somebody buys them, when the dollars paid become their backing. At rest that offer is `INVENTORY_FLOOR`, ten thousand dollars' worth (the value the reference traded with; not ten thousand dollars deposited anywhere), and it grows by four times whatever is in circulation, so one buy through the pool can take that much and fills whole or not at all; the site wraps one for one for anything larger. The wrapper's backing is the sell side: every dollar anyone paid in, on offer at a dollar each, so whatever is in circulation can always come back. Before every outside swap the wrapper rebuilds both positions and re-centres the price at exactly one dollar, paying for the tiny re-centring swap from its own surplus, never from the backing; after the swap it checks that the fill was whole, that the price is within two ticks of a dollar, and that the backing still covers the circulation. If any of that fails the swap reverts and nothing moved. One visit to the pool per transaction; a route that crosses the same name's pool twice reverts.
 

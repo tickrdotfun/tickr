@@ -77,3 +77,16 @@ asset, so a chart can rise against the quote coin while falling in dollar terms.
 
 ## The creator's first buy, the dev buy
 
+`launchWithCoinQuoteAndBuy` launches and buys in one transaction. Approve the launcher for `coinIn` of the quote
+coin first, and send `factory.launchFee()` as value; anything else reverts `BadValue`.
+
+The launcher pulls `coinIn` from you, launches, then swaps it in the new pool through `LaunchSeeder.swapExactIn`
+with the coin delivered **to you**, not to itself. So the snipe tax and the launch-block caps see your wallet, the
+same as any other buyer, and `minTokensOut` is yours to set: pass a real one, since a first buy on a brand new
+pool has no reference price to fall back on. What the pool did not take is returned to you, measured against the
+launcher's balance before your funds arrived, so nothing it held beforehand can leave with the refund.
+
+It emits `FirstBuy(token, quoteIn, tokensOut)` alongside the launch event. The launcher holds no funds between
+transactions and has no privilege beyond being a registrar on the factory.
+
+

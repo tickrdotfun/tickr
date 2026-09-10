@@ -1,5 +1,7 @@
+// Both kinds of invented name are covered, because since the market release they are not worth the same thing.
+// A redeemable name holds the dollar it is worth. A fixed-inventory name holds nothing and is worth its market.
 export const DISCLOSURE =
-  "Not issued by Robinhood Assets. Not a Stock Token. No mint/redeem against listed shares. An invented ticker is a one-for-one wrapper of USDG: it is worth exactly what it wraps.";
+  "Not issued by Robinhood Assets. Not a Stock Token. No mint/redeem against listed shares. A name invented on tickr is not the asset it is named after: a redeemable name is worth exactly the USDG it wraps, a fixed-inventory name has no backing and is worth only what its own market says.";
 
 /** The line. Written in full per the naming rules: the network is always "Robinhood Chain", never "Robinhood". */
 export const TAGLINE = "pair anything on Robinhood Chain.";

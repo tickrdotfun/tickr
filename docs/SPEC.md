@@ -16,15 +16,26 @@ Opening price `p0 = phantomQuote / supply`. A one-sided position from `p0` upwar
 
 ## 4. Pairs
 
-ETH (config economics), USDG and any ERC-20 the owner approves with `setPairTokenEconomics(pair, phantomQuote)` and the registry lists; registrars supply economics for the rest: `TickerLauncher` (invented tickers, USDG economics), `StockQuoteLauncher` (official Stock Tokens, opening cap from the Chainlink feed and a USD target), `CoinQuoteLauncher` (coins launched here, opening cap from the quote's own pool), `MarketQuoteLauncher` (any token with a deep enough Uniswap v3 pool against WETH or USDG, opening cap from that pool's spot price, floors 5 WETH or 15,000 USDG). Every launcher pins economics with `expectedEconomics`.
+ETH (config economics), USDG and any ERC-20 the owner approves with `setPairTokenEconomics(pair, phantomQuote)` and the registry lists; registrars supply economics for the rest: `TickerLauncher` (redeemable names, USDG economics), `StockQuoteLauncher` (official Stock Tokens, opening cap from the Chainlink feed and a USD target), `CoinQuoteLauncher` (coins launched here, opening cap from the quote's own pool), `MarketQuoteLauncher` (any token with a deep enough Uniswap v3 pool against WETH or USDG, opening cap from that pool's spot price, floors 5 WETH or 15,000 USDG). Every launcher pins economics with `expectedEconomics`.
 
-## 5. Invented tickers
+## 5. Redeemable names
 
 `ManagedTickerToken`: a one for one wrapper of USDG, mint and redeem while the pool manager is locked, no owner, that runs its own WRAPPER/USDG pool (fee 500, spacing 1) behind the one `ManagedTickerHook`. Its unsold inventory is the buy side (a floor of ten thousand dollars' worth plus four times the circulation), its backing the sell side; before every outside swap it rebuilds both and re-centres at one dollar from its own surplus, after it checks a whole fill, the price inside two ticks and backing at or above circulation; one visit per transaction. `TickerLauncher.launch(symbol, coin, cfg)` creates the wrapper at CREATE2 by symbol if new, at an address in the top sixteenth of the space, charging `NEW_TICKER_FEE` (0.0015 ETH) on top of the launch fee, which becomes the wrapper's working surplus through the live ETH/USDG pool; the coin must sort below the name (`CoinNotFirst`), so it is always currency0. The club: 10% of the base fee of every coin under a ticker goes to `pot(ticker, epoch, coin)` on collection; `recordVolume` credits the same epoch; `claimClub` pays a member `pot * w / W` per payer, by amount, where `w` is the member's volume, doubled when it is the club's captain, and `W` is the ticker's volume plus the captain's volume; `captainOf(ticker, epoch)` is the founder's coin (the first launched under the ticker) while it has volume in the epoch, else the coin with the most volume (`topOf`, kept as volume lands, ties to the incumbent), zero when nothing traded; `sweepDeadPot` pays the payer's own share to the protocol. The captain has no rights: nobody owns a ticker. Reserved official symbols cannot be invented.
 
+`MarketTickerLauncher` invents the other kind of name: **fixed inventory**. 500,000,000 at 6 decimals minted once
+at birth, opened in its own USDG pool (fee 500, spacing 10, width 30, no hook), no mint after birth, no redeem,
+no backing. It is worth what its market says. A coin under one pays a frozen 82 bps with no creator tax, and the
+launcher reverts with `NotTheFrozenFee` on any config that says otherwise, because the factory gates only on
+registrar and would otherwise accept whatever config id the caller passed. There is no club under a fixed-inventory
+name, so the split freezes at 60 / 0 / 40 creator / club / protocol. `QuoteRegistry.kindOf` tells the two kinds
+apart by which issuer made the name, never by asking the name; FUN predates the registry and reads unclassified,
+which every reader treats as redeemable, which is what FUN is. `BuybackTreasuryV2` is the fee recipient from this
+release on, and converts a fixed-inventory name through its own market instead of forwarding it to the team whole.
+
+
 ## 6. Fees
 
-Launch fee 0.0005 ETH to the protocol at creation. Pool fee 1% base plus creator tax 0 to 2% at launch (the owner can raise that ceiling for later launches, never above 10%; TICKR carries 2%), the pool's own LP fee. `LaunchLocker.collectFees` splits the base part 50 / 10 / 40 creator / club / protocol under a ticker and 60 / 40 elsewhere; the tax part is the creator's; the coin side splits the same way, the creator's share and the tax to the escrow in the coin, the protocol's and the club's shares burned to `0xdEaD`; everything for the creator and the protocol lands in `FeeEscrow`, pull only. See [06](./06-fees.md).
+Launch fee 0.0005 ETH to the protocol at creation. Pool fee 1% base plus creator tax 0 to 2% at launch (the owner can raise that ceiling for later launches, never above 10%; TICKR carries 2%), the pool's own LP fee. `LaunchLocker.collectFees` splits the base part 50 / 10 / 40 creator / club / protocol under a redeemable name and 60 / 40 elsewhere, a fixed-inventory name included; the tax part is the creator's; the coin side splits the same way, the creator's share and the tax to the escrow in the coin, the protocol's and the club's shares burned to `0xdEaD`; everything for the creator and the protocol lands in `FeeEscrow`, pull only. See [06](./06-fees.md).
 
 ## 7. Contracts
 

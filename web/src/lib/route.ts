@@ -12,7 +12,8 @@ export function ethUsdgKey(): V4Key {
 }
 
 /** One hop of a zap route: kind 0 is a Uniswap v4 pool key, kind 1 a Uniswap v3 pool address, kind 2 an
- *  invented ticker (a one-for-one wrapper of USDG): the router mints on the way in and redeems on the way out. */
+ *  redeemable name (a one-for-one wrapper of USDG): the router mints on the way in and redeems on the way out.
+ *  A fixed-inventory name is not wrapped: it is bought and sold in its own pool like any other token. */
 export type Hop = { kind: number; key: V4Key; pool: Address };
 
 const EMPTY_KEY: V4Key = { currency0: ZERO, currency1: ZERO, fee: 0, tickSpacing: 0, hooks: ZERO };

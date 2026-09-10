@@ -202,8 +202,8 @@
   /* Thick-thin hairline pair: the one rule we print, as front-page furniture */
   .rule {
     height: 5px;
-    border-top: 2px solid rgb(61 220 132 / 0.35);
-    border-bottom: 1px solid rgb(61 220 132 / 0.35);
+    border-top: 2px solid rgb(61 194 220 / 0.35);
+    border-bottom: 1px solid rgb(61 194 220 / 0.35);
     width: 100%;
     border-radius: 999px;
   }
@@ -342,11 +342,14 @@
        1000px; the loop below moves exactly one. */
     width: 2000px;
     z-index: -1;
-    /* wheel order, so no pair blends through grey, and oklab so the mix holds its saturation */
+    /* The wash lives in the rebrand's own arc now: accent cyan through sky and periwinkle into violet and
+       lilac, then back. One sweep of hue from 186 to 272 and home, so no pair blends through grey and there
+       is no colour in it that is not the ground's family. oklab so the mix holds its saturation, and every
+       stop stays light enough to carry the near-black label. */
     background: linear-gradient(
       118deg in oklab,
-      #F5C63C, #F0862A, #E23B2E, #F4B8C6, #5B78F0, #3DC2DC,
-      #F5C63C, #F0862A, #E23B2E, #F4B8C6, #5B78F0, #3DC2DC, #F5C63C
+      #3DC2DC, #56B0F0, #7C8BFF, #A78BFA, #C9A7FF, #6FD8E8,
+      #3DC2DC, #56B0F0, #7C8BFF, #A78BFA, #C9A7FF, #6FD8E8, #3DC2DC
     );
   }
   .btn-gradient:hover { color: var(--tickr-black); filter: brightness(1.06); }
@@ -536,7 +539,25 @@
     color: var(--text);
     transition: background 0.15s;
   }
-  .rail-row:hover { background: rgb(244 247 244 / 0.05); }
+  /* the ticker rail: the same softness as the cards, at the scale of a row */
+  .rail-row {
+    position: relative;
+    transition:
+      background 0.5s ease,
+      transform 0.55s cubic-bezier(0.22, 0.9, 0.24, 1.03);
+  }
+  .rail-row:hover {
+    background: rgb(244 247 244 / 0.05);
+    transform: translateX(4px);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .rail-row:hover { animation: rail-wave 5.4s ease-in-out infinite; }
+  }
+  /* a row drifts on hover rather than resting at its new offset */
+  @keyframes rail-wave {
+    0%, 100% { transform: translateX(4px); }
+    50% { transform: translateX(9px); }
+  }
   /* scoped past .token-art's 100% sizing, which is defined later in this layer */
   .rail-row .token-art { width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0; }
   .rail-row .token-art-letters { font-size: 12px; }
@@ -623,10 +644,62 @@
     overflow: hidden;
     background: var(--tickr-black);
     color: var(--text);
-    transition: transform 0.16s ease, border-color 0.16s ease;
+    position: relative;
+    /* Long and soft, with a little overshoot at the end, so the card surfaces rather than snapping up. The
+       curve is the whole difference between "it moved" and "it floated". */
+    transition:
+      transform 0.62s cubic-bezier(0.22, 0.9, 0.24, 1.04),
+      border-color 0.5s ease,
+      box-shadow 0.62s cubic-bezier(0.22, 0.9, 0.24, 1.04);
   }
-  .coin-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--state) 55%, transparent); }
+  .coin-card:hover {
+    transform: translateY(-7px);
+    border-color: color-mix(in srgb, var(--state) 62%, transparent);
+    /* the card's own colour, pooled underneath it */
+    box-shadow:
+      0 18px 44px -18px color-mix(in srgb, var(--state) 46%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--state) 12%, transparent);
+  }
   .coin-art { position: relative; aspect-ratio: 4 / 3; }
+  /* the artwork keeps drifting while the pointer is on it, on a slow figure that never quite repeats */
+  @media (prefers-reduced-motion: no-preference) {
+    /* the artwork only. the state and quote pills are positioned children of .coin-art, and swaying them
+       would drag them off the corners they are pinned to. */
+    .coin-card .coin-art > :not(.coin-state):not(.coin-quote) {
+      transition: transform 0.62s cubic-bezier(0.22, 0.9, 0.24, 1.04);
+    }
+    .coin-card:hover .coin-art > :not(.coin-state):not(.coin-quote) {
+      animation: coin-sway 7.5s ease-in-out infinite;
+    }
+    /* a slow band of light crossing the card, once per pass, like a torch under a duvet */
+    .coin-card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      opacity: 0;
+      background: linear-gradient(
+        104deg,
+        transparent 34%,
+        color-mix(in srgb, var(--state) 16%, transparent) 50%,
+        transparent 66%
+      );
+      background-size: 260% 100%;
+      background-position: 130% 0;
+      transition: opacity 0.5s ease;
+    }
+    .coin-card:hover::after { opacity: 1; animation: coin-sheen 4.6s ease-in-out infinite; }
+  }
+  @keyframes coin-sway {
+    0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1.02); }
+    28% { transform: translate3d(5px, -4px, 0) rotate(0.5deg) scale(1.035); }
+    62% { transform: translate3d(-4px, 3px, 0) rotate(-0.42deg) scale(1.03); }
+  }
+  @keyframes coin-sheen {
+    0% { background-position: 130% 0; }
+    55%, 100% { background-position: -60% 0; }
+  }
   .coin-state,
   .coin-quote {
     position: absolute;
@@ -978,7 +1051,7 @@
   .club-table { width: 100%; margin-top: 14px; border-collapse: collapse; font-size: 13px; }
   .club-table th { text-align: left; font-weight: 500; color: var(--dim); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; padding: 0 12px 8px 0; border-bottom: 1px solid var(--border); }
   .club-table th.num, .club-table td.num { text-align: right; }
-  .club-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid rgb(61 220 132 / 0.09); vertical-align: baseline; }
+  .club-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid rgb(140 130 220 / 0.09); vertical-align: baseline; }
   .club-table th:first-child, .club-table td:first-child { text-align: left; }
   .club-table tr[data-me="true"] td:first-child { font-weight: 600; }
   .club-table tr[data-out="true"] td { color: var(--dim); }
@@ -1030,8 +1103,8 @@
 
   /* slippage: a summary in the header, the real control above the button */
   .slip-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; color: var(--muted); background: transparent; cursor: pointer; }
-  .slip-toggle:hover { color: var(--text); border-color: rgb(61 220 132 / 0.34); }
-  .slip-toggle[aria-expanded="true"] { color: var(--text); border-color: rgb(61 220 132 / 0.45); }
+  .slip-toggle:hover { color: var(--text); border-color: rgb(61 194 220 / 0.34); }
+  .slip-toggle[aria-expanded="true"] { color: var(--text); border-color: rgb(61 194 220 / 0.45); }
   .slip-toggle.is-high { color: var(--tickr-sw-yellow); border-color: color-mix(in srgb, var(--tickr-sw-yellow) 40%, transparent); }
   .slip { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: rgb(244 247 244 / 0.02); }
   .slip-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
@@ -1089,11 +1162,11 @@
 
   /* the landing's one link */
   .soon-x { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin-top: 22px; border-radius: 999px; color: var(--muted); border: 1px solid var(--border); transition: color 0.15s, border-color 0.15s; }
-  .soon-x:hover { color: var(--text); border-color: rgb(61 220 132 / 0.45); }
+  .soon-x:hover { color: var(--text); border-color: rgb(61 194 220 / 0.45); }
 
   /* the pair card */
   .pair-card { margin-top: 18px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px; background: rgb(244 247 244 / 0.02); }
-  .pair-card.is-ok { border-color: rgb(61 220 132 / 0.35); }
+  .pair-card.is-ok { border-color: rgb(61 194 220 / 0.35); }
   .pair-card.is-lookalike { border-color: rgb(226 59 46 / 0.6); background: rgb(226 59 46 / 0.05); }
   .pc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .pc-badges { display: inline-flex; gap: 8px; align-items: center; }
@@ -1103,7 +1176,7 @@
   .pc-row dt { color: var(--dim); font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; }
   .pc-row dd { font-size: 14px; margin-top: 2px; overflow-wrap: anywhere; }
   .pc-sub { display: block; color: var(--dim); font-size: 12px; margin-top: 1px; font-family: var(--font-sans, inherit); }
-  .pc-foot { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgb(61 220 132 / 0.09); }
+  .pc-foot { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgb(140 130 220 / 0.09); }
   @media (max-width: 560px) { .pc-grid { grid-template-columns: 1fr; } }
 
   /* the domain before launch: the hero, centred in the viewport, with a button that is only a shape */
@@ -1404,7 +1477,9 @@
     z-index: 0;
     pointer-events: none;
     color: var(--tickr-signal);
-    opacity: 0.17;
+    /* lifted from 0.17: the sky is meant to be noticed now, not just found when you look for it. The fade
+       mask still pulls it away from the edges, so the type sits on the calm middle either way. */
+    opacity: 0.26;
     --px: 0;
     --py: 0;
   }
@@ -1432,7 +1507,29 @@
 
     /* a comet crosses, then waits a long time before the next one */
     .bd-comet { animation: bd-comet 26s cubic-bezier(0.4, 0, 0.7, 1) infinite; opacity: 0; }
+    /* the second one runs the other way on a longer wait, so the two rarely share the sky */
+    .bd-comet-2 { animation: bd-comet-2 43s cubic-bezier(0.35, 0, 0.65, 1) infinite; }
+
+    /* the clouds breathe and slide, each on its own long cycle so the sky never repeats visibly */
+    .bd-cloud-a { animation: bd-drift-a 68s ease-in-out infinite; }
+    .bd-cloud-b { animation: bd-drift-b 91s ease-in-out infinite; }
+    .bd-cloud-c { animation: bd-drift-c 77s ease-in-out infinite; }
+
+    /* the stuck-on stars pulse like the glow-in-the-dark ones, slower and deeper than the pinprick stars */
+    .bd-star { animation: bd-star 11s ease-in-out infinite; }
+
+    /* dust rises and wanders */
+    .bd-mote { animation-name: bd-mote; animation-timing-function: linear; animation-iteration-count: infinite; }
+
+    .bd-crescent { animation: bd-bob 26s ease-in-out infinite; }
   }
+
+  /* the clouds sit under the hairlines and are the only colour in the sky */
+  .bd-clouds { opacity: 0.9; will-change: transform; transform: translate3d(calc(var(--px) * 10px), calc(var(--py) * 8px), 0); }
+  .bd-cloud { transform-box: fill-box; transform-origin: center; }
+  .bd-ceiling { will-change: transform; transform: translate3d(calc(var(--px) * 38px), calc(var(--py) * 30px), 0); }
+  .bd-star { transform-box: fill-box; transform-origin: center; opacity: 0.55; }
+  .bd-crescent { transform-box: fill-box; transform-origin: center; }
 
   @keyframes bd-twinkle {
     0%, 100% { opacity: 0.28; }
@@ -1448,6 +1545,47 @@
     26% { opacity: 0.9; }
     30% { transform: translate(1560px, 470px) rotate(14deg); opacity: 0; }
     100% { transform: translate(1560px, 470px) rotate(14deg); opacity: 0; }
+  }
+  /* right to left and downward, mirrored so the trail still leads the head */
+  @keyframes bd-comet-2 {
+    0% { transform: translate(1580px, 120px) rotate(196deg); opacity: 0; }
+    3% { opacity: 0.85; }
+    18% { opacity: 0.85; }
+    22% { transform: translate(-140px, 690px) rotate(196deg); opacity: 0; }
+    100% { transform: translate(-140px, 690px) rotate(196deg); opacity: 0; }
+  }
+
+  /* the clouds: slow, wide, and never quite back where they started until the cycle closes */
+  @keyframes bd-drift-a {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(90px, -46px) scale(1.14); }
+  }
+  @keyframes bd-drift-b {
+    0%, 100% { transform: translate(0, 0) scale(1.06); }
+    50% { transform: translate(-104px, 38px) scale(0.94); }
+  }
+  @keyframes bd-drift-c {
+    0%, 100% { transform: translate(0, 0) scale(0.96); }
+    50% { transform: translate(56px, 60px) scale(1.1); }
+  }
+
+  /* a stuck-on star holds its glow, then fades and comes back, the way the real ones do as they discharge */
+  @keyframes bd-star {
+    0%, 100% { opacity: 0.34; transform: scale(0.94) rotate(0deg); }
+    45% { opacity: 0.92; transform: scale(1.07) rotate(3deg); }
+  }
+
+  /* dust: up and across, fading in at the bottom of its run and out at the top */
+  @keyframes bd-mote {
+    0% { transform: translate(0, 0); opacity: 0; }
+    12% { opacity: 0.5; }
+    80% { opacity: 0.42; }
+    100% { transform: translate(46px, -190px); opacity: 0; }
+  }
+
+  @keyframes bd-bob {
+    0%, 100% { transform: translateY(0) rotate(-4deg); }
+    50% { transform: translateY(-16px) rotate(4deg); }
   }
 
   .preview-card {
@@ -1807,7 +1945,7 @@
     width: min(430px, 94vw);
     border-radius: 20px;
     background: var(--tickr-ink);
-    border: 1px solid rgb(61 220 132 / 0.18);
+    border: 1px solid rgb(140 130 220 / 0.18);
     box-shadow: 0 32px 80px rgb(7 8 7 / 0.66), 0 4px 16px rgb(7 8 7 / 0.5);
     padding: 40px 34px;
     text-align: center;
@@ -1951,9 +2089,9 @@
     background: linear-gradient(
       104deg,
       transparent 26%,
-      rgb(61 220 132 / 0.05) 44%,
+      rgb(140 130 220 / 0.05) 44%,
       rgb(244 247 244 / 0.04) 52%,
-      rgb(61 220 132 / 0.05) 60%,
+      rgb(140 130 220 / 0.05) 60%,
       transparent 76%
     );
     transform: translateX(-65%);
@@ -1987,7 +2125,7 @@
     width: 100%;
     padding: 13px 20px;
     border-radius: 999px;
-    border: 1px solid rgb(61 220 132 / 0.32);
+    border: 1px solid rgb(61 194 220 / 0.32);
     background: rgb(244 247 244 / 0.04);
     color: var(--tickr-white);
     font-size: 14.5px;
@@ -1996,7 +2134,7 @@
     cursor: pointer;
   }
   .collapse-toggle:hover {
-    background: rgb(31 106 69 / 0.18);
+    background: rgb(31 88 107 / 0.18);
     border-color: var(--tickr-signal);
   }
   .collapse-chevron {
@@ -2082,7 +2220,7 @@
   }
   .chain-pill:hover {
     background: rgb(244 247 244 / 0.09);
-    border-color: rgb(61 220 132 / 0.28);
+    border-color: rgb(61 194 220 / 0.28);
   }
   .chain-pill {
     font-size: 13.5px;

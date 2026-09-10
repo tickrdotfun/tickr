@@ -1,5 +1,9 @@
 # 19 · Any token with a market (Mode 5)
 
+> Not in use. `MarketQuoteLauncher` is deployed at `0x4Dc4404ac80fC4372B689f0013b8adACf1E0B61b` but is not
+> wired into the site, so this mode is not offered on the create page. The page describes what the contract does.
+> For launches priced in a name somebody invented, see [05 anchors](./05-anchors.md).
+
 > One of the quote assets a launch can use. The others are ETH, USDG and Stock Tokens (04), an invented name (05), and a tickr coin (10).
 
 A launch can be priced in **any ERC-20 on Robinhood Chain with a deep enough Uniswap v3 pool**: a pool against WETH or USDG, from the canonical v3 factory, holding at least the floor of that counter asset. `MarketQuoteLauncher` reads the pool at the moment of launch, sizes the opening market cap from it, and opens the coin's own pool against the token like every other launch.
@@ -65,4 +69,9 @@ The owner can change `minDepth` per counter and `targetRaise` per base, for futu
 
 ## The list on the create page
 
-The site lists every token that clears the floor, in order of depth, with its market cap and the venues it trades on. The list is read from the chain with the same rule the contract applies, so what is shown is what the launcher accepts, and the preview before signing is the contract's own.
+Not shown, because the mode is off. The site's address record carries `marketQuoteLauncher` as the zero address,
+and every code path that would read the launcher checks for that first and falls back, so the create page does not
+offer this choice and no list is built.
+
+If it is ever switched on, the list is read from the chain with the same rule the contract applies, so what is
+shown is what the launcher accepts, and the preview before signing is the contract's own.

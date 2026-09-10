@@ -43,15 +43,18 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `AnchorRegistered(address,string,uint8,address)` | `0xb795aa27a856d41cc57e3c8c50c22cb3e0a53618ea9af00ddc8a96f40c4d2f08` | AnchorRegistry |
 | `AnchorStatus(address,bool)` | `0xc7eeae902570c875dbc35081a2294ff8d21360be748b671052bd3751a6ee3a83` | AnchorRegistry |
 | `Approval(address,address,uint256)` | `0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925` | Token, ManagedTickerToken |
-| `BoughtAndBurned(uint256,uint256,address)` | `0x1b6fe3d614107093562b62b9236e265cac820f430060c5eb674a70824a7435db` | BuybackTreasury |
-| `BuybackShareProposed(uint16,uint256)` | `0x25f0057b4f4e56b85281b097467926d4f104d1721347d3edc384a4e251d94f9b` | BuybackTreasury |
-| `BuybackShareRaised(uint16)` | `0x3c027b913b338f2a029e8d3b9d6afcfc378bededed0ea3e00035157028840b91` | BuybackTreasury |
+| `AwaitingRegistration(address,uint256)` | `0x7f58826b3f0c7f6de8a55794cd5a9efa26bf3541819a4aa9a8ac7c797d6e0b36` | BuybackTreasuryV2 |
+| `BoughtAndBurned(uint256,uint256,address)` | `0x1b6fe3d614107093562b62b9236e265cac820f430060c5eb674a70824a7435db` | BuybackTreasury, BuybackTreasuryV2 |
+| `BuybackHeld(address,uint256)` | `0x591812a4a303f0f2ad9a6660b614b379493bb8cf1d1e66d4c0290c1f52ea473b` | BuybackTreasuryV2 |
+| `BuybackReturned(address,uint256)` | `0xd56dee4958c0c026d1e0cd9f422df88ab2d497f94abe87d71b322a1adc3b2922` | BuybackTreasuryV2 |
+| `BuybackShareProposed(uint16,uint256)` | `0x25f0057b4f4e56b85281b097467926d4f104d1721347d3edc384a4e251d94f9b` | BuybackTreasury, BuybackTreasuryV2 |
+| `BuybackShareRaised(uint16)` | `0x3c027b913b338f2a029e8d3b9d6afcfc378bededed0ea3e00035157028840b91` | BuybackTreasury, BuybackTreasuryV2 |
 | `Claimed(address,uint256)` | `0xd8138f8a3f377c5259ca548e70e4c2de94f129f5a11036a15b69513cba2b426a` | FeeEscrow |
 | `ClaimedToken(address,address,uint256)` | `0xdbc1ea3a8459e4c7e11fb385b52bbb5cc8c8ab85eec5d883ac9aa78c171f5141` | FeeEscrow |
 | `ClubClaimed(address,uint256,address,address,uint256)` | `0x659005b82109aa113441f2c563c06b60aa77aa7ffb11627b095cc2c247564623` | TickerLauncher |
 | `ClubFee(address,uint256,address,uint256)` | `0x0877294740802b7587101f4754015f9e6694c9ec53849aceffd0dca93dab6d81` | TickerLauncher |
 | `CoinQuoteLaunched(address,bytes32,address,address,uint256,uint256)` | `0xb5210e97fb7d72ef8834f69f62bde6ca74816fe42ffbad27e7484f6db93f1e79` | CoinQuoteLauncher |
-| `Collected(uint256,uint256,uint256)` | `0x6059b72f21911d96e92ebeb103aa1162802c8b875d60921f9db35ec8967fc7f6` | BuybackTreasury |
+| `Collected(uint256,uint256,uint256)` | `0x6059b72f21911d96e92ebeb103aa1162802c8b875d60921f9db35ec8967fc7f6` | BuybackTreasury, BuybackTreasuryV2 |
 | `CreatorFeeRecipientChangeProposed(address,address,uint256,uint256)` | `0x22b336cc3c163283ca94b8a02d1107b4485a820fa77cc12ea205640452d37b5e` | Factory |
 | `CreatorFeeRecipientUpdated(address,address)` | `0x2cc664e1ac1e2d05c0d4637bb63ec8189113b6ac39276be8977e26216a8cdd19` | Factory |
 | `Credited(address,uint256)` | `0x9c9e0cdb1670e88302408e5b941dc636f63a3293204694bb68910fcf3d9305f3` | FeeEscrow |
@@ -62,29 +65,35 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `FeePolicyUpdated((address,uint16,uint16,uint16,uint16,address,uint16,uint16))` | `0x3305ad2f721aaaa69e560f58a2c1224a88ae25a6b88132bbdad2a63404e6916d` | Factory |
 | `FeesCollected(address,uint256,uint256,uint256,uint256,uint256,uint256,uint256)` | `0xa1f59c4198b06eed65ba9c4eb11e1040d74f53818977958b489376f7cb851c0e` | LaunchLocker |
 | `FirstBuy(address,uint256,uint256)` | `0x4c71b8a31a6b3e892579c501fcaecc04e992f4f430a7f4772ac5db32da85ec63` | LaunchAndBuyRouter, TickerLauncher, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher |
-| `Forwarded(address,uint256)` | `0x6f1deddfc28100c291fae8f1064e4a91e844f0841993bb8fba9a913c3b801d80` | BuybackTreasury |
+| `Forwarded(address,uint256)` | `0x6f1deddfc28100c291fae8f1064e4a91e844f0841993bb8fba9a913c3b801d80` | BuybackTreasury, BuybackTreasuryV2 |
 | `Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)` | `0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438` | Uniswap PoolManager |
 | `LaunchConfigAdded(uint256)` | `0xedd96c570c6e5ef9add0378e59df53579a283889dc5dab6440ef6eca2ee6c8ce` | Factory |
 | `LaunchConfigUpdated(uint256)` | `0x2f8ba78ae68cfd0c82c7756c540eaf4eead3341aef9ccebcb91d546bff10d62b` | Factory |
 | `Launched(address,bytes32,address)` | `0x7d7973b0bce0568727967767ebffbb956d03b099cfaeb0d8e6e338d2f0a03787` | TickerLauncher |
-| `LauncherBound(address)` | `0x3ae987fd9641b8f46247990290ac31493ccf09c4e52cae5a61566983e46dc69e` | BuybackTreasury |
+| `LauncherBound(address)` | `0x3ae987fd9641b8f46247990290ac31493ccf09c4e52cae5a61566983e46dc69e` | BuybackTreasury, BuybackTreasuryV2 |
 | `LaunchFeeUpdated(uint256)` | `0xc799be5eb19a1a6d6ba7368d21e2bc367c8a335e4a07cd3d954482e6f714d3c5` | Factory |
 | `LaunchPositionLocked(address,uint256,int24,int24,uint128)` | `0x1699dadac90fce1f13f689ddb1cf88b07a25fd2339468d846b5ea6b22704786a` | Factory |
 | `LaunchSeeded(address,bytes32,uint256,int24,int24,uint128)` | `0xe777d7555b919fda019704ee6e89c0a5781e7bd21edb97a02a0890d6d699ef0b` | LaunchSeeder |
 | `Maintained(uint256,uint256,uint256,uint256)` | `0xa931cc0d5fef691941b395c737ad6fb723ce72ed847121df18f956b6079bd96b` | ManagedTickerToken |
 | `MaintenanceSkipped(bytes4)` | `0x2db4857148d10584800878afc58bab39d2df889e4a58ca4f14fa21d1dae41973` | ManagedTickerToken |
+| `MarketLaunch(address,address,address,bool)` | `0xef2fd5b75097f0bd454ae6de78642a5b03d5f0d339346199f14061b11fd6892c` | MarketTickerLauncher |
 | `MarketQuoteLaunched(address,bytes32,address,address,address,uint256,uint256)` | `0x29f7311eb056f66ba342c1dd302c83730e9bb314dfff45a2271e8a89333c29df` | MarketQuoteLauncher |
 | `MaxStalenessUpdated(uint256)` | `0x64a4703c7c168827058126cbd2e71d8d0f026afa821e7dff1480173dffdd3895` | StockQuoteLauncher |
+| `MaxTermsAheadSet(uint256)` | `0xc2826301bc7c9f1c31e8c6909ea903935f3daa41bc1bab52f3e2c5b11b174502` | BuybackTreasuryV2 |
 | `MinDepthUpdated(address,uint256)` | `0x4855ecd1c83ead9615b46d104300d3ddfc6d1d35ff0076ab229bf3c76544675d` | MarketQuoteLauncher |
+| `MinRateSet(address,bool,uint256)` | `0x870a711d451f7c5a46d3dfb9a159d897a9f0939b39890a6fb1bea0a26849e6df` | BuybackTreasuryV2 |
 | `Minted(address,address,uint256)` | `0x9d228d69b5fdb8d273a2336f8fb8612d039631024ea9bf09c424a9503aa078f0` | ManagedTickerToken |
 | `ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)` | `0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec` | Uniswap PoolManager |
 | `NameReserved(string,bool)` | `0x3991f588a604787469eff195387d64a0412af48ef404233dadc122594114f38f` | AnchorRegistry |
+| `NotConverted(address,uint256,bytes)` | `0xc4e78006a8e01f1d2372eda029ea9639e658411bd75b777a8eb75f1c8d9ec3d6` | BuybackTreasuryV2 |
 | `OwnershipTransferred(address,address)` | `0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0` | Factory, AnchorRegistry, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, BuybackVault |
 | `OwnershipTransferStarted(address,address)` | `0x38d16b8cac22d99fc7c124b9cd0de2d3fa1faef420bfe791d8c362d765e22700` | Factory, AnchorRegistry, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, BuybackVault |
 | `PairRegistrarUpdated(address,bool)` | `0xe6c0fba2f3535e9a5d84e056a4c0ad64d9fc1d7040770dc47ed1090e64491116` | Factory |
 | `PairTokenApproved(address,uint256,uint8)` | `0x1d5a4cb2ed187e012b376c379f93b8be85c53df9e13d9d6b373d321ad09493e6` | Factory |
 | `PairTokenRevoked(address)` | `0x01d82fe5117ed9433136541c9323e3ed69942ed6b5537ee00f01d04983a8679c` | Factory |
 | `PositionLocked(address,uint256)` | `0x2cabb2a2973327d5863ceb4707e9441851243897e86d587ee35943599752eb54` | LaunchLocker |
+| `QuoteMarketCreated(address,address,bytes32,address,uint256,uint256,int24,int24,uint24,int24)` | `0x7f9aadfa73ac5d753756eea6d568d049161eca89f33562032544589023e37b26` | MarketTickerDeployer |
+| `QuoteRecorded(address,uint8,address)` | `0x97f1b4e3ecfe78d1b6fab4494c1e8e6701e0fe74e87c98c92931fd9c97744f5a` | QuoteRegistry |
 | `Recentered(uint256,uint256,bool)` | `0x7ba9c7048246d156f23f799b728c18d3226313c76df961a2170c960edfce1eb0` | ManagedTickerToken |
 | `Redeemed(address,address,uint256)` | `0x27d4634c833b7622a0acddbf7f746183625f105945e95c723ad1d5a9f2a0b6fc` | ManagedTickerToken |
 | `Registered(address,bytes32)` | `0xb8142d42f05d95abf0a6570799774d59276e49ea32a04d9a4ec316ea4a6886bc` | ManagedTickerHook |
@@ -100,22 +109,26 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `TickerReserved(string,bool)` | `0x52cec17453a6a79bbd62df80b689eb80cdef3d0d28d4a668447631efdb280940` | AnchorRegistry |
 | `TokenLaunched(address,bytes32,address,address,uint256,uint24,uint256)` | `0xb6aa2732938645ba6006aecc1a69e2e2c105447698bfeceb2fd347532ae40954` | Factory |
 | `Transfer(address,address,uint256)` | `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef` | Token, ManagedTickerToken |
-| `Zapped(address,address,address,uint256,uint256,uint256)` | `0xe91c019e21e619ffcc1911755ca8385b08392696a46dbfc31b4cc69804161ad2` | ZapRouter |
-| `ZapSold(address,address,address,uint256,uint256,uint256)` | `0xcae331be1761c82e841551cd62fb652b07ae6f51962c767cfc8e6d4b11fe4a8f` | ZapRouter |
+| `Zapped(address,address,address,uint256,uint256,uint256)` | `0xe91c019e21e619ffcc1911755ca8385b08392696a46dbfc31b4cc69804161ad2` | ZapRouter, MarketZapRouter |
+| `ZapSold(address,address,address,uint256,uint256,uint256)` | `0xcae331be1761c82e841551cd62fb652b07ae6f51962c767cfc8e6d4b11fe4a8f` | ZapRouter, MarketZapRouter |
 
 ### Errors
 
 | error | selector | declared in |
 | --- | --- | --- |
+| `AlreadyHolding()` | `0xec55fe3d` | QuoteMarketLocker |
+| `AlreadyRecorded(address,uint8)` | `0xdd361204` | QuoteRegistry |
 | `AlreadyRegistered()` | `0x3a81d6fc` | ManagedTickerHook |
 | `BadName()` | `0x153736cd` | LaunchDeployer |
-| `BadPath()` | `0x64325c91` | ZapRouter |
+| `BadPath()` | `0x64325c91` | ZapRouter, MarketZapRouter |
 | `BadPrice()` | `0xfd1ee349` | StockQuoteLauncher |
 | `BadSymbol()` | `0x73a289b0` | LaunchDeployer, TickerLauncher |
-| `BadValue()` | `0x0bba69fb` | LaunchSeeder, LaunchAndBuyRouter, TickerLauncher, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, ZapRouter |
+| `BadValue()` | `0x0bba69fb` | LaunchSeeder, LaunchAndBuyRouter, TickerLauncher, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, ZapRouter, MarketZapRouter |
 | `CapacityExceeded(uint256,uint256)` | `0xc28f738e` | ManagedTickerToken |
-| `CoinNotFirst(address,address)` | `0x587fe89d` | TickerLauncher |
+| `CoinNotFirst(address,address)` | `0x587fe89d` | TickerLauncher, MarketTickerLauncher |
 | `CreatorTaxTooHigh()` | `0x9ad465dc` | Factory |
+| `DeadlineTooFar(uint256,uint256)` | `0x657526de` | BuybackTreasuryV2 |
+| `DecimalsMismatch(address,uint8,uint8)` | `0x85d6e41f` | MarketTickerLauncher |
 | `EmptyMetadata()` | `0xae921357` | LaunchDeployer |
 | `EmptySymbol()` | `0x198c27f6` | TickerLauncher |
 | `EpochOpen()` | `0xa2e041e8` | TickerLauncher |
@@ -125,55 +138,70 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `ERC20InvalidReceiver(address)` | `0xec442f05` | Token, ManagedTickerToken |
 | `ERC20InvalidSender(address)` | `0x96c6fd1e` | Token, ManagedTickerToken |
 | `ERC20InvalidSpender(address)` | `0x94280d62` | Token, ManagedTickerToken |
-| `Expired()` | `0x203d82d8` | ZapRouter |
+| `Expired()` | `0x203d82d8` | ZapRouter, MarketZapRouter |
 | `Insolvent(uint256,uint256)` | `0x1f2c89f0` | ManagedTickerToken |
-| `InsufficientLiquidity()` | `0xbb55fd27` | ZapRouter |
+| `InsufficientLiquidity()` | `0xbb55fd27` | ZapRouter, MarketZapRouter |
 | `InsufficientMaintenanceSurplus()` | `0xf797980c` | ManagedTickerToken |
 | `InvalidPolicy()` | `0xd06b96b1` | Factory |
+| `InventoryNotFullyPlaced(uint256,uint256)` | `0x2d67846b` | MarketTickerDeployer |
+| `IsTheCounter(address)` | `0xbb7aeb8b` | QuoteRegistry |
 | `LaunchBlock()` | `0x062b673f` | Token |
 | `LaunchConfigDisabled()` | `0xa8b63076` | Factory |
 | `LaunchEconomicsMismatch()` | `0x3cba147e` | Factory |
 | `LaunchFeeNotPaid()` | `0x7e6d78a5` | Factory |
+| `MarketExhausted(address,address)` | `0x753098a4` | MarketZapRouter |
+| `MarketNotPrimed(address)` | `0xf43cba15` | BuybackTreasuryV2 |
 | `MetadataTooLong()` | `0x85b8e2f4` | LaunchDeployer |
 | `MultipleBridgeVisits()` | `0x2ccba773` | ManagedTickerToken |
 | `NameReserved()` | `0x577a3cce` | Factory |
 | `NoFeed()` | `0x7e1f7c28` | StockQuoteLauncher |
 | `NoMarket()` | `0x78dc030c` | MarketQuoteLauncher |
+| `NoMarket(address)` | `0x2df59b68` | BuybackTreasuryV2 |
+| `NoPolicy(address)` | `0x10beed5b` | BuybackTreasuryV2 |
+| `NotAContract(address)` | `0x8a8b41ec` | QuoteRegistry |
 | `NotALaunchPool(address)` | `0xa120caf9` | LaunchLocker |
 | `NotAMint()` | `0x98bc7fb5` | LaunchLocker |
 | `NoTargetRaise()` | `0x899d778d` | StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher |
+| `NotAWrapper(address,uint8)` | `0x2470d467` | MarketZapRouter |
 | `NotCreatorFeeRecipient()` | `0xb9f93944` | Factory |
-| `NotFactoryOwner()` | `0x428e0b92` | BuybackTreasury |
+| `NoTerms()` | `0x55f17ace` | BuybackTreasuryV2 |
+| `NotFactoryOwner()` | `0x428e0b92` | BuybackTreasury, BuybackTreasuryV2 |
 | `NotFeeSource()` | `0x70154a5e` | TickerLauncher |
-| `NotFromEscrow()` | `0xbe81426f` | BuybackTreasury |
-| `NothingEarmarked()` | `0xdbded5a4` | BuybackTreasury |
+| `NotFromEscrow()` | `0xbe81426f` | BuybackTreasury, BuybackTreasuryV2 |
+| `NothingEarmarked()` | `0xdbded5a4` | BuybackTreasury, BuybackTreasuryV2 |
 | `NothingLocked(address)` | `0xd9e7f38a` | LaunchLocker |
-| `NothingPending()` | `0x175c1aea` | BuybackTreasury |
-| `NothingToBuy()` | `0xb2f53681` | BuybackTreasury |
+| `NothingPending()` | `0x175c1aea` | BuybackTreasury, BuybackTreasuryV2 |
+| `NothingPlaced()` | `0x51a5de9c` | MarketTickerDeployer |
+| `NothingToBuy()` | `0xb2f53681` | BuybackTreasury, BuybackTreasuryV2 |
 | `NothingToSweep()` | `0x351261fc` | TickerLauncher |
 | `NotHook()` | `0xc72cfc38` | TickerLauncher |
 | `NotInitialized()` | `0x87138d5c` | ManagedTickerToken |
-| `NotIssuer()` | `0x54ec5063` | ManagedTickerHook, ManagedTickerDeployer |
+| `NotIssuer()` | `0x54ec5063` | ManagedTickerHook, ManagedTickerDeployer, MarketTickerDeployer |
 | `NotOfficialStockToken()` | `0x63a68476` | StockQuoteLauncher |
 | `NotOneSided()` | `0xb3ac93d1` | LaunchSeeder |
+| `NotOwner()` | `0x30cd7471` | BuybackTreasuryV2 |
 | `NotPoolManager()` | `0xae18210a` | ManagedTickerHook |
 | `NotPositionManager()` | `0x20fdc658` | LaunchLocker |
+| `NotRegistered(address)` | `0xbfc6c337` | BuybackTreasuryV2 |
 | `NotRegistrar()` | `0x2ad95351` | Factory |
+| `NotTheCounter(address)` | `0x7040536e` | MarketTickerLauncher |
+| `NotTheFrozenFee(uint256,uint16)` | `0xde7c0d0d` | MarketTickerLauncher |
 | `NotTheWrapper()` | `0x627da710` | ManagedTickerHook |
 | `NotUnderTicker()` | `0x5859c16a` | TickerLauncher |
 | `NotWhitelisted()` | `0x584a7938` | Factory |
-| `NotYetLaunched()` | `0x8f7ce531` | BuybackTreasury |
+| `NotYetLaunched()` | `0x8f7ce531` | BuybackTreasury, BuybackTreasuryV2 |
 | `OnlyFactory()` | `0x0c6d42ae` | LaunchDeployer, LaunchSeeder |
-| `OnlyPool()` | `0x4b602735` | ZapRouter |
-| `OnlyPoolManager()` | `0xf655705d` | LaunchSeeder, ZapRouter |
+| `OnlyPool()` | `0x4b602735` | ZapRouter, MarketZapRouter |
+| `OnlyPoolManager()` | `0xf655705d` | LaunchSeeder, ZapRouter, MarketZapRouter |
 | `OwnableInvalidOwner(address)` | `0x1e4fbdf7` | Factory, AnchorRegistry, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, BuybackVault |
 | `OwnableUnauthorizedAccount(address)` | `0x118cdaa7` | Factory, AnchorRegistry, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, BuybackVault |
 | `PairTokenDecimalsMismatch()` | `0xe16fd21f` | Factory |
 | `PairTokenNotApproved()` | `0x49285dfb` | Factory |
 | `PartialFill()` | `0xd964f528` | ManagedTickerToken |
 | `PoolAlreadyExists()` | `0x03119322` | LaunchSeeder |
+| `PoolExists()` | `0xf48e3c26` | MarketTickerDeployer |
 | `PositionNotLocked()` | `0xd58f9686` | LaunchSeeder |
-| `Preview(uint256,uint256)` | `0x762a4020` | ZapRouter |
+| `Preview(uint256,uint256)` | `0x762a4020` | ZapRouter, MarketZapRouter |
 | `QuoteDecimals()` | `0x7eccfb48` | MarketQuoteLauncher |
 | `QuoteIsAnchor()` | `0xa3b8e31e` | MarketQuoteLauncher |
 | `QuoteLaunchedHere()` | `0xf48e4bfb` | MarketQuoteLauncher |
@@ -181,26 +209,32 @@ Computed from the compiled ABIs by `web/scripts/gen-selectors.mjs` every time th
 | `QuoteNotLaunchedHere()` | `0xce99f096` | CoinQuoteLauncher |
 | `QuotePriceUnavailable()` | `0x12ecbbe8` | CoinQuoteLauncher, MarketQuoteLauncher |
 | `QuoteTooDeep()` | `0x4e6ebcc8` | CoinQuoteLauncher |
-| `ReentrancyGuardReentrantCall()` | `0x3ee5aeb5` | Factory, LaunchSeeder, LaunchLocker, FeeEscrow, LaunchAndBuyRouter, TickerLauncher, ManagedTickerToken, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, ZapRouter, BuybackTreasury |
+| `RateTooLow(uint256,uint256)` | `0x8e03f3e5` | BuybackTreasuryV2 |
+| `ReentrancyGuardReentrantCall()` | `0x3ee5aeb5` | Factory, LaunchSeeder, LaunchLocker, FeeEscrow, LaunchAndBuyRouter, TickerLauncher, ManagedTickerToken, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, ZapRouter, BuybackTreasury, MarketZapRouter, BuybackTreasuryV2 |
 | `RefundFailed()` | `0xf0c49d44` | LaunchSeeder |
-| `SafeERC20FailedOperation(address)` | `0x5274afe7` | Factory, LaunchDeployer, LaunchSeeder, LaunchLocker, FeeEscrow, LaunchAndBuyRouter, TickerLauncher, ManagedTickerToken, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, ZapRouter, BuybackTreasury, BuybackVault |
-| `ShareNotHigher()` | `0xe4354168` | BuybackTreasury |
-| `ShareTooHigh()` | `0x2a07fc4c` | BuybackTreasury |
-| `Slippage()` | `0x7dd37f70` | LaunchSeeder, ZapRouter |
+| `SafeERC20FailedOperation(address)` | `0x5274afe7` | Factory, LaunchDeployer, LaunchSeeder, LaunchLocker, FeeEscrow, LaunchAndBuyRouter, TickerLauncher, ManagedTickerToken, StockQuoteLauncher, CoinQuoteLauncher, MarketQuoteLauncher, ZapRouter, BuybackTreasury, BuybackVault, MarketTickerDeployer, MarketZapRouter, BuybackTreasuryV2 |
+| `ShareNotHigher()` | `0xe4354168` | BuybackTreasury, BuybackTreasuryV2 |
+| `ShareTooHigh()` | `0x2a07fc4c` | BuybackTreasury, BuybackTreasuryV2 |
+| `Slippage()` | `0x7dd37f70` | LaunchSeeder, ZapRouter, MarketZapRouter |
 | `StalePrice()` | `0x19abf40e` | StockQuoteLauncher |
 | `SymbolTooLong()` | `0x1124f78b` | TickerLauncher |
+| `TermsExpired(uint256,uint256)` | `0x5400f80b` | BuybackTreasuryV2 |
+| `TermsWeakerThanPolicy(address,uint256,uint256)` | `0xf3a558b0` | BuybackTreasuryV2 |
 | `TickerReserved()` | `0x8bf25255` | Factory, TickerLauncher |
 | `TimelockExpired()` | `0x7a6fcaa6` | Factory |
 | `TimelockNotElapsed()` | `0x6677a596` | Factory |
-| `TooEarly(uint256)` | `0x2a35a324` | BuybackTreasury |
+| `TooEarly(uint256)` | `0x2a35a324` | BuybackTreasury, BuybackTreasuryV2 |
 | `TooFewDollars(uint256)` | `0xa9062c20` | TickerLauncher |
-| `TooSoon()` | `0x6fed7d85` | BuybackTreasury |
+| `TooSoon()` | `0x6fed7d85` | BuybackTreasury, BuybackTreasuryV2 |
 | `UnknownLaunchConfig()` | `0x67905872` | Factory |
+| `UnknownMarket(address)` | `0x99b75a5c` | MarketTickerLauncher |
 | `UnknownPool()` | `0xf7139e33` | ManagedTickerHook |
-| `UnknownToken()` | `0x8698bf37` | Factory, ZapRouter |
+| `UnknownProvenance(address)` | `0xcb221e63` | QuoteRegistry |
+| `UnknownToken()` | `0x8698bf37` | Factory, ZapRouter, MarketZapRouter |
+| `UnsupportedKind(address,uint8)` | `0x38325e2f` | BuybackTreasuryV2 |
 | `WalletCapExceeded(address,uint256,uint256)` | `0x683b3827` | Token |
 | `WrongContext()` | `0xf9d1dd2e` | ManagedTickerToken |
-| `ZeroAddress()` | `0xd92e233d` | Factory |
+| `ZeroAddress()` | `0xd92e233d` | Factory, QuoteRegistry |
 <!-- selectors:end -->
 
 ## A minimal indexer
@@ -253,6 +287,11 @@ A coin's `Transfer` log is its holder ledger. Leave these addresses out when cou
 | `NotAMint` | locker | somebody tried to transfer an existing position into the locker; only launch mints land there. |
 | `OnlyTickerLauncher` | seeder | only the ticker launcher named on the factory may open a dollar pool. |
 | `OnlyExecutor`, `NotOneDollar`, `OutsideTheBand`, `PriceGuard` | guard hook | the dollar pool refuses anything but the seeder's own opening, a position off the band, or a swap that would move the price. |
+| `NotTheFrozenFee(baseFeeBps, creatorTaxBps)` | market ticker launcher | the launch config handed in does not carry the frozen 82 bps base fee, or the creator tax is not zero. the launcher refuses rather than opening a coin at a fee the factory happened to have configured. |
+| `MarketExhausted(tokenIn, tokenOut)` | market zap router | the name's market has nothing available in the direction the trade needs. the router checks the pool's price before it swaps and stops, rather than filling at whatever is left. on the site: *This route currently has no available liquidity in the required direction.* |
+| `PriceLimitAlreadyExceeded(a, b)` | Uniswap v4 | selector `0x7c9c6e8f`, raised by the pool itself when the price is already past the bound the swap carries. reaches the site through `WrappedError` and reads the same as `MarketExhausted`, because for a trader it is the same condition. |
+| `TermsWeakerThanPolicy(token, offered, floor)` | treasury v2 | a conversion was offered on terms below the floor in force for that name. |
+| `NothingEarmarked`, `NothingToBuy`, `TooSoon`, `NotYetLaunched` | either treasury | there is nothing set aside, the tranche sized to zero, the ten minute interval has not passed, or the official coin does not exist yet. |
 
 ## Versioning and attribution
 

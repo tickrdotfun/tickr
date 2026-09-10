@@ -13,7 +13,7 @@ import { TAGLINE } from "./constants";
 const RULES = [
   "every figure here is a constant in the contracts, not a projection",
   "a coin's pair is chosen at launch and frozen with it, and so is its fee split",
-  "an invented ticker is a one-for-one wrapper of USDG and is not the asset it is named after",
+  "a name invented on tickr is not the asset it is named after: a redeemable name is a one-for-one wrapper of USDG, a fixed-inventory name has no backing and is worth what its own market says",
 ];
 
 export function llmsIndex(origin: string): string {

@@ -4,24 +4,24 @@ Every coin can be bought with ETH in one transaction, whatever it is quoted in. 
 
 ## Why it exists
 
-The coin's own pool, as the factory records it, must be the last hop of a buy and the first hop of a sell; a route through any other pool that happens to output the coin is refused. A coin quoted in USDG, a Stock Token, another coin, or an invented ticker is priced in that asset, and its pool only
+The coin's own pool, as the factory records it, must be the last hop of a buy and the first hop of a sell; a route through any other pool that happens to output the coin is refused. A coin quoted in USDG, a Stock Token, another coin, or a redeemable name is priced in that asset, and its pool only
 accepts that asset. Without help a buyer would have to acquire the quote somewhere else first. That is the friction
 aggregators remove on other launchpads, and the zap removes it here.
 
 ## How it works
 
-Every route ends at the coin itself: its own pool is the last hop on a buy and the first hop on a sell. A coin priced in ETH is one hop. A coin priced in USDG is the ETH/USDG pool then the coin's pool. A coin under an invented ticker is ETH/USDG, then a wrap hop that mints the ticker one for one, then the coin's pool. A coin priced in a Stock Token goes through that stock's market first.
+Every route ends at the coin itself: its own pool is the last hop on a buy and the first hop on a sell. A coin priced in ETH is one hop. A coin priced in USDG is the ETH/USDG pool then the coin's pool. A coin under a redeemable name is ETH/USDG, then a wrap hop that mints the ticker one for one, then the coin's pool. A coin priced in a Stock Token goes through that stock's market first.
 
 
 The caller passes a route: a list of hops walked from the input asset to the coin's quote. A hop is a Uniswap
-v4 pool key, a Uniswap v3 pool address, or an invented ticker to wrap into or redeem from, one for one. Consecutive v4 hops run inside a single `PoolManager.unlock`; a v3 hop calls
+v4 pool key, a Uniswap v3 pool address, or a redeemable name to wrap into or redeem from, one for one. Consecutive v4 hops run inside a single `PoolManager.unlock`; a v3 hop calls
 the pool directly and pays it in the swap callback. Native ETH is wrapped before a v3 hop and unwrapped before a v4
 hop that prices native ETH, so one route can mix both. A run of v4 hops is one unlock: the router swaps hop by hop, settles the run's input once and takes its output once, so nothing between the two ever leaves the pool manager. The coin's own pool, the last hop, pays the recipient directly; the snipe tax and the launch caps therefore see the buyer, never the router, and the amount the zap reports is the recipient's balance change. On a sell the coin goes from the seller straight into the pool manager. It holds nothing between transactions and has no
 privileges.
 
 ```solidity
 struct Hop {
-    uint8 kind;           // 0 = Uniswap v4 (key), 1 = Uniswap v3 (pool), 2 = wrap (invented ticker, one for one; pool = the ticker)
+    uint8 kind;           // 0 = Uniswap v4 (key), 1 = Uniswap v3 (pool), 2 = wrap (redeemable name, one for one; pool = the ticker)
     PoolKey key;
     address pool;
 }
@@ -68,7 +68,8 @@ struct ZapSellParams {
 |---|---|
 | ETH | none, the coin's pool is called directly |
 | USDG | ETH/USDG (fee 0.01%) |
-| an invented ticker (paired with USDG) | ETH/USDG, then the ticker's own pool (a v4 hop, fee 500, spacing 1, hooks = `ManagedTickerHook`) or wrap into the ticker one for one, whichever pays more; the site quotes both. A buy above the pool's offer wraps |
+| a redeemable name (paired with USDG) | ETH/USDG, then the name's own pool (a v4 hop, fee 500, spacing 1, hooks = `ManagedTickerHook`) or wrap into the name one for one, whichever pays more; the site quotes both. A buy above the pool's offer wraps |
+| a fixed-inventory name (paired with USDG) | ETH/USDG, then the name's own pool (a v4 hop, fee 500, spacing 10, no hook), then the coin's own. There is no wrap hop and no redeem: the name is bought and sold in its market like any other token, so both halves of the route have price impact |
 | a coin launched here | that coin's pool, no hook |
 | a Stock Token | the deepest pool against ETH: native ETH on v4 or WETH on v3, across the standard fee tiers |
 

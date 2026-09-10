@@ -4,13 +4,13 @@ A coin on tickr has one state: live. What follows is what happens in the launch 
 
 ## 1. Create
 
-The creator picks a name, a symbol, an image, a description, socials, a pair, an optional creator tax (0 to 2%), an optional dev buy, and a fee wallet (defaults to the launching wallet). The pair is ETH, USDG, an official Stock Token from the Robinhood Assets registry, a coin already launched here, or an invented ticker.
+The creator picks a name, a symbol, an image, a description, socials, a pair, an optional creator tax (0 to 2%), an optional dev buy, and a fee wallet (defaults to the launching wallet). The pair is ETH, USDG, an official Stock Token from the Robinhood Assets registry, a coin already launched here, or a name somebody invented. A name is one of two kinds, and the create page now makes only the second: a redeemable name, a one-for-one wrapper of USDG, or a fixed-inventory name with its own market and no backing. See [05 anchors](./05-anchors.md). Under a fixed-inventory name the base fee is a frozen 82 bps and the creator tax is zero, so that choice is not offered.
 
 `Factory._launch`, called through `launchToken` (ETH and USDG), `launchTokenFor` (the launch and buy router) or `launchTokenWithPair` (the ticker, Stock Token and coin launchers, which supply the pair's economics), does the following in order. Either all of it happens or none of it does.
 
 1. Checks: the launch config exists and is enabled, launching is open or the caller is whitelisted, `msg.value` equals the launch fee, the creator tax is within the cap, the symbol and name are not reserved for official assets, `expectedEconomics` matches the economics in force, the pair's decimals match.
 2. `LaunchDeployer.deployToken` deploys the coin at its CREATE2 address and hands the supply to the factory.
-3. The factory builds the pool key: the two tokens sorted by address, fee `(baseFeeBps + creatorTaxBps) * 100` in pips, tick spacing 10, no hook.
+3. The factory builds the pool key: the two tokens sorted by address, fee `(baseFeeBps + creatorTaxBps) * 100` in pips, tick spacing 10, no hook. Under a fixed-inventory name that arithmetic gives 8200, and `MarketTickerLauncher` refuses any config that would give anything else.
 4. `LaunchSeeder.seedLaunch` initializes the pool at the opening price and mints one position holding the entire supply, from that price to the end of the range, to `LaunchLocker`. Rounding dust of the coin goes to the locker too.
 5. The launch record and the fee policy in force are stored against the coin, the launch fee is credited to the protocol's escrow, and `TokenLaunched` and `LaunchPositionLocked` are emitted.
 
