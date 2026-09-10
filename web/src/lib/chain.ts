@@ -16,7 +16,9 @@ export const robinhoodChain = defineChain({
   name: IS_SEPOLIA ? "Sepolia" : IS_DEVNET ? "tickr devnet" : "Robinhood Chain",
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
   rpcUrls: {
-    default: { http: [process.env.NEXT_PUBLIC_RPC_URL ?? "https://rpc.mainnet.chain.robinhood.com"] },
+    // the node named for this build, or the chain's public one. how the browser actually splits its reads between
+    // the site's endpoint and this node is in transport.ts
+    default: { http: [process.env.NEXT_PUBLIC_RPC_URL && process.env.NEXT_PUBLIC_RPC_URL !== "/api/rpc" ? process.env.NEXT_PUBLIC_RPC_URL : "https://rpc.mainnet.chain.robinhood.com"] },
   },
   blockExplorers: {
     default: { name: "Blockscout", url: IS_SEPOLIA ? "https://eth-sepolia.blockscout.com" : "https://robinhoodchain.blockscout.com" },

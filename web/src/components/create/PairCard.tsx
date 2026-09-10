@@ -2,8 +2,9 @@
 
 import type { Address } from "viem";
 import { usePairApi, usePairOnChain, type PairKind } from "@/hooks/usePairInfo";
-import { ADDRESSES, sameAddr } from "@/lib/addresses";
+
 import { explorerAddress, explorerToken } from "@/lib/chain";
+import { StockLogo } from "../StockLogo";
 import { fmtAmount, fmtUsd, shortAddr, timeAgo } from "@/lib/format";
 import { OfficialBadge } from "../QuoteChip";
 
@@ -37,6 +38,7 @@ export function PairCard({ address }: { address: Address }) {
     <div className={`pair-card ${lookalike ? "is-lookalike" : canPair ? "is-ok" : ""}`} data-kind={kind}>
       <div className="pc-head">
         <span className="pc-title">
+          {kind === "stock" && <StockLogo ticker={symbol} size={20} />}
           <span className="num text-white font-semibold">{symbol}</span>
           {name && <span className="text-muted"> · {name}</span>}
         </span>
@@ -57,13 +59,11 @@ export function PairCard({ address }: { address: Address }) {
       <dl className="pc-grid">
         {a?.genuine && (
           <>
-            <Row k="registry" v={`verified ${a.genuine.syncedAt} against ${a.genuine.issuer}`} />
-            {a.genuine.isin && <Row k="isin" v={a.genuine.isin} mono />}
             <Row k="price feed" v={a.genuine.feed.startsWith("0x0000") ? "none published yet: cannot be quoted today" : `Chainlink ${shortAddr(a.genuine.feed)}`} mono={!a.genuine.feed.startsWith("0x0000")} />
           </>
         )}
         {priceUsd !== undefined && <Row k="price" v={fmtUsd(priceUsd)} mono sub={c?.feedPriceUsd !== undefined ? "from the feed the launcher uses" : a?.token?.priceUsd !== undefined ? "explorer" : "by construction"} />}
-        {c?.decimals !== undefined && c.totalSupply !== undefined && <Row k="supply on chain" v={`${fmtAmount(c.totalSupply, c.decimals, { sig: 4 })} ${symbol}`} mono />}
+        {kind !== "stock" && c?.decimals !== undefined && c.totalSupply !== undefined && <Row k="supply on chain" v={`${fmtAmount(c.totalSupply, c.decimals, { sig: 4 })} ${symbol}`} mono />}
         {kind === "ticker" && c?.reserve !== undefined && (
           <Row k="backing" v={`${fmtAmount(c.reserve, 6)} USDG held for ${fmtAmount(c.totalSupply ?? 0n, 6)} ${symbol}`} mono sub={`${c.coinsUnder ?? 0} coin${c.coinsUnder === 1 ? "" : "s"} under it`} />
         )}
@@ -73,11 +73,11 @@ export function PairCard({ address }: { address: Address }) {
             {c.creator && <Row k="creator" v={shortAddr(c.creator)} mono />}
           </>
         )}
-        {a?.token?.holders !== undefined && <Row k="holders" v={a.token.holders.toLocaleString()} mono />}
-        {a?.token?.volume24hUsd !== undefined && <Row k="24h volume" v={fmtUsd(a.token.volume24hUsd)} mono sub="explorer, all venues" />}
-        {a?.token?.marketCapUsd !== undefined && <Row k="market cap" v={fmtUsd(a.token.marketCapUsd)} mono />}
-        {a?.contract?.createdAt && <Row k="deployed" v={timeAgo(BigInt(Math.floor(new Date(a.contract.createdAt).getTime() / 1000)))} sub={a.contract.verified ? "source verified on the explorer" : "source not verified on the explorer"} />}
-        {a && (
+        {kind !== "stock" && a?.token?.holders !== undefined && <Row k="holders" v={a.token.holders.toLocaleString()} mono />}
+        {kind !== "stock" && a?.token?.volume24hUsd !== undefined && <Row k="24h volume" v={fmtUsd(a.token.volume24hUsd)} mono sub="explorer, all venues" />}
+        {kind !== "stock" && a?.token?.marketCapUsd !== undefined && <Row k="market cap" v={fmtUsd(a.token.marketCapUsd)} mono />}
+        {kind !== "stock" && a?.contract?.createdAt && <Row k="deployed" v={timeAgo(BigInt(Math.floor(new Date(a.contract.createdAt).getTime() / 1000)))} sub={a.contract.verified ? "source verified on the explorer" : "source not verified on the explorer"} />}
+        {a && kind !== "stock" && (
           <Row
             k="lookalikes"
             v={a.lookalikes.count === 0 ? "none found" : `${a.lookalikes.count} other contract${a.lookalikes.count === 1 ? "" : "s"} named ${symbol}`}
@@ -87,15 +87,11 @@ export function PairCard({ address }: { address: Address }) {
         {c && !c.hasCode && kind !== "native" && <Row k="code" v="no contract at this address" />}
       </dl>
 
+      {kind !== "stock" && (
       <div className="pc-foot">
         <a href={explorerToken(address)} target="_blank" rel="noreferrer" className="num text-[12.5px]">
           {shortAddr(address)} on the explorer
         </a>
-        {kind === "stock" && sameAddr(address, ADDRESSES.usdg) === false && a?.genuine && (
-          <a href={a.genuine.registry} target="_blank" rel="noreferrer" className="text-[12.5px]">
-            Robinhood&apos;s registry
-          </a>
-        )}
         {kind === "coin" && (
           <a href={`/t/${address}`} className="text-[12.5px]">
             its page on tickr
@@ -107,6 +103,7 @@ export function PairCard({ address }: { address: Address }) {
           </a>
         )}
       </div>
+      )}
     </div>
   );
 }

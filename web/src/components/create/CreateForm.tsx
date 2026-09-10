@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAccount, useChainId, usePublicClient, useReadContract } from "wagmi";
-import { encodeFunctionData, erc20Abi, formatUnits, isAddress, parseAbi, parseEther, toHex, type Address, type Hash, type Hex } from "viem";
+import { encodeFunctionData, erc20Abi, formatUnits, getAddress, isAddress, keccak256, parseAbi, parseEther, stringToHex, toHex, type Address, type Hash, type Hex } from "viem";
 
 /** The OpenZeppelin token errors a launch can surface, so a pre-flight names them instead of printing a selector. */
 const ERC20_ERRORS = parseAbi([
@@ -15,6 +15,7 @@ const ERC20_ERRORS = parseAbi([
 import { CoinQuoteLauncherAbi, TickerLauncherAbi, FactoryAbi, LaunchAndBuyRouterAbi, StockQuoteLauncherAbi, AnchorRegistryAbi, MarketQuoteLauncherAbi, LaunchDeployerAbi } from "@/lib/abis";
 import { ADDRESSES, DEPLOYED, ZERO, isZero, sameAddr } from "@/lib/addresses";
 import { TICKER_ALLOCATION } from "@/lib/constants";
+import { LAUNCHER_ABI as MarketLauncherAbi, isMarketLaunchWired } from "@/lib/marketLaunch";
 import { applySlippage } from "@/lib/pool";
 import { bpsToPct, errorMessage, fmtAmount, safeParseUnits, splitLabel, type FeeSplit } from "@/lib/format";
 import { useQuoteAssets, type QuoteAsset } from "@/hooks/useQuoteAssets";
@@ -31,10 +32,10 @@ import { StockLogo } from "../StockLogo";
 import { OfficialBadge } from "../QuoteChip";
 import { TxStatus } from "../TxStatus";
 import { Field, Notice, Row } from "../ui";
-import { grindSalt, tokenInitCodeHash, type GrindResult } from "@/lib/vanity";
+import { grindSalt, vanityInputs, type GrindResult } from "@/lib/vanity";
 import { Collapse } from "../Collapse";
 import { RainbowRule } from "../RainbowRule";
-import { LogoPicker } from "./LogoPicker";
+import { LogoPicker, uploadPickedImage } from "./LogoPicker";
 import { PairCard } from "./PairCard";
 import stocks from "@/data/stocks.json";
 import { DEMO } from "@/lib/demoTransport";
@@ -63,7 +64,7 @@ const CHOICES: { id: Choice; label: string; keepCase?: boolean; hero?: boolean }
   { id: "token", label: "any token" },
   { id: "eth", label: "ETH", keepCase: true },
   { id: "usdg", label: "USDG", keepCase: true },
-  { id: "stocks", label: "Robinhood stocks", keepCase: true },
+  { id: "stocks", label: "stocks" },
 ];
 const choiceOf = (t: Tab, mode: "new" | "existing"): Choice => (t === "eth" ? "eth" : t === "usdg" ? "usdg" : t === "official" ? "stocks" : t === "diy" && mode === "new" ? "invent" : "token");
 
@@ -98,29 +99,6 @@ type Prepared = {
 
 
 /** What fixes a coin's CREATE2 address: its constructor arguments and the wallet launching it. Nothing until all are known. */
-function vanityInputs(f: {
-  user?: Address;
-  supply?: bigint;
-  name: string;
-  symbol: string;
-  logo: string;
-  description: string;
-  socials: { twitter: string; telegram: string; discord: string; website: string; farcaster: string };
-  seed: Hex;
-}): { initCodeHash: Hex; initiator: Address; key: string } | undefined {
-  if (!f.user || !f.supply || isZero(ADDRESSES.launchDeployer) || isZero(ADDRESSES.factory) || !f.name.trim() || !f.symbol.trim()) return undefined;
-  const initCodeHash = tokenInitCodeHash({
-    name: f.name.trim(),
-    symbol: f.symbol.trim(),
-    logo: f.logo.trim(),
-    description: f.description.trim(),
-    socials: { ...f.socials },
-    supply: f.supply,
-    factory: ADDRESSES.factory,
-  });
-  return { initCodeHash, initiator: f.user, key: `${f.seed}:${initCodeHash}:${f.user.toLowerCase()}` };
-}
-
 function randomSalt(): Hex {
   const b = new Uint8Array(32);
   crypto.getRandomValues(b);
@@ -171,7 +149,8 @@ export function CreateForm() {
   const [socials, setSocials] = useState({ twitter: "", telegram: "", discord: "", website: "", farcaster: "" });
   const [feeWallet, setFeeWallet] = useState("");
   const [creatorTax, setCreatorTax] = useState(""); // percent, as typed
-  const params = useSearchParams();
+  // null until the router has them; an empty set reads the same as no parameters given
+  const params = useSearchParams() ?? new URLSearchParams();
   const [tab, setTab] = useState<Tab>(() => {
     const t = params.get("tab");
     return TAB_IDS.includes(t as Tab) ? (t as Tab) : "diy";
@@ -230,7 +209,7 @@ export function CreateForm() {
   const pairToken: Address | undefined = tab === "eth" ? ZERO : tab === "usdg" ? (usdgAsset?.address ?? ADDRESSES.usdg) : tab === "official" ? official : undefined;
   const pairAsset = tab === "eth" ? undefined : tab === "usdg" ? usdgAsset : undefined;
   const pairDecimals = tab === "eth" ? 18 : (pairAsset?.decimals ?? (tab === "usdg" ? 6 : 18));
-  const pairSymbol = tab === "eth" ? "ETH" : (pairAsset?.symbol ?? (tab === "usdg" ? "USDG" : "-"));
+  const pairSymbol = tab === "eth" ? "ETH" : tab === "official" ? (selectedStock?.ticker ?? "a Stock Token") : (pairAsset?.symbol ?? (tab === "usdg" ? "USDG" : "-"));
 
   const pairEcon = useReadContract({
     abi: FactoryAbi,
@@ -294,6 +273,46 @@ export function CreateForm() {
   });
 
   const tickerUp = diy.anchorTicker.trim().toUpperCase();
+
+  // A name can be either kind. A wrapper mints a dollar for a dollar and has always been the one on offer here;
+  // a market holds a fixed inventory and has a price. They launch through different contracts and a coin under
+  // either has to sort below it, so the kind is chosen before anything is ground.
+  const [nameKind, setNameKind] = useState<"wrapper" | "market">("wrapper");
+  const marketNames = nameKind === "market" && isMarketLaunchWired();
+  const marketTyped = diy.anchorTicker.trim();
+  // one field, two ways to use it: a short symbol invents a name, a full address picks one that already exists
+  // case is not the point of an address here, so the checksum is not required of what was typed
+  const marketExisting = isAddress(marketTyped, { strict: false }) ? (getAddress(marketTyped) as Address) : undefined;
+  const marketSymbol = marketExisting ? "" : marketTyped.toUpperCase();
+  const marketNameSalt = useMemo(() => (marketSymbol ? keccak256(stringToHex(marketSymbol)) : undefined), [marketSymbol]);
+  const marketDecimals = useReadContract({
+    abi: MarketLauncherAbi, address: ADDRESSES.marketTickerLauncher, functionName: "requiredDecimals",
+    query: { enabled: marketNames },
+  });
+  const marketPredicted = useReadContract({
+    abi: MarketLauncherAbi, address: ADDRESSES.marketTickerLauncher, functionName: "predictName",
+    args: marketNameSalt && marketDecimals.data !== undefined ? [marketNameSalt, marketSymbol, marketDecimals.data] : undefined,
+    query: { enabled: marketNames && !!marketNameSalt && marketDecimals.data !== undefined },
+  });
+
+
+  /**
+   * The name a coin priced in an invented ticker must sort below. `TickerLauncher` reverts `CoinNotFirst` when a
+   * coin's address is not below its name's, so the coin's salt is ground for that as well as for the suffix, and a
+   * creator never sees a launch fail for it. Only this path: a coin priced in ETH can never sort below address
+   * zero, and one priced in USDG, a Stock Token or another coin goes through a launcher with its own rules.
+   *
+   * `previewLaunch` returns the name's address whether it exists already or is created inside the launch, so a
+   * brand new name is covered too.
+   */
+  const coinMustSortBelow: Address | undefined = diyOn
+    ? marketNames
+      // a market name, whether it exists or is about to: either way the coin is ground under its address
+      ? (marketExisting ?? (sharedOn ? (diyQuote as Address | undefined) : (marketPredicted.data as Address | undefined)))
+      : sharedOn
+        ? (selectedDiyQuote?.quoteToken as Address | undefined)
+        : (tickerPreview.data?.[0] as Address | undefined)
+    : undefined;
 
   // ---- economics preview: the opening market cap in the pair's own units, and the pool fee
   const econ = (() => {
@@ -402,8 +421,8 @@ export function CreateForm() {
     if (reservedSymbol.data === true) return `${coinSymbolUp} is an anchor ticker on Robinhood Chain, so a coin cannot use it.`;
     if (nameReserved) return `"${name.trim()}" is the name of an official asset, so a coin cannot use it.`;
     if (!/^[\x20-\x7E]+$/.test(name.trim())) return "Names use plain letters, digits and punctuation. Emoji and other scripts go in the description or the image.";
-    if (!logo.trim()) return "Add an image for your coin.";
-    if (!description.trim()) return "Write a description for your coin.";
+    // the image and the description are marked optional on the form and are optional here: a launch is never
+    // blocked on either. a coin with neither still trades; the fields say "optional" and they mean it
     if (feeWallet && !isAddress(feeWallet)) return "Fee wallet is not a valid address.";
     if (taxBps > maxTaxBps) return `Creator tax is above the ceiling, ${bpsToPct(maxTaxBps)} right now.`;
     if (!config.data?.enabled) return "Selected launch config is disabled.";
@@ -425,8 +444,22 @@ export function CreateForm() {
     if (tab !== "diy" && tab !== "eth" && !econ) return "Pair token is not approved on the factory.";
     if (firstBuyAmt > 0n && !firstBuyPreview) return "The first buy has no preview yet. Wait a moment, or clear it.";
     if (firstBuyAmt > 0n && firstBuyPreview && firstBuyPreview.tokensOut === 0n) return "The first buy is too small to receive anything. Raise it or clear it.";
-    if (inventing && newTickerFee.data === undefined) return "Could not read the new ticker fee. Try again in a moment.";
-    if (tab === "diy" && sharedOn) {
+    // a market name has no such fee: it is inventory placed in a pool, not a wrapper to be opened
+    if (inventing && !marketNames && newTickerFee.data === undefined) return "Could not read the new ticker fee. Try again in a moment.";
+    if (tab === "diy" && marketNames) {
+      // a market name is checked against its own launcher, not against the wrapper launcher's registry
+      if (isZero(ADDRESSES.marketTickerLauncher)) return "Market names are not available on this deployment.";
+      if (marketDecimals.data === undefined) return "Could not read what decimals a name carries. Try again in a moment.";
+      if (marketExisting) {
+        // an address names an existing market; nothing is predicted and nothing is created
+      } else if (sharedOn) {
+        if (!diyQuote) return "Pick a name to price against.";
+      } else {
+        if (!marketSymbol) return "Pick a name.";
+        if (!marketPredicted.data) return "Could not work out where that name would land. Try again in a moment.";
+      }
+      if (!coinMustSortBelow) return "The name's address is not known yet.";
+    } else if (tab === "diy" && sharedOn) {
       if (!diyQuote) return "Pick a ticker to price against.";
       if (!tickerPreview.data) return "That ticker cannot be launched against right now.";
     } else if (tab === "diy") {
@@ -439,29 +472,35 @@ export function CreateForm() {
   }
 
   const supplyForVanity = config.data?.supply;
-  const vanityInp = useMemo(
-    () => (step === 2 ? vanityInputs({ user, supply: supplyForVanity, name, symbol, logo, description, socials, seed }) : undefined),
-    [step, user, supplyForVanity, name, symbol, logo, description, socials, seed],
-  );
+  // not memoised: `socials` is rebuilt on every render, so a memo could never hold anyway, and the object is a
+  // few fields. What the effect below keys off is the one stable thing about it, its key
+  const vanityInp = step === 1
+    ? vanityInputs({ user, supply: supplyForVanity, name, symbol, logo, description, socials, seed, below: coinMustSortBelow, addresses: ADDRESSES })
+    : undefined;
+  const vanityKey = vanityInp?.key;
   useEffect(() => {
-    if (!vanityInp) return;
-    let p = vanityCache.current.get(vanityInp.key);
+    if (!vanityKey) return;
+    const inp = vanityInputs({ user, supply: supplyForVanity, name, symbol, logo, description, socials, seed, below: coinMustSortBelow, addresses: ADDRESSES });
+    if (!inp) return;
+    // the grind runs ahead of the launch so the salt is ready when the wallet opens; the result lives in the
+    // cache, keyed the same way, so `vanityFor` finds this one rather than starting a second
+    let p = vanityCache.current.get(inp.key);
     if (!p) {
-      p = grindSalt({ deployer: ADDRESSES.launchDeployer, initiator: vanityInp.initiator, initCodeHash: vanityInp.initCodeHash, seed });
-      vanityCache.current.set(vanityInp.key, p);
+      p = grindSalt({ deployer: ADDRESSES.launchDeployer, initiator: inp.initiator, initCodeHash: inp.initCodeHash, seed, below: inp.below });
+      vanityCache.current.set(inp.key, p);
     }
-    // the grind runs ahead of the launch so the salt is ready when the wallet opens; the result lives in the cache
     p.catch(() => {});
-    return () => {};
-  }, [vanityInp, seed]);
+    // the key is built from exactly the fields read here, so it is what changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vanityKey, seed]);
 
   /** The ground salt and address for the current fields, one promise per seed, init code and wallet. */
   function vanityFor(useSeed: Hex = seed): Promise<GrindResult> | undefined {
-    const inp = vanityInputs({ user, supply: config.data?.supply, name, symbol, logo, description, socials, seed: useSeed });
+    const inp = vanityInputs({ user, supply: config.data?.supply, name, symbol, logo, description, socials, seed: useSeed, below: coinMustSortBelow, addresses: ADDRESSES });
     if (!inp) return undefined;
     let p = vanityCache.current.get(inp.key);
     if (!p) {
-      p = grindSalt({ deployer: ADDRESSES.launchDeployer, initiator: inp.initiator, initCodeHash: inp.initCodeHash, seed: useSeed });
+      p = grindSalt({ deployer: ADDRESSES.launchDeployer, initiator: inp.initiator, initCodeHash: inp.initCodeHash, seed: useSeed, below: inp.below });
       vanityCache.current.set(inp.key, p);
     }
     return p;
@@ -649,6 +688,34 @@ export function CreateForm() {
     const minOut = firstBuyPreview ? applySlippage(firstBuyPreview.tokensOut, 100) : 0n;
     // a first buy always carries a positive minimum, as the listing buys do; a preview that rounds to nothing stops here
     if (firstBuyAmt > 0n && minOut === 0n) throw new Error("the first buy would receive nothing at this size. raise it or clear it.");
+    if (tab === "diy" && marketNames) {
+      // a market name launches through its own registrar. There is no separate fee for making one: the name is
+      // inventory placed in a pool, not a wrapper to be minted from
+      const name = (marketExisting ?? (sharedOn ? diyQuote : (marketPredicted.data as Address | undefined))) as Address | undefined;
+      if (!name) throw new Error("the name's address is not known yet. wait a moment and try again.");
+      const decimals = marketDecimals.data;
+      if (decimals === undefined) throw new Error("the launcher has not said what decimals a name carries.");
+      const expected = await client.readContract({
+        abi: MarketLauncherAbi, address: ADDRESSES.marketTickerLauncher, functionName: "previewEconomics", args: [BigInt(cfgId), name],
+      });
+      const p = { ...base, expectedEconomics: expected as Hex };
+      if (marketExisting || sharedOn) {
+        return {
+          label: "Launch",
+          request: { abi: MarketLauncherAbi, address: ADDRESSES.marketTickerLauncher, functionName: "launch", args: [p, BigInt(cfgId), name], value: fee },
+          tokenIndex: 0,
+        };
+      }
+      return {
+        label: `Create ${marketSymbol} and launch`,
+        request: {
+          abi: MarketLauncherAbi, address: ADDRESSES.marketTickerLauncher, functionName: "createAndLaunch",
+          args: [marketNameSalt!, marketSymbol, decimals, p, BigInt(cfgId)],
+          value: fee,
+        },
+        tokenIndex: 1,
+      };
+    }
     if (tab === "diy") {
       // read the terms right before sending, so a stale preview reverts instead of settling. the fee for a new
       // name is due only when the name does not exist yet
@@ -870,6 +937,9 @@ export function CreateForm() {
         return false;
       }
       launchedToken.current = outcome.r.record.token;
+      // the coin is on chain and carries the image's link; now the bytes go, so a draft nobody launched never
+      // costs an upload
+      void uploadPickedImage(logo);
       setActivating({ token: outcome.r.record.token, isTicker: tab === "diy", hash: outcome.r.record.hash });
       try {
         window.localStorage.removeItem("tickr.launch.seed.hint");
@@ -1003,7 +1073,18 @@ export function CreateForm() {
   }
 
   const upd = <K extends keyof typeof diy>(k: K, v: (typeof diy)[K]) => setDiy((s) => ({ ...s, [k]: v }));
-  const launchLabel = tab === "diy" && !sharedOn ? (firstBuyAmt > 0n ? "Create ticker, launch and buy" : "Create ticker and launch") : firstBuyAmt > 0n ? "Launch and buy" : "Launch";
+  const launchLabel =
+    tab === "diy" && !sharedOn
+      ? marketNames
+        ? marketExisting
+          ? "Launch"
+          : `Create ${marketSymbol || "the name"} and launch`
+        : firstBuyAmt > 0n
+          ? "Create ticker, launch and buy"
+          : "Create ticker and launch"
+      : firstBuyAmt > 0n
+        ? "Launch and buy"
+        : "Launch";
   // A ticker is minted once. If it already exists, the creator joins it instead of minting another.
   const takenBy = useReadContract({
     abi: TickerLauncherAbi,
@@ -1061,14 +1142,16 @@ export function CreateForm() {
   // The pair everyone will see on a chart.
   const pairLeft = coinTicker || "YOURCOIN";
   const pairRight = quoteTicker || (tab === "diy" ? example : "QUOTE");
-  const canAdvance = step === 0 ? (tab === "diy" ? (sharedOn ? !!diyQuote : tickerUp.length > 0 && reservedTicker.data !== true && !tickerTaken) : tab === "coin" ? !!quoteCoin : tab === "market" ? !!marketToken : tab === "official" ? !!official : true) : !!name.trim() && !!symbol.trim() && !!logo.trim() && !!description.trim();
+  // the coin comes first: its name and ticker; then what it is priced in
+  const pairChosen = tab === "diy" ? (sharedOn ? !!diyQuote : tickerUp.length > 0 && reservedTicker.data !== true && !tickerTaken) : tab === "coin" ? !!quoteCoin : tab === "market" ? !!marketToken : tab === "official" ? !!official : true;
+  const canAdvance = !!name.trim() && !!symbol.trim() && pairChosen;
 
-  const STEP_LABELS = ["Pair", "Coin", "Review"];
+  const STEP_LABELS = ["Coin", "Review"];
 
   const tickerState: "checking" | "available" | "taken" | "reserved" =
     reservedTicker.data === true ? "reserved" : tickerTaken ? "taken" : reservedTicker.isFetching || takenBy.isFetching ? "checking" : "available";
 
-  const seedLine: string | undefined = inventing && tickerUp.length > 0 && newTickerFee.data ? `${fmtAmount(newTickerFee.data, 18)} eth of it opens ${tickerUp}'s dollar pool` : undefined;
+  const seedLine: string | undefined = inventing && !marketNames && tickerUp.length > 0 && newTickerFee.data ? `${fmtAmount(newTickerFee.data, 18)} eth of it opens ${tickerUp}'s dollar pool` : undefined;
   const targetLabel = "opening cap";
   const targetValue = econ ? `${fmtAmount(econ.phantom, econ.decimals, { sig: 4 })} ${econ.symbol}` : "-";
 
@@ -1229,7 +1312,7 @@ export function CreateForm() {
   }
 
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-14 lg:items-start">
+    <div className="create-form lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-12 lg:items-start">
       <div className="min-w-0">
       <div ref={stepTrack} className="glide-track flex gap-1 mb-12">
         <GlideIndicator indRef={stepInd} />
@@ -1251,196 +1334,14 @@ export function CreateForm() {
 
       {step === 0 && (
         <div className="view-fade">
-          <div className="pair-choose">
-            <div className="label label-muted mb-3">what your coin is priced in</div>
-            <div ref={tabTrack} className="glide-track flex flex-wrap">
-              <GlideIndicator indRef={tabInd} />
-              {CHOICES.filter((c) => c.id !== "token" || !isZero(ADDRESSES.marketQuoteLauncher) || coinsQ.data?.length || diyQuotesQ.data?.length).map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={`tab glide-item ${c.hero ? "tab-hero" : ""} ${c.keepCase ? "keep-case" : ""}`}
-                  data-active={choice === c.id}
-                  data-glide-active={choice === c.id}
-                  onClick={() => choose(c.id)}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {choice === "eth" && (
-            <div className="quote-card">
-              <div className="flex items-center gap-2">
-                <span className="num font-semibold text-white text-[17px]">ETH</span>
-                <span className="qp-kind">native</span>
-              </div>
-              <p className="text-muted mt-2">
-                your coin opens at a <span className="num text-white">{targetValue}</span> market cap{usdNote ? `, ${usdNote}` : ""}. the whole supply sits in a pool against <span className="cap">ETH</span>, and every fee it earns is paid in <span className="cap">ETH</span>.
-              </p>
-            </div>
-          )}
-
-          {choice === "usdg" && (
-            <>
-              {usdgAsset && !usdgAsset.approved && <div className="text-muted">Not currently approved as a pair token.</div>}
-              {!isZero(ADDRESSES.usdg) && <PairCard address={ADDRESSES.usdg} />}
-            </>
-          )}
-
-          {choice === "token" && (
-            <>
-              <RainbowRule className="mb-4" />
-              <h2>pick a token</h2>
-              <div className="mt-6">
-                <QuotePicker
-                  items={pickItems}
-                  loading={pickLoading}
-                  selected={selectedPick}
-                  onSelect={pick}
-                  onAddress={(v) => {
-                    setPasted(v);
-                    setPastedNote(undefined);
-                    if (!resolveAddress(v))
-                      setPastedNote("this address is not a quote asset on tickr. a coin can be priced in ETH, USDG, a Stock Token from the Robinhood Assets registry, any token with a market, a tickr coin, or a name you invent. here is what it is:");
-                  }}
-                />
-              </div>
-              {pastedNote && <p className="text-[13px] text-muted mt-3">{pastedNote}</p>}
-              {isAddress(pasted) && !selectedPick && <PairCard address={pasted as Address} />}
-              {selectedPick && <PairCard address={selectedPick} />}
-              {tab === "coin" && isZero(ADDRESSES.coinQuoteLauncher) && quoteCoin && <Notice kind="warn">Coin-quoted launches are not available on this deployment.</Notice>}
-              {tab === "market" && !DEMO && isZero(ADDRESSES.marketQuoteLauncher) && marketToken && <Notice kind="warn">Launches priced in a chain token are not available on this deployment.</Notice>}
-              {tab === "market" && selectedMarket && (
-                <p className="text-[13px] text-muted mt-3">
-                  priced from its {selectedMarket.counter} pool on Uniswap v3, {compact(selectedMarket.depthEth)} ETH deep, at the moment you launch.
-                </p>
-              )}
-            </>
-          )}
-
-          {choice === "stocks" && (
-            <>
-              <RainbowRule className="mb-4" />
-              <h2>pick a Stock Token</h2>
-              <div className="mt-7">
-                {stocksQ.isLoading || assets.isLoading ? (
-                  <div className="text-muted">Loading Stock Tokens…</div>
-                ) : officials.length === 0 ? (
-                  <div className="text-muted">
-                    No <span className="cap">Stock Tokens</span> are registered on this deployment yet.
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3 mb-4">
-                      <OfficialBadge />
-                      <span className="text-dim text-[13px]">
-                        issued by <span className="cap">Robinhood Assets</span>. a Stock Token needs a published price feed to size the opening market cap.{" "}
-                        {officials.filter((o) => o.priceUsd !== undefined).length} of {officials.length} have one today.
-                      </span>
-                    </div>
-                    <div className={`grid sm:grid-cols-2 lg:grid-cols-3 gap-3 ${official ? "dim-group" : ""}`}>
-                      {officials.map((o) => (
-                        <button
-                          key={o.address}
-                          type="button"
-                          disabled={o.priceUsd === undefined}
-                          title={o.priceUsd === undefined ? "no price feed published for this asset yet" : undefined}
-                          onClick={() => {
-                            setTab("official");
-                            setOfficial(o.address);
-                          }}
-                          className="row-card px-4 py-3 text-left flex items-center justify-between gap-3 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          data-selected={sameAddr(official, o.address)}
-                          data-picked={sameAddr(official, o.address)}
-                        >
-                          <span className="flex items-center gap-2.5 min-w-0">
-                            <StockLogo ticker={o.ticker} />
-                            <span className="font-semibold num">{o.ticker}</span>
-                          </span>
-                          <span className="num text-dim text-[13px]">
-                            {o.priceUsd === undefined ? "no feed" : `$${o.priceUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-              {official && <PairCard address={official} />}
-            </>
-          )}
-
-          {choice === "invent" && (
-            <>
-              <RainbowRule className="mb-4" />
-              <h2>invent a quote asset</h2>
-              <p className="text-muted mt-3">
-                name the asset your coin is priced in. the pair reads{" "}
-                <span className="num text-white">
-                  {pairLeft}/<span className="sw-yellow">{tickerUp || example}</span>
-                </span>
-                .
-              </p>
-              <div className="ticker-field mt-6">
-                <input
-                  className="num ticker-input"
-                  value={diy.anchorTicker}
-                  onChange={(e) => upd("anchorTicker", e.target.value.toUpperCase())}
-                  placeholder={example}
-                  maxLength={12}
-                  autoFocus
-                />
-                {tickerUp.length > 0 && (
-                  <span className={`avail-chip ${tickerState}`} aria-live="polite">
-                    {tickerState === "checking" ? "checking" : tickerState === "available" ? "available" : tickerState === "taken" ? "taken" : "reserved"}
-                  </span>
-                )}
-              </div>
-              {tickerTaken && (
-                <p className="text-[13px] text-signal mt-3">
-                  <span className="num">{tickerUp}</span> already exists.{" "}
-                  <button
-                    type="button"
-                    className="underline hover:text-white"
-                    onClick={() => {
-                      setDiyQuote(takenBy.data as Address);
-                      setDiyMode("existing");
-                      setChoice("token");
-                    }}
-                  >
-                    Use it instead
-                  </button>{" "}
-                  and your coin is priced in the one everyone already trades.
-                </p>
-              )}
-              {reservedTicker.data === true && (
-                <p className="text-[13px] text-signal mt-3">
-                  <span className="num">{tickerUp}</span> is an anchor ticker on <span className="cap">Robinhood Chain</span>, so it cannot be an invented name. Pick another.
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {step === 1 && (
-        <div className="view-fade">
           <RainbowRule className="mb-4" />
           <h2>Name your coin</h2>
-          <p className="text-muted mt-3">the ticker and name are written into the contract and cannot be changed. the whole supply goes into the pool, locked.</p>
-          <div className="mt-5 text-[15px]">
-            <span className="label label-muted mr-3">pair</span>
-            <span className="num text-white text-[17px]">
-              {pairLeft}/<span className="sw-yellow">{pairRight}</span>
-            </span>
-          </div>
+          <p className="text-muted mt-2 text-[14px]">pick a ticker and a name. neither can be changed after launch.</p>
           {/* the ticker leads: it is what the pair reads and what people type, the name is the label under it */}
-          <div className="grid sm:grid-cols-2 gap-5 mt-7">
+          <div className="grid gap-4 mt-6">
             <Field label="Ticker">
               <div className="ticker-field">
-                <input className="num" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="STAND" maxLength={16} autoFocus />
+                <input className="num ticker-input" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="STAND" maxLength={16} autoFocus />
                 {symbolState && (
                   <span className={`avail-chip ${symbolState}`} aria-live="polite">
                     {symbolState}
@@ -1466,7 +1367,7 @@ export function CreateForm() {
             <LogoPicker value={logo} onChange={setLogo} />
           </div>
           <div className="mt-5">
-            <Field label="Description" hint={`shown on the coin's page and stored with the coin. ${description.length.toLocaleString()} of 1,000 characters.`}>
+            <Field label="Description, optional" hint={`shown on the coin's page and stored with the coin. ${description.length.toLocaleString()} of 1,000 characters.`}>
               <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} placeholder="what this coin is, in a sentence or two." />
             </Field>
           </div>
@@ -1571,8 +1472,7 @@ export function CreateForm() {
           )}
         </div>
       )}
-
-      {step === 2 && (
+      {step === 1 && (
         <div className="view-fade">
           <RainbowRule className="mb-4" />
           <h2>Review</h2>
@@ -1612,7 +1512,7 @@ export function CreateForm() {
 
           <div className="mt-7">
             <Row k="Launch fee" v={`${fmtAmount(launchFee.data, 18)} ETH`} />
-            {inventing && <Row k={`New ticker fee, opens ${tickerUp || "the name"}'s dollar pool`} v={`${fmtAmount(newTickerFee.data, 18)} ETH`} />}
+            {inventing && !marketNames && <Row k={`New ticker fee, opens ${tickerUp || "the name"}'s dollar pool`} v={`${fmtAmount(newTickerFee.data, 18)} ETH`} />}
             <Row k="Supply" v={config.data ? fmtAmount(config.data.supply, 18, { sig: 3 }) : "-"} />
             <Row k="Opening market cap" v={econ ? `${fmtAmount(econ.phantom, econ.decimals, { sig: 4 })} ${econ.symbol}${usdNote ? `, ${usdNote}` : ""}` : "-"} />
             {tab === "official" && selectedStock?.priceUsd !== undefined && (
@@ -1634,7 +1534,16 @@ export function CreateForm() {
             <Row k="Creator tax" v={bpsToPct(taxBps)} />
           </div>
 
-          {tab === "diy" && !sharedOn && (
+          {tab === "diy" && !sharedOn && marketNames && (
+            <div className="mt-8">
+              <div className="label mb-2">What {quoteSymbol || "the name you pair against"} is</div>
+              <div className="text-[13px] text-muted mt-2" data-testid="market-name-review">
+                a fixed inventory name. its whole supply goes into one pool against usdg and trades at a price
+                there. it cannot be minted or redeemed, so what it is worth is what that pool pays.
+              </div>
+            </div>
+          )}
+          {tab === "diy" && !sharedOn && !marketNames && (
             <div className="mt-8">
               <div className="label mb-2">What {quoteSymbol || "the ticker you pair against"} is</div>
               <div className="flex h-[3px] overflow-hidden rounded-full">
@@ -1684,8 +1593,8 @@ export function CreateForm() {
 
       {/* the thing you came to do leads the row; going back is the secondary move and sits after it */}
       <div className="flex items-center gap-3 mt-12">
-        {step < 2 ? (
-          <button type="button" className="btn btn-cta" disabled={!canAdvance || (step === 1 && (reservedSymbol.data === true || nameReserved))} onClick={() => setStep(step + 1)}>
+        {step < 1 ? (
+          <button type="button" className="btn btn-cta" disabled={!canAdvance || (step === 0 && (reservedSymbol.data === true || nameReserved))} onClick={() => setStep(step + 1)}>
             Continue
           </button>
         ) : (
@@ -1706,7 +1615,12 @@ export function CreateForm() {
             Back
           </button>
         )}
-        {step === 2 && !user && <span className="text-muted text-[14px]">Connect a wallet to launch.</span>}
+        {step === 0 && !canAdvance && (
+          <span className="text-muted text-[14px]">
+            {!symbol.trim() || !name.trim() ? "name your coin to continue." : "pick what it is priced in, on the right."}
+          </span>
+        )}
+        {step === 1 && !user && <span className="text-muted text-[14px]">Connect a wallet to launch.</span>}
       </div>
 
 
@@ -1725,7 +1639,9 @@ export function CreateForm() {
         subject={symbol || name || "Untitled"}
         detail={
           (inventing
-            ? `${tickerUp || "The ticker"} is created with its own dollar pool, then your coin's pool opens with the whole supply locked in it.`
+            ? marketNames
+              ? `${marketSymbol || "The name"} is created with its whole supply placed in one pool against dollars, then your coin's pool opens with the whole supply locked in it.`
+              : `${tickerUp || "The ticker"} is created with its own dollar pool, then your coin's pool opens with the whole supply locked in it.`
             : "Your coin's pool opens with the whole supply locked in it.") +
           (firstBuyAmt > 0n
             ? ` Your first buy of ${fmtAmount(firstBuyAmt, firstBuyDecimals)} ${firstBuySymbol} then buys from the pool like anyone else, at the opening price.`
@@ -1742,6 +1658,225 @@ export function CreateForm() {
         }
       />
     </div>
+      {step === 0 && (
+        <div className="pair-panel view-fade">
+          <div className="pair-choose">
+            <div className="label label-muted mb-3">what {coinTicker || "your coin"} is priced in</div>
+            <div ref={tabTrack} className="glide-track flex">
+              <GlideIndicator indRef={tabInd} />
+              {CHOICES.filter((c) => c.id !== "token" || !isZero(ADDRESSES.marketQuoteLauncher) || coinsQ.data?.length || diyQuotesQ.data?.length).map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`tab glide-item ${c.hero ? "tab-hero" : ""} ${c.keepCase ? "keep-case" : ""}`}
+                  data-active={choice === c.id}
+                  data-glide-active={choice === c.id}
+                  onClick={() => choose(c.id)}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {choice === "eth" && (
+            <div className="quote-card">
+              <div className="flex items-center gap-2">
+                <span className="num font-semibold text-white text-[17px]">ETH</span>
+                <span className="qp-kind">native</span>
+              </div>
+              <p className="text-muted mt-2">
+                your coin opens at a <span className="num text-white">{targetValue}</span> market cap{usdNote ? `, ${usdNote}` : ""}. the whole supply sits in a pool against <span className="cap">ETH</span>, and every fee it earns is paid in <span className="cap">ETH</span>.
+              </p>
+            </div>
+          )}
+
+          {choice === "usdg" && (
+            <>
+              {usdgAsset && !usdgAsset.approved && <div className="text-muted">Not currently approved as a pair token.</div>}
+              {!isZero(ADDRESSES.usdg) && <PairCard address={ADDRESSES.usdg} />}
+            </>
+          )}
+
+          {choice === "token" && (
+            <>
+              <div className="mt-6">
+                <QuotePicker
+                  items={pickItems}
+                  loading={pickLoading}
+                  selected={selectedPick}
+                  onSelect={pick}
+                  onAddress={(v) => {
+                    setPasted(v);
+                    setPastedNote(undefined);
+                    if (!resolveAddress(v))
+                      setPastedNote("this address is not a quote asset on tickr. a coin can be priced in ETH, USDG, a Stock Token from the Robinhood Assets registry, any token with a market, a tickr coin, or a name you invent. here is what it is:");
+                  }}
+                />
+              </div>
+              {pastedNote && <p className="text-[13px] text-muted mt-3">{pastedNote}</p>}
+              {isAddress(pasted) && !selectedPick && <PairCard address={pasted as Address} />}
+              {selectedPick && <PairCard address={selectedPick} />}
+              {tab === "coin" && isZero(ADDRESSES.coinQuoteLauncher) && quoteCoin && <Notice kind="warn">Coin-quoted launches are not available on this deployment.</Notice>}
+              {tab === "market" && !DEMO && isZero(ADDRESSES.marketQuoteLauncher) && marketToken && <Notice kind="warn">Launches priced in a chain token are not available on this deployment.</Notice>}
+              {tab === "market" && selectedMarket && (
+                <p className="text-[13px] text-muted mt-3">
+                  priced from its {selectedMarket.counter} pool on Uniswap v3, {compact(selectedMarket.depthEth)} ETH deep, at the moment you launch.
+                </p>
+              )}
+            </>
+          )}
+
+          {choice === "stocks" && (
+            <>
+              <RainbowRule className="mb-4" />
+              <h2>pick a Stock Token</h2>
+              <div className="mt-7">
+                {stocksQ.isLoading || assets.isLoading ? (
+                  <div className="text-muted">Loading Stock Tokens…</div>
+                ) : officials.length === 0 ? (
+                  <div className="text-muted">
+                    No <span className="cap">Stock Tokens</span> are registered on this deployment yet.
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3 mb-4">
+                      <OfficialBadge />
+                      <span className="text-dim text-[13px]">
+                        issued by <span className="cap">Robinhood Assets</span>. {officials.filter((o) => o.priceUsd !== undefined).length} have a live price right now.
+                      </span>
+                    </div>
+                    <div className={`pick-grid ${official ? "dim-group" : ""}`}>
+                      {officials.map((o) => (
+                        <button
+                          key={o.address}
+                          type="button"
+                          disabled={o.priceUsd === undefined}
+                          title={o.priceUsd !== undefined ? undefined : o.hasFeed ? "this asset has a feed, but its last price is too old to launch against right now" : "no price feed published for this asset yet"}
+                          onClick={() => {
+                            setTab("official");
+                            setOfficial(o.address);
+                          }}
+                          className="row-card pick-row text-left flex items-center justify-between gap-3 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          data-selected={sameAddr(official, o.address)}
+                          data-picked={sameAddr(official, o.address)}
+                        >
+                          <span className="flex items-center gap-2.5 min-w-0">
+                            <StockLogo ticker={o.ticker} />
+                            <span className="font-semibold num truncate">{o.ticker}</span>
+                          </span>
+                          <span className="num text-dim text-[13px] shrink-0">
+                            {o.priceUsd !== undefined
+                              ? `$${o.priceUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                              : o.hasFeed
+                                ? "price stale"
+                                : "no feed"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              {official && <PairCard address={official} />}
+            </>
+          )}
+
+          {choice === "invent" && (
+            <>
+              <p className="text-muted mt-3">
+                name the asset your coin is priced in. the pair reads{" "}
+                <span className="num text-white">
+                  {pairLeft}/<span className="sw-yellow">{tickerUp || example}</span>
+                </span>
+                .
+              </p>
+              {isMarketLaunchWired() && (
+                <div className="mt-4 flex gap-2" data-testid="name-kind">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${nameKind === "wrapper" ? "" : "is-quiet"}`}
+                    data-testid="kind-wrapper"
+                    aria-pressed={nameKind === "wrapper"}
+                    onClick={() => setNameKind("wrapper")}
+                  >
+                    redeemable
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${nameKind === "market" ? "" : "is-quiet"}`}
+                    data-testid="kind-market"
+                    aria-pressed={nameKind === "market"}
+                    onClick={() => setNameKind("market")}
+                  >
+                    fixed inventory
+                  </button>
+                </div>
+              )}
+              <div className="ticker-field mt-6">
+                <input
+                  className="num ticker-input"
+                  value={diy.anchorTicker}
+                  // a symbol is upper case; an address is left as typed, so it stays an address
+                  onChange={(e) => upd("anchorTicker", e.target.value.startsWith("0x") ? e.target.value : e.target.value.toUpperCase())}
+                  placeholder={example}
+                  // a market name may be given as an address instead of a symbol, and an address is longer
+                  maxLength={marketNames ? 42 : 12}
+                  autoFocus
+                />
+                {tickerUp.length > 0 && !marketNames && (
+                  <span className={`avail-chip ${tickerState}`} aria-live="polite">
+                    {tickerState === "checking" ? "checking" : tickerState === "available" ? "available" : tickerState === "taken" ? "taken" : "reserved"}
+                  </span>
+                )}
+              </div>
+              {marketNames && (
+                <p className="text-muted text-[13px] mt-3" data-testid="market-name-note">
+                  a fixed inventory name: it holds its whole supply in one pool and trades at a price, rather than
+                  minting a dollar for a dollar. it carries {marketDecimals.data ?? "-"} decimals, the same as the
+                  asset it is priced in.
+                  {marketExisting ? (
+                    <>
+                      {" "}
+                      you gave an address, so this launches under the name already at{" "}
+                      <span className="num text-white" data-testid="existing-name">{marketExisting}</span>, and your
+                      coin is ground to sort below it.
+                    </>
+                  ) : marketPredicted.data ? (
+                    <>
+                      {" "}
+                      it will be at <span className="num text-white" data-testid="predicted-name">{String(marketPredicted.data)}</span>, and your coin
+                      is ground to sort below it.
+                    </>
+                  ) : null}
+                </p>
+              )}
+              {tickerTaken && (
+                <p className="text-[13px] text-signal mt-3">
+                  <span className="num">{tickerUp}</span> already exists.{" "}
+                  <button
+                    type="button"
+                    className="underline hover:text-white"
+                    onClick={() => {
+                      setDiyQuote(takenBy.data as Address);
+                      setDiyMode("existing");
+                      setChoice("token");
+                    }}
+                  >
+                    Use it instead
+                  </button>{" "}
+                  and your coin is priced in the one everyone already trades.
+                </p>
+              )}
+              {reservedTicker.data === true && (
+                <p className="text-[13px] text-signal mt-3">
+                  <span className="num">{tickerUp}</span> is an anchor ticker on <span className="cap">Robinhood Chain</span>, so it cannot be an invented name. Pick another.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {preview}
     </div>
   );

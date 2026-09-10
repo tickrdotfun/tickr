@@ -1,6 +1,9 @@
 import { encodeAbiParameters, getCreate2Address, hexToBytes, bytesToHex, keccak256, encodePacked, type Address, type Hex } from "viem";
 import { TOKEN_CREATION_CODE } from "./tokenBytecode";
 
+/** An address that is not set. Kept local so this module has no dependency on the deployment record. */
+const isZero = (a: Address) => /^0x0{40}$/i.test(a);
+
 /**
  * Every coin launched from the create page gets an address ending in this. Nothing on chain enforces it: the factory
  * deploys each coin with CREATE2 at `keccak256(initiator ++ TokenParams.salt)`, and the salt is free, so the page
@@ -55,9 +58,20 @@ const YIELD_EVERY = 4096;
 const HARD_CAP = 2_000_000;
 
 /**
- * Finds the first salt whose predicted address ends in `suffix`. Deterministic from `seed`. Works on bytes with three
- * keccaks per try and yields to the event loop every few thousand tries so the page stays responsive. A four character
- * suffix takes 65,536 tries on average, well under a second in a browser.
+ * Finds the first salt whose predicted address ends in `suffix`, and, when `below` is given, also sorts strictly
+ * below that address. Deterministic from `seed`. Works on bytes with three keccaks per try and yields to the event
+ * loop every few thousand tries so the page stays responsive. A four character suffix takes 65,536 tries on average,
+ * well under a second in a browser.
+ *
+ * What `below` costs depends entirely on where that address sits, not on its first nibble alone. Names are ground to
+ * start `0xF`, which spans 0.9375 to 1.0 of the address space, so the extra work is at most 6.7% and falls towards
+ * zero the higher the name sits; one measured name, `0xF9d3…`, costs 2.5%. A name low in the space would cost far
+ * more, and one near zero is impossible; the search fails with a clear message rather than returning a wrong answer.
+ *
+ * `below` is for a coin launched against an invented name: the coin must be currency0 of its pool and the name
+ * currency1, which `TickerLauncher` enforces by reverting `CoinNotFirst`. Grinding for it here means a creator is
+ * never sent a transaction that reverts. It is not passed for other quote types, and must not be: a coin paired with
+ * native ETH can never sort below address zero, so requiring it there would grind for ever.
  */
 export async function grindSalt(opts: {
   deployer: Address;
@@ -65,12 +79,17 @@ export async function grindSalt(opts: {
   initCodeHash: Hex;
   seed: Hex;
   suffix?: string;
+  /** The name this coin will be priced in. The predicted address must sort strictly below it. */
+  below?: Address;
   onProgress?: (tries: number) => void;
 }): Promise<GrindResult> {
   const suffix = (opts.suffix ?? VANITY_SUFFIX).toLowerCase();
   if (!/^[0-9a-f]+$/.test(suffix) || suffix.length === 0 || suffix.length > 40) throw new Error("bad suffix");
   const want = hexToBytes(`0x${suffix.length % 2 ? "0" + suffix : suffix}`);
   const oddNibble = suffix.length % 2 === 1;
+  // compared as bytes, most significant first, so no bigint is needed in the hot loop
+  const below = opts.below ? hexToBytes(opts.below) : undefined;
+  if (below && below.length !== 20) throw new Error("bad below address");
 
   // seed ++ uint256(i)
   const saltIn = new Uint8Array(64);
@@ -102,6 +121,18 @@ export async function grindSalt(opts: {
       const wb = want[k];
       ok = k === 0 && oddNibble ? (hb & 0x0f) === wb : hb === wb;
     }
+    // and, for an invented name, the address has to sort below it as well
+    if (ok && below) {
+      ok = false;
+      for (let k = 0; k < 20; k++) {
+        const ab = h[12 + k];
+        const bb = below[k];
+        if (ab !== bb) {
+          ok = ab < bb;
+          break;
+        }
+      }
+    }
     if (ok) {
       const address = bytesToHex(h.slice(12)) as Address;
       const salt = bytesToHex(userSalt) as Hex;
@@ -112,5 +143,45 @@ export async function grindSalt(opts: {
       await new Promise<void>((r) => setTimeout(r, 0));
     }
   }
-  throw new Error(`no address ending in ${suffix} within ${HARD_CAP.toLocaleString()} tries`);
+  throw new Error(
+    opts.below
+      ? `no address ending in ${suffix} and sorting below ${opts.below} within ${HARD_CAP.toLocaleString()} tries`
+      : `no address ending in ${suffix} within ${HARD_CAP.toLocaleString()} tries`,
+  );
+}
+
+export function vanityInputs(f: {
+  user?: Address;
+  supply?: bigint;
+  name: string;
+  symbol: string;
+  logo: string;
+  description: string;
+  socials: { twitter: string; telegram: string; discord: string; website: string; farcaster: string };
+  seed: Hex;
+  /** The invented name this coin is priced in, when it is priced in one. */
+  below?: Address;
+  /** The deployed addresses this build talks to; passed in so the keying can be tested without the app. */
+  addresses: { launchDeployer: Address; factory: Address };
+}): { initCodeHash: Hex; initiator: Address; below?: Address; key: string } | undefined {
+  const addresses = f.addresses;
+  if (!f.user || !f.supply || isZero(addresses.launchDeployer) || isZero(addresses.factory) || !f.name.trim() || !f.symbol.trim()) return undefined;
+  const initCodeHash = tokenInitCodeHash({
+    name: f.name.trim(),
+    symbol: f.symbol.trim(),
+    logo: f.logo.trim(),
+    description: f.description.trim(),
+    socials: { ...f.socials },
+    supply: f.supply,
+    factory: addresses.factory,
+  });
+  // the name is part of the key: change what the coin is priced in and the ground address must be thrown away,
+  // because an address that sorts below one name need not sort below another
+  const below = f.below && !isZero(f.below) ? f.below : undefined;
+  return {
+    initCodeHash,
+    initiator: f.user,
+    below,
+    key: `${f.seed}:${initCodeHash}:${f.user.toLowerCase()}:${below?.toLowerCase() ?? "none"}`,
+  };
 }

@@ -8,10 +8,10 @@ import { CHAIN_ID, robinhoodChain } from "@/lib/chain";
  * browser. Without it the route answers 503 and the create page stores the image with the coin instead.
  *
  * What stands between a script and the pinning bill, in order: the origin check (advisory, a header can be forged),
- * a signature from a wallet that holds ETH on the site's chain (one free signature per browser per hour; a script has
- * to fund every address it uploads from), shared counters in the tokens Worker (per address, per wallet, for
- * everyone, and a hard daily budget), and a memory of files already pinned so the same bytes are never pinned or
- * counted twice. Every decision is logged as one JSON line for the Worker's observability. A creator never sees any
+ * shared counters in the tokens Worker (per address, for everyone, and a hard daily budget), and a memory of files
+ * already pinned so the same bytes are never pinned or counted twice. A wallet signature can be demanded on top
+ * (UPLOAD_SIGNATURE=on), which ties every upload to a funded address; it is off, because signing to pick a picture
+ * reads as a transaction to the person doing it. Every decision is logged as one JSON line for the Worker's observability. A creator never sees any
  * of it fail: whenever this route says no, the create page stores the image on-chain with the coin instead.
  */
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -46,8 +46,8 @@ function sameSite(req: Request): boolean {
   return host === mine || allowed.includes(host);
 }
 
-/** the preview replays a recording and has no wallet to sign with, so it skips the signature and keeps the counters */
-const DEMO = process.env.NEXT_PUBLIC_DEMO === "1";
+/** a wallet signature on every upload, off unless asked for; the counters and the dedup stand either way */
+const SIGN = process.env.UPLOAD_SIGNATURE === "on" && process.env.NEXT_PUBLIC_DEMO !== "1";
 /** a signed-in wallet must hold this much on the site's chain: a launch costs more, so every creator has it */
 const MIN_FUNDED = parseEther("0.0001");
 const balances = new Map<string, { at: number; ok: boolean }>();
@@ -153,18 +153,18 @@ export async function GET() {
     kv = !!env.NEXT_INC_CACHE_KV;
     // names only, never values: which secrets the worker was given, and whether they reached process.env
     const secretNames = Object.keys(env).filter((k) => /JWT|KEY|SECRET/i.test(k));
-    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, envHasJwt: "PINATA_JWT" in env, secretNames, kv, signature: !DEMO, shared: shared(), stats, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
+    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, envHasJwt: "PINATA_JWT" in env, secretNames, kv, signature: SIGN, shared: shared(), stats, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
   } catch {
-    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, kv, signature: !DEMO, shared: shared(), stats, bindings: [] });
+    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, kv, signature: SIGN, shared: shared(), stats, bindings: [] });
   }
 }
 
 export async function POST(req: Request) {
   const ip = clientIp(req);
   if (!sameSite(req)) return NextResponse.json({ error: "pinning is for the create page only.", code: "origin" }, { status: 403 });
-  // who is asking: a wallet that signed for uploads and holds ETH here. the preview has no wallet and skips this
+  // who is asking, when a signature is demanded: a wallet that signed for uploads and holds ETH here
   let wallet: Address | undefined;
-  if (!DEMO) {
+  if (SIGN) {
     const auth = decodeUploadAuth(req.headers.get("x-upload-auth"));
     if (!auth) return NextResponse.json({ error: "connect a wallet and sign once to upload images.", code: "auth" }, { status: 401 });
     const verdict = await verifyUploadAuth(auth, CHAIN_ID);

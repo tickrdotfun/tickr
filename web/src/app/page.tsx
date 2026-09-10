@@ -31,7 +31,7 @@ export default function Home() {
 
           <div className="cascade-3 hero-actions flex flex-wrap items-center justify-center gap-3">
             <Link href="/create" className="btn btn-gradient hero-cta no-underline hover:no-underline">
-              launch
+              create
             </Link>
             <a href="#launches" className="btn no-underline hover:no-underline">
               see live launches
@@ -40,8 +40,8 @@ export default function Home() {
         </div>
       </section>
 
-      <StatsRow />
       <HowItWorks />
+      <StatsRow />
 
       <section id="launches" className="cascade-data scroll-mt-24 mt-24">
         <SectionHead title="live launches" />

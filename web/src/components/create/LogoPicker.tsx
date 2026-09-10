@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { useAccount, useChainId, useGasPrice, useSignMessage } from "wagmi";
+import {useAccount, useGasPrice } from "wagmi";
 import { DEMO } from "@/lib/demoTransport";
-import { UPLOAD_AUTH_TTL_MS, encodeUploadAuth, uploadMessage } from "@/lib/uploadAuth";
 import { formatEther } from "viem";
+import { ipfsUriFor } from "@/lib/cid";
 import { resolveImage } from "@/lib/imageSrc";
 
 /**
@@ -85,18 +85,48 @@ async function forPin(file: File): Promise<Blob> {
   }
 }
 
-/** Pins through tickr's server; `undefined` means the image goes on-chain instead, whatever the reason. */
-async function pinToIpfs(file: File, auth: string | undefined): Promise<string | undefined> {
-  const blob = await forPin(file);
-  const fd = new FormData();
-  fd.append("file", blob, file.name.replace(/\.[^.]+$/, "") + (blob.type === "image/webp" ? ".webp" : ""));
-  const r = await fetch("/api/pin", { method: "POST", body: fd, headers: auth ? { "x-upload-auth": auth } : undefined });
-  // 401: no signed-in wallet. 429: over the upload budget. 503: pinning is not set up here. 5xx: it failed. in every
-  // case the image goes on-chain instead, quietly, so a launch is never held up by the pinning service
-  if (r.status === 401 || r.status === 429 || r.status === 503 || r.status >= 500) return undefined;
-  const out = (await r.json().catch(() => ({}))) as { image?: string; error?: string };
-  if (!r.ok) throw new Error(out.error ?? "pinning failed");
-  return out.image;
+/**
+ * Images picked but not yet sent anywhere, by the `ipfs://` name their bytes already have. Nothing leaves the
+ * browser while someone is filling the form; `uploadPickedImage` sends the bytes once the coin is on chain.
+ */
+const held = new Map<string, { blob: Blob; filename: string }>();
+
+/** Sends the bytes behind an `ipfs://` link a launch has just written on chain. Quiet about failure: the link is
+ *  already in the coin, and a retry can follow from anywhere that holds the same file. */
+export async function uploadPickedImage(uri: string | undefined): Promise<boolean> {
+  if (!uri) return false;
+  const item = held.get(uri);
+  if (!item) return false;
+  // the link is already written into the coin and cannot be changed, so this tries harder than a single request
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    try {
+      const fd = new FormData();
+      fd.append("file", item.blob, item.filename);
+      const r = await fetch("/api/pin", { method: "POST", body: fd });
+      if (!r.ok) continue;
+      const out = (await r.json().catch(() => ({}))) as { image?: string };
+      // the service names the bytes the same way this page did; anything else means they did not survive the trip
+      if (out.image && out.image !== uri) return false;
+      held.delete(uri);
+      return true;
+    } catch {
+      // try again
+    }
+  }
+  return false;
+}
+
+/** Whether this deployment can pin at all. Asked before a file is read, so an image can go on-chain instead when
+ *  the answer is no, rather than pointing a launched coin at a link nothing will ever serve. */
+async function pinningWorks(): Promise<boolean> {
+  try {
+    const r = await fetch("/api/pin");
+    if (!r.ok) return false;
+    return ((await r.json()) as { pinning?: boolean }).pinning === true;
+  } catch {
+    return false;
+  }
 }
 
 export function LogoPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -108,38 +138,6 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
   const fileRef = useRef<HTMLInputElement | null>(null);
   const gasPrice = useGasPrice();
   const { address } = useAccount();
-  const chainId = useChainId();
-  const { signMessageAsync } = useSignMessage();
-
-  // the permission to upload: one free signature per wallet per hour, kept for this tab. no wallet, or a declined
-  // signature, means no permission, and the image goes on-chain instead
-  const uploadAuth = useCallback(async (): Promise<string | undefined> => {
-    if (DEMO || !address) return undefined;
-    const key = `tickr.upload.${chainId}.${address.toLowerCase()}`;
-    try {
-      const kept = sessionStorage.getItem(key);
-      if (kept) {
-        const a = JSON.parse(atob(kept)) as { until?: number };
-        if (typeof a.until === "number" && a.until > Date.now() + 60_000) return kept;
-      }
-    } catch {
-      // nothing kept
-    }
-    const until = Date.now() + UPLOAD_AUTH_TTL_MS;
-    try {
-      const signature = await signMessageAsync({ message: uploadMessage(address, chainId, until) });
-      const enc = encodeUploadAuth({ address, until, signature });
-      try {
-        sessionStorage.setItem(key, enc);
-      } catch {
-        // a tab without storage signs again next time
-      }
-      return enc;
-    } catch {
-      return undefined;
-    }
-  }, [address, chainId, signMessageAsync]);
-
   const take = useCallback(
     async (file: File | undefined) => {
       if (!file) return;
@@ -154,14 +152,17 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
       setBusy(true);
       setError(undefined);
       try {
-        // first choice: pin to IPFS through tickr's server, so the token carries a short link instead of the bytes.
-        // off the preview that takes a signed-in wallet; without one the image is stored with the coin
-        const pinned = DEMO || address ? await pinToIpfs(file, await uploadAuth()) : undefined;
-        if (pinned) {
-          onChange(pinned);
+        // first choice: an ipfs link, so the coin carries a short name instead of the bytes. the name comes from
+        // the bytes themselves, so nothing is uploaded here; the file is sent once the launch is on chain
+        if (await pinningWorks()) {
+          const blob = await forPin(file);
+          const link = await ipfsUriFor(await blob.arrayBuffer());
+          held.set(link, { blob, filename: file.name.replace(/\.[^.]+$/, "") + (blob.type === "image/webp" ? ".webp" : "") });
+          onChange(link);
           setBytes(undefined);
           return;
         }
+        // nowhere to upload to: the image goes into the coin itself
         const { uri, bytes: n } = await shrink(file);
         if (n > MAX_BYTES) {
           setError("that image is too detailed to store on-chain. try a simpler one, like a logo on a flat background.");
@@ -175,7 +176,7 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
         setBusy(false);
       }
     },
-    [onChange, address, uploadAuth],
+    [onChange],
   );
 
   // an image pasted while the image area has focus becomes the coin image. nowhere else on the page listens,
@@ -197,7 +198,7 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
 
   return (
     <div>
-      <div className="label label-muted mb-1.5">Image</div>
+      <div className="label label-muted mb-1.5">Image, optional</div>
       <div
         className={`logo-drop ${dragging ? "is-dragging" : ""}`}
         tabIndex={0}
@@ -227,7 +228,7 @@ export function LogoPicker({ value, onChange }: { value: string; onChange: (v: s
                 <circle cx="9" cy="10" r="1.6" />
                 <path d="M21 16l-5-5-8 8" />
               </svg>
-              {busy ? "pinning…" : value ? "replace" : "pick an image"}
+              {busy ? "uploading…" : value ? "replace" : "pick an image"}
             </button>
             {value && (
               <button

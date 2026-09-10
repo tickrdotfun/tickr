@@ -51,6 +51,9 @@ export function TokenPage({ address }: { address: Address }) {
   // the burn in dollars: burned coins at the pool price, through the quote's dollar rate the home grid already knows
   const row = market.data?.rows.find((r) => sameAddr(r.launch.token, address));
   const rate = row?.marketCapUsd !== undefined && row.marketCap ? row.marketCapUsd / row.marketCap : undefined;
+  // the quote in dollars: a name is a one-for-one dollar wrapper, so one unit is one dollar; other pairs use the same rate as above
+  const usdRate = d.isTicker ? 1 : rate;
+  const mcapUsd = mcap !== undefined && usdRate !== undefined ? mcap * usdRate : undefined;
   const burnedCoins = Number(fees.burned ?? 0n) / 10 ** (meta.decimals ?? 18);
   const burnedUsd = rate !== undefined && price !== undefined ? burnedCoins * price * rate : undefined;
   const socials = meta.socials;
@@ -80,7 +83,7 @@ export function TokenPage({ address }: { address: Address }) {
                   <span className="badge sw-signal">live</span>
                   {isOfficialCoin(address) && <span className="badge sw-green">official coin</span>}
                 </div>
-                {meta.description && <p className="text-muted mt-3 max-w-2xl whitespace-pre-wrap break-words">{meta.description}</p>}
+                {(isOfficialCoin(address) ? "tickr.fun genesis token" : meta.description) && <p className="text-muted mt-3 max-w-2xl whitespace-pre-wrap break-words">{isOfficialCoin(address) ? "tickr.fun genesis token" : meta.description}</p>}
                 {links.length > 0 && (
                   <div className="flex flex-wrap gap-4 mt-3 text-[14px]">
                     {links.map(([k, v]) => (
@@ -100,7 +103,7 @@ export function TokenPage({ address }: { address: Address }) {
           <Panel>
             <div className="fig-grid">
               <Figure hue="signal" label="pool price" n={fmtPrice(price)} unit={qs} sub={`per ${meta.symbol ?? "token"}`} />
-              <Figure hue="blue" label="market cap" n={mcap !== undefined ? fmtNumber(mcap) : "-"} unit={mcap !== undefined ? qs : ""} sub={`at the pool price, burned coins excluded. opened at ${fmtAmount(launch.phantomQuote, qd, { sig: 4 })} ${qs} of virtual reserve`} />
+              <Figure hue="blue" label="market cap" n={mcap !== undefined ? fmtNumber(mcap) : "-"} unit={mcap !== undefined ? qs : ""} aside={mcapUsd !== undefined ? `$${fmtNumber(mcapUsd)}` : undefined} sub={`at the pool price, burned coins excluded. opened at ${fmtAmount(launch.phantomQuote, qd, { sig: 4 })} ${qs} of virtual reserve`} />
               <Figure hue="yellow" label="liquidity" n={pool.quoteInPool !== undefined ? fmtNumber(pool.quoteInPool) : "-"} unit={qs} sub="in the locked position, quote side" />
               <Figure hue="orange" label="fees earned" n={fmtAmount(feesQuote, qd, { sig: 4 })} unit={qs} sub="in the quote, on buys. sells pay in the coin, split the same way" />
               <Figure hue="pink" label="burned" n={fmtAmount(fees.burned ?? 0n, meta.decimals, { sig: 4 })} unit={meta.symbol ?? ""} sub={`${burnedPct !== undefined ? `${burnedPct}% of supply` : "dead address balance"}${burnedUsd !== undefined && burnedUsd > 0 ? `, about ${fmtUsd(burnedUsd)}` : ""}`} />
@@ -129,13 +132,14 @@ export function TokenPage({ address }: { address: Address }) {
 }
 
 /** One number that matters, given its own hue on a short dash, a bold figure and a quiet unit. */
-function Figure({ hue, label, n, unit, sub }: { hue: "yellow" | "orange" | "signal" | "blue" | "pink"; label: string; n: string; unit: string; sub?: string }) {
+function Figure({ hue, label, n, unit, sub, aside }: { hue: "yellow" | "orange" | "signal" | "blue" | "pink"; label: string; n: string; unit: string; aside?: string; sub?: string }) {
   return (
     <div className={`fig fig-${hue}`}>
       <div className="fig-k">{label}</div>
       <div className="fig-v">
         <span className="num fig-n">{n}</span>
         {unit && <span className="fig-u">{unit}</span>}
+        {aside && <span className="fig-aside num">{aside}</span>}
       </div>
       {sub && <div className="fig-s">{sub}</div>}
     </div>

@@ -91,7 +91,7 @@ contract Genesis is Script {
             name: "tickr",
             symbol: "TICKR",
             logo: vm.envOr("GENESIS_LOGO", string("")),
-            description: "the coin of tickr. priced in FUN, a one-for-one wrapper of USDG. the first launch on the platform, on the same rules as every launch.",
+            description: "tickr.fun genesis token",
             socials: Socials("https://x.com/tickrdotfun_rh", "", "", "https://tickrfun.gg", ""),
             creatorFeeRecipient: treasury,
             creatorTaxBps: 200, // 2% on every trade, all of it to the treasury wallet, shown like any creator tax

@@ -22,9 +22,10 @@ In the genesis transaction, while launching was still closed to everyone but the
 
 In the genesis transaction itself, the team bought a slice of TICKR: `5%` of supply, delivered to the treasury wallet. It is paid in FUN minted from USDG that the deployer bought with ETH the moment before, bought from the pool at the pool's price with no exemption from the fee, and the transaction is public. The size is worked out by running that same transaction in a simulation first and searching for the dollars that buy the share; the pool is new both times, so the answer is exact.
 
-After launch the team sends that 5% to the dead address by hand and lists the transaction here:
+On launch night that 5% went into the pool instead of the fire: all 50,000,000 TICKR sit as a concentrated position on the TICKR/FUN pool, the same pool as every other trade, from just above the price at placement up to about fifty percent above it, so buys land on them at a fraction of the price impact the launch curve alone would give. The position is an NFT (id 2135484) owned by the treasury wallet; it earns the pool fee like any position and can be withdrawn or moved by that wallet. Nothing of it was burned, and none of it was sold. A first placement (id 2135009) was made twenty percent wide and the price fell out of its band within the hour, so it was withdrawn and placed again wider; every step below is a treasury or deployer transaction, none a sale:
 
-- burn of the genesis 5%: transaction hash to follow
+- the 50,000,000 TICKR moved to the deployer, then placed: `0xe3d40210b9a7f3496aa6a4607cb7d448d518b4195d5a12021b6763e9c3d3d84a`, `0xc2d6954f0d1359cf592199d27004ff6e4724656877d634f3ef7e2fb2658001b6`
+- withdrawn and placed again, wider: `0xf84487294c842c9021b93f96ce5522f31c89dd8100c94573171e9ca796a450c8`, `0x54dc325bf0cc8bcb5d5771ecdca6d6fa4bc6aa7404d2b0c3effb1d2d90dbc47f`, `0x16f5713ff400d636790fa8c36754722d1aef952da571634a4c84d03c6f7f51de`
 
 ## Buybacks
 

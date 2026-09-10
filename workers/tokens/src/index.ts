@@ -15,6 +15,12 @@ const addr = (a: string): Address => getAddress(a.toLowerCase());
 
 type Env = {
   TICKR_KV: KVNamespace;
+  KEEPER_KEY?: string;
+  RPC_ENDPOINT?: string;
+  KEEPER_LOCKER?: string;
+  KEEPER_TREASURY?: string;
+  KEEPER_COIN?: string;
+  KEEPER_NAME?: string;
   PIN_COUNTER: DurableObjectNamespace;
   BUDGET_KEY?: string;
   RPC_URL: string;
@@ -394,13 +400,110 @@ async function pinRoutes(url: URL, req: Request, env: Env): Promise<Response> {
   return new Response("not found", { status: 404 });
 }
 
+
+/**
+ * The keeper: the permissionless housekeeping of the official coin, every ten minutes. Collect the pool's fees
+ * (the protocol's and the club's coin-side shares burn in that call), let the treasury collect and convert its
+ * cut, then let it buy and burn with the dollars it set aside. Anyone may call these; a small funded key does it
+ * on a schedule so nobody has to. Every step is its own transaction and a failing one never blocks the next.
+ */
+const LOCKER_ABI = [{ type: "function", name: "collectFees", stateMutability: "nonpayable", inputs: [{ name: "token", type: "address" }], outputs: [{ type: "uint256" }, { type: "uint256" }] },
+  { type: "function", name: "pendingFees", stateMutability: "view", inputs: [{ name: "token", type: "address" }], outputs: [{ type: "uint256" }, { type: "uint256" }] }] as const;
+const TREASURY_ABI = [{ type: "function", name: "collect", stateMutability: "nonpayable", inputs: [{ name: "tokens", type: "address[]" }], outputs: [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }] },
+  { type: "function", name: "buy", stateMutability: "nonpayable", inputs: [], outputs: [] },
+  { type: "function", name: "nextBuyAt", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "earmarkedUsdg", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] }] as const;
+async function keep(env: Env): Promise<string[]> {
+  const out: string[] = [];
+  if (!env.KEEPER_KEY || !env.KEEPER_LOCKER || !env.KEEPER_TREASURY || !env.KEEPER_COIN || !env.KEEPER_NAME) return ["keeper: not configured"];
+  const { createWalletClient, createPublicClient, custom, defineChain } = await import("viem");
+  const { privateKeyToAccount } = await import("viem/accounts");
+  const chain = defineChain({ id: 4663, name: "Robinhood Chain", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [env.RPC_URL] } } });
+  const account = privateKeyToAccount(env.KEEPER_KEY as `0x${string}`);
+  // the public node rate-limits a burst from the shared addresses workers send from: one request at a time, a gap
+  // between them, a pause and a retry on a refusal
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let queue: Promise<unknown> = Promise.resolve();
+  let last = 0;
+  const rpc = async (method: string, params: unknown, attempt = 0): Promise<unknown> => {
+    // the fast endpoint where one is configured, the chain's public node otherwise
+    const url = env.RPC_ENDPOINT || env.RPC_URL;
+    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
+    if (r.status === 429 || r.status >= 500) {
+      if (attempt < 5) {
+        await sleep(800 * (attempt + 1));
+        return rpc(method, params, attempt + 1);
+      }
+      throw new Error(`rpc ${r.status}`);
+    }
+    const j = (await r.json()) as { result?: unknown; error?: { message?: string; code?: number } };
+    if (j.error) {
+      // the node also answers a rate limit as a JSON error inside an HTTP 200 ("Rate Limit Hit, limit will reset
+      // in 60 seconds"); that is worth waiting out, a few times, before giving the step up
+      if ((j.error.code === 429 || /rate limit/i.test(j.error.message ?? "")) && attempt < 4) {
+        await sleep(15_000 * (attempt + 1));
+        return rpc(method, params, attempt + 1);
+      }
+      throw Object.assign(new Error(j.error.message ?? "rpc error"), { code: j.error.code });
+    }
+    return j.result;
+  };
+  const paced = custom({
+    request: ({ method, params }: { method: string; params?: unknown }) => {
+      const next = queue.then(async () => {
+        const wait = last + 120 - Date.now();
+        if (wait > 0) await sleep(wait);
+        last = Date.now();
+        return rpc(method, params ?? []);
+      });
+      queue = next.then(() => undefined, () => undefined);
+      return next;
+    },
+  });
+  const wallet = createWalletClient({ account, chain, transport: paced });
+  const pub = createPublicClient({ chain, transport: paced });
+  const locker = env.KEEPER_LOCKER as `0x${string}`, treasury = env.KEEPER_TREASURY as `0x${string}`, coin = env.KEEPER_COIN as `0x${string}`, name = env.KEEPER_NAME as `0x${string}`;
+  const step = async (label: string, fn: () => Promise<`0x${string}`>) => {
+    try {
+      const hash = await fn();
+      const rc = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 });
+      out.push(`${label}: ${rc.status} ${hash}`);
+    } catch (e) {
+      out.push(`${label}: skipped (${(e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 80)})`);
+    }
+  };
+  // 1. the pool's fees, only when there is something to collect
+  const pending = await pub.readContract({ address: locker, abi: LOCKER_ABI, functionName: "pendingFees", args: [coin] }).catch(() => [0n, 0n] as const);
+  if (pending[0] > 0n || pending[1] > 0n) await step("collectFees", () => wallet.writeContract({ address: locker, abi: LOCKER_ABI, functionName: "collectFees", args: [coin] }));
+  else out.push("collectFees: nothing pending");
+  // 2. the treasury's cut, converted
+  await step("treasury.collect", () => wallet.writeContract({ address: treasury, abi: TREASURY_ABI, functionName: "collect", args: [[name]] }));
+  // 3. a buy, when its interval has passed and dollars are set aside
+  const [next, earmarked] = await Promise.all([
+    pub.readContract({ address: treasury, abi: TREASURY_ABI, functionName: "nextBuyAt" }).catch(() => 0n),
+    pub.readContract({ address: treasury, abi: TREASURY_ABI, functionName: "earmarkedUsdg" }).catch(() => 0n),
+  ]);
+  if (earmarked > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next) await step("treasury.buy", () => wallet.writeContract({ address: treasury, abi: TREASURY_ABI, functionName: "buy" }));
+  else out.push(`treasury.buy: waiting (earmarked ${earmarked}, next at ${next})`);
+  return out;
+}
+
 export default {
-  async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext) {
+  async scheduled(c: ScheduledController, env: Env, ctx: ExecutionContext) {
+    // two schedules share this worker: the token list every fifteen minutes, the keeper every ten
+    if (c.cron === "*/10 * * * *") {
+      ctx.waitUntil(keep(env).then((lines) => console.log(JSON.stringify({ keeper: lines }))));
+      return;
+    }
     ctx.waitUntil(refresh(env).then((o) => console.log(`tokens: ${o.tokens.length} of ${o.stats.candidates} candidates`)));
   },
   /** A manual run, for a deploy or a check: `curl -H "x-refresh-key: ..." https://<worker>/refresh`. Reading is what the site does. */
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
+    if (url.pathname === "/keep") {
+      if (!env.REFRESH_KEY || req.headers.get("x-refresh-key") !== env.REFRESH_KEY) return new Response("not found", { status: 404 });
+      return Response.json({ keeper: await keep(env) });
+    }
     if (url.pathname === "/refresh") {
       // a manual run is ours to trigger: the schedule does it otherwise
       // the key travels in a header: a query string lands in logs, caches and browser history

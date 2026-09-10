@@ -39,7 +39,23 @@ export function PriceChart({ d }: { d: TokenData }) {
   const { launch, meta, quote, pool } = d;
   const poolId = pool.poolId;
   const live = !DEMO && !IS_DEVNET;
-  const [view, setView] = useState<"pool" | "dexscreener">("pool");
+  // DexScreener's chart is the one people know, so it is the view by default once DexScreener lists the pool;
+  // until then, and on a fork or a testnet, the line drawn from the pool's own swaps
+  const [chosen, setChosen] = useState<"pool" | "dexscreener" | undefined>(undefined);
+  const listed = useQuery({
+    queryKey: ["dexscreener-listed", poolId],
+    enabled: live && !!poolId,
+    staleTime: 5 * 60_000,
+    retry: false,
+    queryFn: async () => {
+      const r = await fetch(`https://api.dexscreener.com/latest/dex/pairs/robinhood/${poolId}`);
+      if (!r.ok) return false;
+      const d = (await r.json()) as { pairs?: unknown[] | null };
+      return Array.isArray(d.pairs) && d.pairs.length > 0;
+    },
+  });
+  const view: "pool" | "dexscreener" = chosen ?? (live && listed.data ? "dexscreener" : "pool");
+  const setView = setChosen;
   const td = meta.decimals ?? 18;
   const qd = quote?.decimals ?? 18;
 
@@ -62,9 +78,15 @@ export function PriceChart({ d }: { d: TokenData }) {
         if (lo === floor) break;
         hi = lo - 1n;
       }
-      const logs = (
-        await Promise.all(ranges.map(([a, b]) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: poolId as Hex }, fromBlock: a, toBlock: b })))
-      ).flat();
+      // one filtered request first: a pool's own swaps are few, and the public node rate limits a burst of parallel
+      // requests, which is what a page full of reads produces. the chunks are the fallback, sent one at a time
+      const read = (a: bigint, b: bigint) => client.getLogs({ address: ADDRESSES.poolManager, event: SWAP, args: { id: poolId as Hex }, fromBlock: a, toBlock: b });
+      let logs: Awaited<ReturnType<typeof read>> = [];
+      try {
+        logs = await read(floor, latest);
+      } catch {
+        for (const [a, b] of ranges) logs = logs.concat(await read(a, b));
+      }
       logs.sort((x, y) => (x.blockNumber === y.blockNumber ? Number(x.logIndex ?? 0) - Number(y.logIndex ?? 0) : x.blockNumber < y.blockNumber ? -1 : 1));
 
       // the opening price, from the launch itself: what the pool held against the whole supply
@@ -169,11 +191,11 @@ export function PriceChart({ d }: { d: TokenData }) {
         </div>
         {live && (
           <div className="chart-tabs" role="tablist">
-            <button className="chart-tab" data-active={view === "pool"} onClick={() => setView("pool")}>
-              pool
-            </button>
             <button className="chart-tab" data-active={view === "dexscreener"} onClick={() => setView("dexscreener")}>
               dexscreener
+            </button>
+            <button className="chart-tab" data-active={view === "pool"} onClick={() => setView("pool")}>
+              pool
             </button>
           </div>
         )}

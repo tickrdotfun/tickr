@@ -119,7 +119,7 @@ export function QuotePicker({
         placeholder={
           picked
             ? `${picked.symbol} picked. type to change it`
-            : "type a name, a ticker or an address"
+            : "any token on Robinhood Chain: name, ticker or address"
         }
         aria-label="find a quote asset"
         autoComplete="off"

@@ -14,7 +14,8 @@ const NAV = [
 ] as const;
 
 export function Header() {
-  const path = usePathname();
+  // null before the router has a path: nothing is marked active until it does, rather than throwing
+  const path = usePathname() ?? "";
   const activeHref = NAV.find((n) => (n.href === "/" ? path === "/" : path.startsWith(n.href)))?.href ?? null;
   const { trackRef, indRef } = useGlider(activeHref);
 

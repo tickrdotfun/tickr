@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { explainRevert } from "@/lib/explain";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { decodeErrorResult, type Abi, type Address, type Hash, type Hex, type TransactionReceipt } from "viem";
 import { errorMessage } from "@/lib/format";
@@ -79,10 +80,10 @@ async function minedRevert(client: Client, hash: Hash, blockNumber: bigint, labe
       } catch {
         // not one of ours: the selector is still better than nothing
       }
-      return new Error(`${label}: reverted with ${name}`);
+      return new Error(explainRevert(name, label));
     }
   }
-  return new Error(`${label}: transaction reverted`);
+  return new Error(explainRevert(undefined, label));
 }
 
 export function useTx() {

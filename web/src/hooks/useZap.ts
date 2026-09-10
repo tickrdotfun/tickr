@@ -28,7 +28,9 @@ export function zapParams(token: Address, path: Hop[], recipient: Address, minTo
     path,
     minTokensOut,
     recipient,
-    deadline: deadline ?? BigInt(Math.floor(Date.now() / 1000) + 20 * 60),
+    // twenty minutes was long enough for a queued trade to land at a price nobody quoted; three minutes is past
+    // any honest confirmation on this chain and short enough that a stuck trade expires instead of executing stale
+    deadline: deadline ?? BigInt(Math.floor(Date.now() / 1000) + 3 * 60),
   };
 }
 
@@ -110,7 +112,7 @@ export function zapSellParams(token: Address, amountIn: bigint, path: Hop[], rec
     tokenOut,
     minOut,
     recipient,
-    deadline: deadline ?? BigInt(Math.floor(Date.now() / 1000) + 20 * 60),
+    deadline: deadline ?? BigInt(Math.floor(Date.now() / 1000) + 3 * 60),
   };
 }
 

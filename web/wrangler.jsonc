@@ -33,6 +33,12 @@
     "live": {
       // tickrfun.gg: the full site against the real chain.
       "name": "tickr",
+      // the domain: a zone route, so the worker answers every request for tickrfun.gg at Cloudflare's edge whatever the
+      // DNS record behind it points at (it still names the old landing on Vercel, which is never reached)
+      "routes": [
+        { "pattern": "tickrfun.gg/*", "zone_name": "tickrfun.gg" },
+        { "pattern": "www.tickrfun.gg/*", "zone_name": "tickrfun.gg" }
+      ],
       "assets": { "binding": "ASSETS", "directory": ".open-next/assets" },
       "observability": { "enabled": true },
       "vars": { "TOKENS_URL": "https://tickr-tokens.tickrdotfun.workers.dev/" },

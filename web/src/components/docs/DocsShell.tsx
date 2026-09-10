@@ -16,7 +16,8 @@ import { SOCIALS } from "@/lib/constants";
  * chrome. The page's own outline is rendered by the page, into the right column of `.docs-body`.
  */
 export function DocsShell({ children, index }: { children: React.ReactNode; index: DocSection[] }) {
-  const pathname = usePathname();
+  // usePathname is null before the router has a path: the docs open on the overview until it does
+  const pathname = usePathname() ?? "";
   const active = pathname.replace(/^\/docs\/?/, "") || "overview";
   return (
     <div className="docs-shell">

@@ -56,6 +56,24 @@ export const MAX256 = (1n << 256n) - 1n;
 
 export const isManagedHookWired = () => !isZero(ADDRESSES.managedTickerHook) && !isZero(ADDRESSES.universalRouter);
 
+/**
+ * What kind of name the route bridges through, which decides what its pool must look like.
+ *
+ * A managed name is a wrapper of a dollar and trades in one pool behind the one managed hook, always at fee 500
+ * and spacing 1. A fixed-inventory name has its own market: a plain pool with no hook at all, at whatever fee and
+ * spacing its issuer was built with. The two are not interchangeable and neither may be mistaken for the other,
+ * so the kind is carried explicitly and the pool is checked against it rather than sniffed from the key.
+ *
+ * It must come from a read of the chain, the quote registry for the kind and the issuer for the fee and spacing.
+ * Nothing here infers it.
+ */
+export type NameSpec = { kind: "legacy" } | { kind: "market"; fee: number; tickSpacing: number };
+export const LEGACY_NAME: NameSpec = { kind: "legacy" };
+
+/** Activation needs the universal router always, and the managed hook only for a managed name. */
+export const isActivationWired = (name: NameSpec = LEGACY_NAME) =>
+  !isZero(ADDRESSES.universalRouter) && (name.kind === "market" || !isZero(ADDRESSES.managedTickerHook));
+
 export function managedKey(ticker: Address): V4Key {
   return keyOf(ticker, ADDRESSES.usdg, MANAGED_FEE, MANAGED_TICK_SPACING, ADDRESSES.managedTickerHook);
 }
@@ -101,15 +119,21 @@ export const EXACT_TYPE = {
 const COMMANDS: Hex = "0x1004"; // V4_SWAP, SWEEP
 const ACTIONS: Hex = "0x070c0f"; // SWAP_EXACT_IN, SETTLE_ALL, TAKE_ALL
 
-export type Pools = { funding: V4Key; bridge: V4Key; main: V4Key };
+export type Pools = { funding: V4Key; bridge: V4Key; main: V4Key; name?: NameSpec };
+
+/** The pool the name itself trades in: behind the managed hook, or its own hookless market. */
+export function bridgeKey(ticker: Address, name: NameSpec = LEGACY_NAME): V4Key {
+  if (name.kind === "legacy") return managedKey(ticker);
+  return keyOf(ticker, ADDRESSES.usdg, name.fee, name.tickSpacing, ZERO);
+}
 
 export function poolId(k: V4Key): Hex {
   return keccak256(encodeAbiParameters(parseAbiParameters("address,address,uint24,int24,address"), [k.currency0, k.currency1, k.fee, k.tickSpacing, k.hooks]));
 }
 
 /** The three authenticated pools of a launch under a name, in route order: ETH/USDG, the name's own, the coin's own. */
-export function poolsFor(ticker: Address, main: V4Key): Pools {
-  return { funding: { currency0: ZERO, currency1: ADDRESSES.usdg, fee: 100, tickSpacing: 1, hooks: ZERO }, bridge: managedKey(ticker), main };
+export function poolsFor(ticker: Address, main: V4Key, name: NameSpec = LEGACY_NAME): Pools {
+  return { funding: { currency0: ZERO, currency1: ADDRESSES.usdg, fee: 100, tickSpacing: 1, hooks: ZERO }, bridge: bridgeKey(ticker, name), main, name };
 }
 
 /** The path a phase walks from native ETH, each hop checked against what the pools must be. */
@@ -117,7 +141,18 @@ export function routeFor(p: Pools, phase: Phase) {
   check(phase === "quote" || phase === "coin", "unknown activation phase");
   const pools = [p.funding, p.bridge, p.main];
   check(same(p.funding.currency0, zeroAddress) && same(p.funding.currency1, ADDRESSES.usdg) && p.funding.fee === 100 && p.funding.tickSpacing === 1 && same(p.funding.hooks, zeroAddress), "wrong funding pool");
-  check(p.bridge.fee === MANAGED_FEE && p.bridge.tickSpacing === MANAGED_TICK_SPACING && !isZero(p.bridge.hooks) && same(p.bridge.hooks, ADDRESSES.managedTickerHook), "wrong managed pool");
+  const name = p.name ?? LEGACY_NAME;
+  if (name.kind === "legacy") {
+    check(p.bridge.fee === MANAGED_FEE && p.bridge.tickSpacing === MANAGED_TICK_SPACING && !isZero(p.bridge.hooks) && same(p.bridge.hooks, ADDRESSES.managedTickerHook), "wrong managed pool");
+  } else {
+    // a market's pool has no hook, so nothing can adjust the trade after the fact. Its fee and spacing are the
+    // issuer's, read from the chain, and the pool must be the one that prices the name in dollars
+    check(Number.isInteger(name.fee) && name.fee > 0 && name.fee < 1_000_000, "market fee out of range");
+    check(Number.isInteger(name.tickSpacing) && name.tickSpacing > 0 && name.tickSpacing <= 32_767, "market tick spacing out of range");
+    check(p.bridge.fee === name.fee && p.bridge.tickSpacing === name.tickSpacing, "the market pool is not the issuer's");
+    check(isZero(p.bridge.hooks), "a market pool must have no hook");
+    check(same(p.bridge.currency0, ADDRESSES.usdg) || same(p.bridge.currency1, ADDRESSES.usdg), "the market must price the name in dollars");
+  }
   check(same(p.main.hooks, zeroAddress) && p.main.fee > 0 && p.main.fee < 1_000_000 && p.main.tickSpacing > 0 && p.main.tickSpacing <= 32_767, "wrong coin pool");
   let input: Address = zeroAddress;
   return pools.slice(0, phase === "quote" ? 2 : 3).map((pool) => {

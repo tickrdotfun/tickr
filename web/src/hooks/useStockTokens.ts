@@ -3,16 +3,26 @@
 import { useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
 import type { Address } from "viem";
-import { StockQuoteLauncherAbi } from "@/lib/abis";
+import { AnchorRegistryAbi, StockQuoteLauncherAbi } from "@/lib/abis";
 import { ADDRESSES, isZero } from "@/lib/addresses";
 import { useQuoteAssets } from "./useQuoteAssets";
 
-export type StockToken = { address: Address; ticker: string; issuer: string; symbol: string; decimals: number; priceUsd?: number };
+export type StockToken = {
+  address: Address;
+  ticker: string;
+  issuer: string;
+  symbol: string;
+  decimals: number;
+  priceUsd?: number;
+  /** a feed is published for this asset, whether or not its last price is fresh enough to launch against */
+  hasFeed: boolean;
+};
 
 /**
- * Every official Stock Token registered and active in the AnchorRegistry. `priceUsd` is present only when the asset
- * has a live Chainlink feed, which is what the launcher uses to size the threshold. Assets without one are still
- * listed, because they are official, but they cannot be quoted until a feed is published for them.
+ * Every official Stock Token registered and active in the AnchorRegistry. `hasFeed` says a feed is published for the
+ * asset; `priceUsd` is present only when that feed's last answer is also fresh enough for the launcher to size a
+ * threshold against. The two differ over a weekend or a market holiday, when the feed exists and simply has not
+ * printed since the close, so the two states are read separately and worded separately.
  */
 export function useEligibleStockTokens() {
   const client = usePublicClient();
@@ -28,15 +38,25 @@ export function useEligibleStockTokens() {
     queryFn: async (): Promise<StockToken[]> => {
       if (!client) return [];
       const launcher = ADDRESSES.stockQuoteLauncher;
-      const prices = await client.multicall({
-        contracts: stocks.map(
-          (s) => ({ abi: StockQuoteLauncherAbi, address: launcher, functionName: "stockPrice", args: [s.address] }) as const,
-        ),
-        allowFailure: true,
-      });
+      const [prices, feeds] = await Promise.all([
+        client.multicall({
+          contracts: stocks.map(
+            (s) => ({ abi: StockQuoteLauncherAbi, address: launcher, functionName: "stockPrice", args: [s.address] }) as const,
+          ),
+          allowFailure: true,
+        }),
+        client.multicall({
+          contracts: stocks.map(
+            (s) => ({ abi: AnchorRegistryAbi, address: ADDRESSES.anchorRegistry, functionName: "feedOf", args: [s.address] }) as const,
+          ),
+          allowFailure: true,
+        }),
+      ]);
       const out: StockToken[] = stocks.map((s, i) => {
         const r = prices[i];
-        const base = { address: s.address, ticker: s.ticker, issuer: s.issuer, symbol: s.symbol, decimals: s.decimals };
+        const f = feeds[i];
+        const hasFeed = f?.status === "success" && !isZero(f.result as Address);
+        const base = { address: s.address, ticker: s.ticker, issuer: s.issuer, symbol: s.symbol, decimals: s.decimals, hasFeed };
         if (r?.status !== "success") return base;
         const [price, feedDecimals] = r.result as readonly [bigint, number];
         return { ...base, priceUsd: Number(price) / 10 ** Number(feedDecimals) };

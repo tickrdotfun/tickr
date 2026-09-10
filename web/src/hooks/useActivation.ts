@@ -6,7 +6,9 @@ import { parseAbi, type Address, type Hash, type Hex } from "viem";
 import { ADDRESSES, isZero } from "@/lib/addresses";
 import { isReadUnavailable, readBounded } from "@/lib/readRpc";
 import type { V4Key } from "@/lib/route";
-import { AMOUNTS, QUOTER_ABI, ledgerKey, maximumCost, poolsFor, reviewExpired, type Ledger, type Phase, type Pools, type Request, type Review } from "@/lib/activation";
+import { AMOUNTS, PHASES, QUOTER_ABI, ledgerKey, maximumCost, poolsFor, reviewExpired, type Ledger, type Phase, type Pools, type Request, type Review } from "@/lib/activation";
+import { MARKET_DEPLOYER_ABI } from "@/lib/nameKind";
+import { useNameKind } from "@/hooks/useNameKind";
 import { createActivationFlow, isRejection, type ActivationFlow, type Inspection, type Reads, type WalletProvider } from "@/lib/activationFlow";
 import { DEMO } from "@/lib/demoTransport";
 
@@ -41,18 +43,38 @@ export function useActivation(t?: ActivationTarget) {
   const review = state.id === identity ? state.review : null;
   const setLedger = useCallback((l: Ledger | null) => setState((x) => ({ ...(x.id === identity ? x : { id: identity, ledger: null, inspection: null, review: null }), id: identity, ledger: l })), [identity]);
   const setInspection = useCallback((i: Inspection | null) => setState((x) => ({ ...(x.id === identity ? x : { id: identity, ledger: null, inspection: null, review: null }), id: identity, inspection: i })), [identity]);
-  const setReview = useCallback((r: Review | null) => setState((x) => ({ ...(x.id === identity ? x : { id: identity, ledger: null, inspection: null, review: null }), id: identity, review: r })), [identity]);
+  const setReview = useCallback(
+    (r: Review | null | ((prev: Review | null) => Review | null)) =>
+      setState((x) => {
+        const base = x.id === identity ? x : { id: identity, ledger: null, inspection: null, review: null };
+        return { ...base, id: identity, review: typeof r === "function" ? r(base.review) : r };
+      }),
+    [identity],
+  );
   const [busy, setBusy] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [readsDown, setReadsDown] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
   const inFlight = useRef(false);
-  const ready = !!client && !!t && !!user && !!wallet.data && !!connector && !isZero(ADDRESSES.universalRouter) && !isZero(ADDRESSES.v4Quoter) && !isZero(ADDRESSES.managedTickerHook) && !DEMO;
-  const pools = useMemo((): Pools | undefined => (t ? poolsFor(t.ticker, t.own) : undefined), [t]);
+  // what kind of name this is, read from the issuers, through the one hook that answers that question. Until it
+  // is known nothing is prepared: a market name treated as a wrapper would be routed through a mint that does
+  // not exist, and the reverse would look for a pool that is not there
+  const name = useNameKind(t?.ticker);
+  const spec = name.spec;
+  const nameError = name.error;
+
+  // the managed hook is only needed by a name that trades behind it. A market name does not, and requiring it
+  // would have made every market name unactivatable on a site that never wires one
+  const ready =
+    !!client && !!t && !!user && !!wallet.data && !!connector && !!spec &&
+    !isZero(ADDRESSES.universalRouter) && !isZero(ADDRESSES.v4Quoter) &&
+    (spec.kind === "market" || !isZero(ADDRESSES.managedTickerHook)) && !DEMO;
+  const pools = useMemo((): Pools | undefined => (t && spec ? poolsFor(t.ticker, t.own, spec) : undefined), [t, spec]);
 
   const flow = useMemo((): ActivationFlow | undefined => {
-    if (!ready || !client || !t || !user || !pools || !wallet.data || !connector) return undefined;
+    if (!ready || !client || !t || !user || !pools || !spec || !wallet.data || !connector) return undefined;
     const c = client;
+    const kind = spec.kind;
     const w = wallet.data;
     const reads: Reads = {
       chainId: () => readBounded(() => c.getChainId()),
@@ -67,7 +89,14 @@ export function useActivation(t?: ActivationTarget) {
       nonce: (a, tag) => readBounded(() => c.getTransactionCount({ address: a, blockTag: tag })).then((n) => BigInt(n)),
       balance: (a) => readBounded(() => c.getBalance({ address: a })),
       coinPoolKey: (coin) => readBounded(() => c.readContract({ abi: FACTORY_ABI, address: ADDRESSES.factory, functionName: "poolKeyOf", args: [coin] })).then((k) => ({ ...k, fee: Number(k.fee), tickSpacing: Number(k.tickSpacing) })),
-      namePoolKey: (name) => readBounded(() => c.readContract({ abi: WRAPPER_ABI, address: name, functionName: "poolKey" })).then((k) => ({ ...k, fee: Number(k.fee), tickSpacing: Number(k.tickSpacing) })),
+      // a wrapper knows its own pool; a market's pool is the issuer's, worked out from the name. Reading the
+      // wrong one of these gives a plausible key for the wrong pool, so it follows the kind and nothing else
+      namePoolKey: (name) =>
+        readBounded(() =>
+          kind === "market"
+            ? c.readContract({ abi: MARKET_DEPLOYER_ABI, address: ADDRESSES.marketTickerDeployer, functionName: "keyFor", args: [name] })
+            : c.readContract({ abi: WRAPPER_ABI, address: name, functionName: "poolKey" }),
+        ).then((k) => ({ ...(k as V4Key), fee: Number((k as V4Key).fee), tickSpacing: Number((k as V4Key).tickSpacing) })),
       restrictions: async (coin, who) => {
         const [tax, buy, hold] = await Promise.all([
           readBounded(() => c.readContract({ abi: COIN_ABI, address: coin, functionName: "currentSnipeTaxBps", args: [who] })),
@@ -121,7 +150,7 @@ export function useActivation(t?: ActivationTarget) {
       return fn();
     }) as Promise<T> } : undefined;
     return createActivationFlow({ chainId, wallet: user, coin: t.token, ticker: t.ticker, pools, router: ADDRESSES.universalRouter, storage, reads, provider, locks });
-  }, [ready, client, t, user, pools, wallet.data, connector, chainId]);
+  }, [ready, client, t, user, pools, spec, wallet.data, connector, chainId]);
 
   const fail = useCallback(
     (e: unknown) => {
@@ -132,21 +161,38 @@ export function useActivation(t?: ActivationTarget) {
     [setReview],
   );
 
+  /**
+   * Whether a review still describes the transaction it was prepared for.
+   *
+   * It stops describing it when it expires, when the step it was for is no longer the step to make, or when an
+   * attempt has been recorded since. Anything else a background read turns up leaves it alone: reading is not a
+   * reason to throw away terms somebody is in the middle of reading.
+   */
+  const stillValid = useCallback((v: Review, l: Ledger, s: Inspection) => {
+    if (reviewExpired(v)) return false;
+    if (s.next !== PHASES.indexOf(v.phase)) return false;
+    if (l.attempts.length !== PHASES.indexOf(v.phase)) return false;
+    if (s.blocked || s.pending) return false;
+    return true;
+  }, []);
+
   const refresh = useCallback(async () => {
     if (!flow || inFlight.current) return;
     setBusy("checking saved receipts, no spending");
     setError("");
-    setReview(null);
+    // the review is not cleared up front. A refresh runs on a timer, and clearing it here took the terms off
+    // the screen while somebody was reading them, every time the timer came round
     try {
       const { ledger: l, inspection: s } = await flow.refresh();
       setLedger(l);
       setInspection(s);
+      setReview((v) => (v && stillValid(v, l, s) ? v : null));
     } catch (e) {
       fail(e);
     } finally {
       setBusy("");
     }
-  }, [flow, fail, setInspection, setLedger, setReview]);
+  }, [flow, fail, setInspection, setLedger, setReview, stillValid]);
 
   // the journal on mount and whenever the wallet, chain or launch changes; another tab's write reloads it
   useEffect(() => {
@@ -172,7 +218,17 @@ export function useActivation(t?: ActivationTarget) {
 
   const prepare = useCallback(
     async (phase: Phase) => {
-      if (!flow || inFlight.current) return;
+      if (inFlight.current) return;
+      // a silent return here is what a dead button looks like from outside. The flow goes missing when a read
+      // is unavailable, which is a state worth saying out loud rather than one to swallow
+      if (!flow) {
+        setError(
+          nameError
+            ? `the name could not be identified, so nothing can be prepared. ${nameError}`
+            : "the page cannot reach the chain right now, so nothing can be prepared. reads are retried; nothing is sent.",
+        );
+        return;
+      }
       setBusy(phase === "quote" ? "checking the chain, a fresh quote and fees for the name purchase" : "rechecking the name purchase, then a fresh quote and fees for the coin purchase");
       setError("");
       setReview(null);
@@ -185,7 +241,7 @@ export function useActivation(t?: ActivationTarget) {
         setBusy("");
       }
     },
-    [flow, fail, setLedger, setReview],
+    [flow, fail, setLedger, setReview, nameError],
   );
 
   const send = useCallback(async () => {
@@ -248,6 +304,10 @@ export function useActivation(t?: ActivationTarget) {
 
   return {
     ready,
+    /** What the name turned out to be, once it is known; undefined while it is still being read. */
+    nameKind: spec?.kind,
+    /** Why activation cannot start, when the name could not be classified. Never a reason to carry on anyway. */
+    nameError,
     ledger,
     inspection,
     review,

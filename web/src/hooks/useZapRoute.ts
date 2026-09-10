@@ -8,6 +8,7 @@ import { poolManagerAbi as PoolManagerAbi, v3FactoryAbi, v3PoolAbi } from "@/lib
 import { ADDRESSES, ZERO, isZero, sameAddr } from "@/lib/addresses";
 import { FEE_TIERS, V3_FEES, ethUsdgKey, idOf, keyOf, liquiditySlot, v3Hop, v4Hop, wrapHop, type Hop, type V4Key } from "@/lib/route";
 import { isManagedHookWired, managedKey } from "@/lib/activation";
+import { MARKET_DEPLOYER_ABI as MarketDeployerAbi } from "@/lib/nameKind";
 import { previewZapOnce, previewZapSellOnce } from "@/hooks/useZap";
 import { reverseRoute } from "@/lib/route";
 
@@ -40,6 +41,8 @@ export function useZapRoute(token?: Address, pairToken?: Address, probeWei?: big
   return useQuery({
     queryKey: ["zapRoute", token, pairToken, probe.toString(), from, sellProbe?.toString() ?? ""],
     enabled,
+    // the route itself is stable; the numbers are not. a stale route is fine, a stale quote is what reverts,
+    // which is why the floor is re-quoted at the click rather than read from here
     staleTime: 60_000,
     placeholderData: keepPreviousData,
     queryFn: async (): Promise<ZapRoute | null> => {
@@ -102,14 +105,24 @@ async function routesToAsset(client: Client, pair: Address): Promise<{ paths: Ho
   if (isZero(pair)) return { paths: [[]], label: "ETH" };
   if (sameAddr(pair, ADDRESSES.usdg)) return { paths: [[v4Hop(ethUsdgKey())]], label: "ETH → USDG" };
 
-  // An invented ticker is a one-for-one wrapper of USDG with a pool of its own: reach USDG, then wrap one for one
-  // or trade through the name's pool, whichever pays more for this size
+  // An invented name. A wrapper mints and redeems USDG one for one and has a pool of its own, so both are
+  // offered and the quoter picks whichever pays more for this size. A market has no mint at all: it is a pool
+  // and only a pool, and a wrap hop through it would be refused by the router, correctly. Which one this is
+  // comes from the issuers, never from the address, and an unresolved name falls through to the paths below
+  // rather than being routed on a guess
   if (!isZero(ADDRESSES.tickerLauncher)) {
     const isTicker = await client.readContract({ abi: TickerLauncherAbi, address: ADDRESSES.tickerLauncher, functionName: "isTicker", args: [pair] });
     if (isTicker) {
       const ways: Hop[][] = [[v4Hop(ethUsdgKey()), wrapHop(pair)]];
       if (isManagedHookWired()) ways.push([v4Hop(ethUsdgKey()), v4Hop(managedKey(pair))]);
       return { paths: ways, label: "ETH → USDG → ticker" };
+    }
+  }
+  if (!isZero(ADDRESSES.marketTickerDeployer)) {
+    const made = await client.readContract({ abi: MarketDeployerAbi, address: ADDRESSES.marketTickerDeployer, functionName: "market", args: [pair] });
+    if (sameAddr(made.token, pair)) {
+      const k = await client.readContract({ abi: MarketDeployerAbi, address: ADDRESSES.marketTickerDeployer, functionName: "keyFor", args: [pair] });
+      return { paths: [[v4Hop(ethUsdgKey()), v4Hop({ ...k, fee: Number(k.fee), tickSpacing: Number(k.tickSpacing) })]], label: "ETH → USDG → name" };
     }
   }
 

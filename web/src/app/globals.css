@@ -370,15 +370,20 @@
   /* Ticker availability, read as the user types. */
   /* The ticker field. It was set at 38px with heavy padding, which made a black slab twice the height of
      anything else on the form; this keeps it the biggest input on the page without leaving the family. */
-  .ticker-field { position: relative; max-width: 380px; }
+  .ticker-field { position: relative; }
+  /* the ticker and the name sit one above the other, so they are one box: same height, same radius, same
+     inner padding. only the weight and the chip tell them apart. */
   .ticker-input {
-    font-size: 24px;
+    font-size: 15px;
     font-weight: 700;
     letter-spacing: 0.015em;
     text-transform: uppercase;
-    padding: 12px 116px 12px 15px;
-    border-radius: 14px;
+    padding: 9px 104px 9px 12px;
+    border-radius: 12px;
   }
+  .create-form input:not([type="range"]):not([type="checkbox"]),
+  .create-form textarea { min-height: 42px; padding-inline: 12px; }
+  .create-form textarea { min-height: 96px; padding-block: 10px; }
   .ticker-input::placeholder { color: var(--dim); font-weight: 700; letter-spacing: 0.015em; }
   .ticker-field .avail-chip { right: 11px; font-size: 11.5px; padding: 3px 9px; }
 
@@ -561,7 +566,7 @@
   .stat-k { display: block; margin-top: 4px; font-size: 12.5px; color: var(--muted); }
   .stat-note { display: block; font-size: 11.5px; color: var(--dim); }
 
-  .how { display: grid; gap: 26px; margin-top: 76px; }
+  .how { display: grid; gap: 26px; margin-top: 76px; margin-bottom: 60px; }
   @media (min-width: 720px) { .how { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; } }
   .how-step { border-top: 1px solid var(--border); padding-top: 20px; }
   .how-n { color: var(--dim); }
@@ -628,12 +633,13 @@
   .coin-state { left: 10px; color: var(--state, var(--tickr-white)); }
   .coin-quote { right: 10px; color: var(--tickr-white); }
   .coin-body { padding: 12px 14px 14px; }
-  .coin-name { font-size: 15.5px; font-weight: 700; letter-spacing: -0.02em; }
+  .coin-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
   .coin-ticker { font-size: 12.5px; color: var(--dim); }
   .coin-stats { display: flex; gap: 16px; margin-top: 10px; }
   .coin-stat-k { display: block; font-size: 11px; color: var(--dim); }
   .coin-stat-v { display: block; font-size: 14px; font-weight: 600; }
   .coin-foot { margin-top: 6px; font-size: 11.5px; color: var(--dim); }
+  .coin-pair-slash { margin-inline: 1px; color: var(--dim); }
 
   /* ------------------------------------------------------------------
      The six swatches as a rule. One device, one order, one weight: it
@@ -969,6 +975,46 @@
 
   /* the pair chooser leads the step, because everything under it changes with the choice */
   .pair-choose { margin-bottom: 34px; padding-bottom: 26px; border-bottom: 1px solid var(--border); }
+  /* the pair chooser sits beside the coin's fields, in the right column above the preview, so it reads as its
+     own card there and drops its separating rule */
+  .pair-panel { margin-bottom: 16px; }
+  .pair-panel .pair-choose { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+  .pair-panel .glide-track { gap: 2px; }
+  .pair-panel .tab { padding-inline: 6px; font-size: 12px; white-space: nowrap; }
+  /* the five choices fit the column on one line; wrapping one of them alone read as a mistake */
+  .pair-panel .glide-track { flex-wrap: nowrap; gap: 0; margin-bottom: 16px; }
+  /* a card, not a mirror of the column beside it. the two sides hold different content and wrap at different
+     widths, so lining their boxes up by hand only ever holds at one window size; as its own object with its own
+     edge, the panel reads as deliberate at every size. */
+  .pair-panel {
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 18px 16px 18px;
+    background: color-mix(in srgb, var(--tickr-white) 3%, transparent);
+  }
+  .pair-panel .pair-choose-note { max-width: none; font-size: 13px; margin-top: 8px; }
+  .pair-panel .avail-chip { font-size: 11px; padding: 3px 8px; }
+  /* a list of two hundred assets in a 400px column: one per row, a fixed window that scrolls, the price kept
+     clear of the ticker. the priced ones sort first, so what someone can actually pick is what they see. */
+  .pick-grid { display: grid; grid-template-columns: 1fr; gap: 6px; max-height: 340px; overflow-y: auto; padding-right: 4px; }
+  .pick-row { padding: 8px 12px; min-height: 42px; }
+  .pc-title { display: inline-flex; align-items: center; gap: 7px; }
+  .pair-panel .stock-head { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  /* beside the form, not a page of its own: the panel drops the display heading and the rule that opens a
+     section, and its heading reads as the label above a control */
+  .pair-panel .rainbow-rule { display: none; }
+  .pair-panel h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: lowercase;
+    color: var(--muted);
+  }
+  .pair-panel p { font-size: 13px; margin-top: 6px; color: var(--dim); }
+  .pair-panel .ticker-input { font-size: 15px; padding: 9px 12px; }
+  .pair-panel .mt-6, .pair-panel .mt-7 { margin-top: 10px; }
+  .pair-panel .mb-4 { margin-bottom: 10px; }
+  .pair-panel > .pair-choose > .label { margin-bottom: 8px; }
   .pair-choose-note { margin-top: 12px; max-width: 60ch; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
 
   /* slippage: a summary in the header, the real control above the button */
@@ -1016,6 +1062,9 @@
   .fig-n { font-size: 28px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.05; font-variant-numeric: tabular-nums; }
   .fig-u { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; text-transform: uppercase; }
   .fig-s { margin-top: 6px; font-size: 12.5px; color: var(--dim); }
+  .fig-aside { font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  /* the way in for a browser without a wallet: a small panel under the connect button */
+  .wallet-chooser { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(320px, 92vw); padding: 14px; border: 1px solid var(--border-2); border-radius: 12px; background: var(--panel-2); box-shadow: 0 16px 40px rgb(0 0 0 / 0.45); text-align: left; }
   /* the price chart: the pool's own swaps, and the chart site's view one tab over on the public chain */
   .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
   .chart-count { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--dim); }

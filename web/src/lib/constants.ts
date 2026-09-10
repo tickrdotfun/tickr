@@ -8,7 +8,7 @@ export const ATTRIBUTION =
   "Independent, immutable contracts. Not affiliated with Robinhood.";
 
 export const POLL_MS = 5_000;
-export const DEFAULT_SLIPPAGE_BPS = 100; // 1%
+export const DEFAULT_SLIPPAGE_BPS = 300; // 3%: a quote on a small coin moves before it lands; 1% failed real buys on launch night
 export const DEFAULT_QUOTE_SUPPLY = 10n ** 24n; // 1,000,000 QUOTE (18 decimals)
 
 /** What an invented ticker is made of: dollars, one for one. Nothing is minted for free and nobody is handed any. */

@@ -9,6 +9,7 @@ import { FactoryAbi } from "@/lib/abis";
 import { ADDRESSES, isZero, sameAddr } from "@/lib/addresses";
 import { fmtAmount, shortAddr } from "@/lib/format";
 import { useActivation, type ActivationTarget } from "@/hooks/useActivation";
+import { useNameKind } from "@/hooks/useNameKind";
 import { useLaunches } from "@/hooks/useLaunches";
 import { useTokenData } from "@/hooks/useTokenData";
 import { adaptiveLogs } from "@/lib/logs";
@@ -27,10 +28,13 @@ const explorer = (h: string) => `https://robinhoodchain.blockscout.com/tx/${h}`;
 export function ActivateCard({ token, title, onDone }: { token: Address; title?: string; onDone?: () => void }) {
   const d = useTokenData(token);
   const own = useReadContract({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "poolKeyOf", args: [token], query: { enabled: !!d.launch, staleTime: Infinity } });
+  // the pair is offered to the hook whatever it looks like: the hook asks the issuers what it is, and that
+  // answer is the one that decides. Gating on the ticker launcher alone would hide the card for every name the
+  // market issuer made, which is exactly the case this is being wired for
   const target = useMemo((): ActivationTarget | undefined => {
-    if (!d.launch || !own.data || !d.isTicker) return undefined;
+    if (!d.launch || !own.data) return undefined;
     return { token, ticker: d.launch.pairToken, own: { currency0: own.data.currency0, currency1: own.data.currency1, fee: Number(own.data.fee), tickSpacing: Number(own.data.tickSpacing), hooks: own.data.hooks } };
-  }, [d.launch, d.isTicker, own.data, token]);
+  }, [d.launch, own.data, token]);
   const a = useActivation(target);
   const [hash, setHash] = useState("");
   const [ack, setAck] = useState(false);
@@ -46,12 +50,24 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
   const symbol = a.phase === "quote" ? qs : ts;
   const decimals = a.phase === "quote" ? (d.quote?.decimals ?? 6) : d.meta.decimals;
 
-  if (!d.isTicker) return null;
+  // a coin priced in a plain asset has no name to list, and neither issuer claims one: nothing to show
+  if (!d.isTicker && !a.nameKind && !a.nameError) return null;
+  if (!d.isTicker && a.nameError) return null;
   if (!a.ready) {
     return (
       <div className="activate">
         <div className="label">{title ?? "listing"}</div>
-        <p className="text-muted text-[14px] mt-3">{DEMO ? "this is a preview: the two listing buys are sent from the live site." : isZero(ADDRESSES.universalRouter) ? "no router is recorded for this deployment; the listing buys cannot be prepared here." : "connect the wallet that launched this coin to activate it."}</p>
+        <p className="text-muted text-[14px] mt-3">
+          {DEMO
+            ? "this is a preview: the two listing buys are sent from the live site."
+            : isZero(ADDRESSES.universalRouter)
+              ? "no router is recorded for this deployment; the listing buys cannot be prepared here."
+              : a.nameError
+                ? `the name could not be identified, so nothing can be prepared. ${a.nameError}`
+                : !a.nameKind
+                  ? "reading what this name is."
+                  : "connect the wallet that launched this coin to activate it."}
+        </p>
       </div>
     );
   }
@@ -90,9 +106,7 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
         <div className="mt-3">
           <div className="text-[20px] font-semibold">{ts} is live, listing pending</div>
           <p className="text-muted text-[14px] mt-2">
-            two separate purchases, each reviewed and signed in your wallet, through uniswap&apos;s router: first {formatEther(AMOUNTS.quote)} eth of {qs} delivered to your
-            wallet, then, after that receipt is confirmed, {formatEther(AMOUNTS.coin)} eth of {ts} with fresh eth. the {qs} from the first stays in your wallet. gas is on
-            top. nothing is sent automatically, and nothing is ever sent twice.
+            two buys finish the listing, {formatEther(AMOUNTS.quote)} eth then {formatEther(AMOUNTS.coin)} eth, plus gas. you sign each one. nothing is sent automatically.
           </p>
           <ul className="activate-steps mt-4">
             <li data-done={a.stageStatus(0) === "confirmed"}>
@@ -277,13 +291,25 @@ export function useActivationSignals(token?: Address, ticker?: Address, own?: { 
 
 /** On a coin's page: the creator's own card while the coin is not activated; a line for everyone else. */
 export function ActivationNotice({ token, deployer }: { token: Address; deployer?: Address }) {
+  // the clock, read once when the page opened rather than on every render. A render that asks the time is a
+  // different render each time it runs, and the window this decides is a day wide, so one reading is plenty
+  const [mounted] = useState(() => Date.now());
   const d = useTokenData(token);
   const launches = useLaunches();
   const found = launches.data?.find((l) => sameAddr(l.token, token));
-  const signals = useActivationSignals(d.isTicker ? token : undefined, d.launch?.pairToken, d.pool.poolId ? { id: d.pool.poolId } : undefined, found?.blockNumber, d.isTicker);
-  if (!d.isTicker || !d.launch) return null;
+  // a name of either kind counts. Gating on the ticker launcher alone hid this for every coin priced in a
+  // market name, which is the one case the notice was most needed for
+  const nameKind = useNameKind(d.launch?.pairToken as Address | undefined);
+  const named = d.isTicker || !!nameKind.spec;
+  const signals = useActivationSignals(named ? token : undefined, d.launch?.pairToken, d.pool.poolId ? { id: d.pool.poolId } : undefined, found?.blockNumber, named);
+  if (!named || !d.launch) return null;
   const mine = !!d.user && (sameAddr(d.user, deployer ?? d.launch.deployer) || sameAddr(d.user, d.launch.creatorFeeRecipient));
-  if (mine) return <ActivateCard token={token} title="listing pending" />;
+  // the card is for the hour after a launch, while the two buys still have to be made. the signals cannot confirm
+  // a listing on a busy coin (they read the last handful of swaps, and a traded coin has thousands), so age decides:
+  // a coin that has been trading for a day listed long ago, whatever the scan can still see.
+  const launchedAt = Number(d.launch.launchedAt ?? 0n);
+  const fresh = launchedAt > 0 && mounted / 1000 - launchedAt < 24 * 60 * 60;
+  if (mine && fresh && signals.data?.activated !== true) return <ActivateCard token={token} title="listing pending" />;
   if (signals.data?.activated !== false) return null;
   return <Notice kind="warn">listing pending, as far as this page can tell: the two buys that follow a launch under a name have not landed. it trades here as usual.</Notice>;
 }

@@ -29,9 +29,9 @@ export function StatsRow() {
       cls: "sw-green",
     },
     {
-      k: "burned",
-      v: d ? `${d.coinsBurned} ${d.coinsBurned === 1 ? "coin" : "coins"}` : "-",
-      note: d && d.officialBurnedPct !== undefined ? `tickr ${d.officialBurnedPct.toFixed(2)}% of supply` : undefined,
+      k: "tickr burned",
+      v: d && d.officialBurnedPct !== undefined ? `${d.officialBurnedPct.toFixed(2)}%` : "-",
+      note: undefined,
       cls: "sw-pink",
     },
   ];

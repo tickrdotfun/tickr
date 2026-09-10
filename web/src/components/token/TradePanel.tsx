@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useBalance, useBlockNumber, useReadContract, useReadContracts } from "wagmi";
+import { explainFromError } from "@/lib/explain";
+import { useBalance, useBlockNumber, usePublicClient, useReadContract, useReadContracts } from "wagmi";
 import { erc20Abi } from "viem";
 import type { TokenData } from "@/hooks/useTokenData";
 import { useTx, type WriteFn } from "@/hooks/useTx";
-import { useQuoterQuote } from "@/hooks/useQuoterQuote";
-import { useZapPreview, useZapSellPreview, zapParams, zapSellParams } from "@/hooks/useZap";
+import { quoterQuoteOnce, useQuoterQuote } from "@/hooks/useQuoterQuote";
+import { useRouteProtocolFees } from "@/hooks/useRouteProtocolFees";
+import { previewZapOnce, previewZapSellOnce, useZapPreview, useZapSellPreview, zapParams, zapSellParams } from "@/hooks/useZap";
 import { useZapRoute } from "@/hooks/useZapRoute";
 import { TokenAbi, ZapRouterAbi } from "@/lib/abis";
 import { ADDRESSES, ZERO } from "@/lib/addresses";
@@ -14,6 +16,7 @@ import { DEFAULT_SLIPPAGE_BPS } from "@/lib/constants";
 import { bpsToPct, fmtAmount, safeParseUnits } from "@/lib/format";
 import { applySlippage, quoteExactIn } from "@/lib/pool";
 import { reverseRoute } from "@/lib/route";
+import { floorFor, hopFeesFromPath, routeFees, totalFeeBps, type Quote } from "@/lib/quote";
 import { TxStatus } from "../TxStatus";
 import { Notice, Panel, Row } from "../ui";
 import { GlideIndicator, useGlider } from "../motion/Glide";
@@ -29,9 +32,12 @@ export function TradePanel({ d }: { d: TokenData }) {
   const [amount, setAmount] = useState("");
   const [slippage, setSlippage] = useState((DEFAULT_SLIPPAGE_BPS / 100).toString());
   const [slipOpen, setSlipOpen] = useState(false);
+  /** Set when refreshed terms were worse enough that the trade stopped for another look. */
+  const [renewNote, setRenewNote] = useState("");
   const [payEth, setPayEth] = useState(true);
   const tx = useTx();
   const { trackRef: sideTrack, indRef: sideInd } = useGlider(side);
+  const client = usePublicClient();
   const native = useBalance({ address: user, query: { enabled: !!user, refetchInterval: 5_000 } });
 
   const qd = quote?.decimals ?? 18;
@@ -58,6 +64,8 @@ export function TradePanel({ d }: { d: TokenData }) {
   // ETH is the default way in when a route exists; the quote asset is always an option on an ERC-20 pair
   const ethAvailable = nativePair || !!ethPath;
   const inEth = nativePair || (payEth && !!ethPath);
+  // the price impact of this size: the quote for the typed amount against the quote for a tiny one on the same route
+  const tinyRef = useZapPreview(launch?.token, side === "buy" && inEth ? ethPath : null, 1_000_000_000_000_000n, user);
   const payDecimals = inEth ? 18 : qd;
   const paySymbol = inEth ? "ETH" : qs;
   const outSymbol = inEth ? "ETH" : qs;
@@ -120,9 +128,24 @@ export function TradePanel({ d }: { d: TokenData }) {
   const buyIsEstimate = side === "buy" && !inEth && quotedBuy !== undefined && !quoter.data;
   // the zap's preview already reports what the buyer keeps; the quoter and the local arithmetic report the pool's count
   const buyOut = inEth ? zp.data?.tokensOut : quotedBuy !== undefined && snipeBps > 0 ? quotedBuy - (quotedBuy * BigInt(snipeBps)) / 10_000n : quotedBuy;
+  const impactPct = (() => {
+    if (side !== "buy" || !inEth || buyOut === undefined || !amt || amt === 0n || !tinyRef.data?.tokensOut) return undefined;
+    const got = Number(buyOut) / Number(amt);
+    const marginal = Number(tinyRef.data.tokensOut) / 1e15;
+    if (!(marginal > 0) || !(got > 0)) return undefined;
+    const pct = (1 - got / marginal) * 100;
+    return pct > 0.05 ? pct : undefined;
+  })();
 
   // sells: the own pool first, then the route backwards to ETH, or the quote straight out of the one pool
   const sellPath = inEth ? (nativePair && own ? [own] : ethPath ? reverseRoute(ethPath) : null) : own ? [own] : null;
+  // every hop charges its own pool's fee, so what a trade costs is the whole route and not the coin's pool
+  // alone. v4's own protocol fee is per pool and per direction and is not read here, so the total is reported as
+  // a lower bound rather than as the answer
+  const path = (side === "buy" ? buyPath : sellPath) ?? [];
+  const fromAsset = side === "buy" ? (inEth ? ZERO : launch?.pairToken) : launch?.token;
+  const proto = useRouteProtocolFees(path.length ? path : undefined, fromAsset);
+  const fees = path.length ? routeFees(hopFeesFromPath(path, side, (i) => proto.byHop[i])) : undefined;
   const sellOut = inEth ? ZERO : (launch?.pairToken ?? ZERO);
   const zs = useZapSellPreview(side === "sell" ? launch?.token : undefined, sellPath, side === "sell" ? amt : undefined, user, sellOut);
 
@@ -152,16 +175,57 @@ export function TradePanel({ d }: { d: TokenData }) {
     !routePending &&
     (side === "buy" ? !!buyPath && buyOut !== undefined && buyOut > 0n : !!sellPath && !!zs.data && zs.data.amountOut > 0n);
 
+  /**
+   * `floorFor`, with whatever it refuses put on the page.
+   *
+   * The refusal happens inside the send step, where a thrown error is not something the panel shows on its own.
+   * A trade that stops has to say why it stopped, or it looks like a button that did nothing.
+   */
+  async function guardedFloor(
+    reviewed: Quote,
+    take: () => Promise<bigint | null>,
+    bps: number,
+    onRenew: (why: string) => void,
+  ): Promise<bigint> {
+    try {
+      return await floorFor(reviewed, take, bps, onRenew);
+    } catch (e) {
+      const why = explainFromError(e, side === "buy" ? "buy" : "sell");
+      // the renewed-terms case writes its own, more specific line
+      if (!/review them again/.test(why)) onRenew(why);
+      throw e;
+    }
+  }
+
   async function submit() {
     if (!user || !launch || !amt) return;
+    setRenewNote("");
     const steps = [];
     if (side === "buy" && buyPath && buyOut !== undefined) {
-      const minOut = applySlippage(buyOut, slipBps);
+      // the floor comes from a quote taken now, not from the one on screen. a displayed quote can be a few
+      // seconds old, and on a thin pool a few seconds is enough for the price to move past the floor and
+      // revert the trade. every failed buy traced so far failed exactly this way.
+      // the reviewed quote and its refresh both have to come from the source that produced what is on screen.
+      // Paid in ETH that is the zap preview; paid in the name it is the quoter, or the local arithmetic when no
+      // quoter is wired. Reading the zap's timestamp for a name-paid buy reported an age that quote never had,
+      // and refreshing only the ETH path left a name-paid buy with no refresh at all
+      const snipeAdj = (v: bigint) => (snipeBps > 0 ? v - (v * BigInt(snipeBps)) / 10_000n : v);
+      const quotedAt = inEth ? zp.dataUpdatedAt : quoter.data !== undefined && quoter.data !== null ? quoter.dataUpdatedAt : 0;
+      const reviewed: Quote = { out: buyOut, at: quotedAt || 0 };
+      const take = async (): Promise<bigint | null> => {
+        if (!client) return null;
+        if (inEth) return previewZapOnce(client, launch.token, buyPath, amt, user).then((r) => r?.tokensOut ?? null);
+        if (!pool.key) return null;
+        const got = await quoterQuoteOnce(client, pool.key, !pool.key.tokenIs0, amt);
+        return got === null ? null : snipeAdj(got);
+      };
       if (inEth) {
         steps.push({
           label: `Buy ${ts} with ETH`,
-          request: (w: WriteFn) =>
-            w({ abi: ZapRouterAbi, address: ADDRESSES.zapRouter, functionName: "zapBuy", args: [zapParams(launch.token, buyPath, user, minOut)], value: amt }),
+          request: async (w: WriteFn) => {
+            const minOut = await guardedFloor(reviewed, take, slipBps, setRenewNote);
+            return w({ abi: ZapRouterAbi, address: ADDRESSES.zapRouter, functionName: "zapBuy", args: [zapParams(launch.token, buyPath, user, minOut)], value: amt });
+          },
         });
       } else {
         if ((balances.quoteAllowance ?? 0n) < amt) {
@@ -172,12 +236,16 @@ export function TradePanel({ d }: { d: TokenData }) {
         }
         steps.push({
           label: `Buy ${ts} with ${qs}`,
-          request: (w: WriteFn) =>
-            w({ abi: ZapRouterAbi, address: ADDRESSES.zapRouter, functionName: "zapBuy", args: [zapParams(launch.token, buyPath, user, minOut, launch.pairToken, amt)] }),
+          // inside the step, so the approval above cannot age the floor while it confirms
+          request: async (w: WriteFn) => {
+            const minOut = await guardedFloor(reviewed, take, slipBps, setRenewNote);
+            return w({ abi: ZapRouterAbi, address: ADDRESSES.zapRouter, functionName: "zapBuy", args: [zapParams(launch.token, buyPath, user, minOut, launch.pairToken, amt)] });
+          },
         });
       }
     } else if (side === "sell" && sellPath && zs.data) {
-      const minOut = applySlippage(zs.data.amountOut, slipBps);
+      const reviewed: Quote = { out: zs.data.amountOut, at: zs.dataUpdatedAt || 0 };
+      const take = () => (client ? previewZapSellOnce(client, launch.token, sellPath, amt, user, sellOut).then((r) => r?.amountOut ?? null) : Promise.resolve(null));
       if ((balances.tokenAllowance ?? 0n) < amt) {
         steps.push({
           label: `Approve ${ts}`,
@@ -186,8 +254,10 @@ export function TradePanel({ d }: { d: TokenData }) {
       }
       steps.push({
         label: `Sell ${ts} for ${outSymbol}`,
-        request: (w: WriteFn) =>
-          w({ abi: ZapRouterAbi, address: ADDRESSES.zapRouter, functionName: "zapSell", args: [zapSellParams(launch.token, amt, sellPath, user, minOut, sellOut)] }),
+        request: async (w: WriteFn) => {
+          const minOut = await guardedFloor(reviewed, take, slipBps, setRenewNote);
+          return w({ abi: ZapRouterAbi, address: ADDRESSES.zapRouter, functionName: "zapSell", args: [zapSellParams(launch.token, amt, sellPath, user, minOut, sellOut)] });
+        },
       });
     }
     const h = await tx.run(steps);
@@ -279,6 +349,14 @@ export function TradePanel({ d }: { d: TokenData }) {
             <>
               <Row k={`Receive (${ts})`} v={buyOut !== undefined ? fmtAmount(buyOut, td) : amt && zp.isFetching ? "quoting" : "-"} />
               <Row k="Min. after slippage" v={buyOut !== undefined ? `${fmtAmount(applySlippage(buyOut, slipBps), td)} ${ts}` : "-"} />
+              {impactPct !== undefined && (
+                <Row k="Price impact" v={`${impactPct.toFixed(1)}%`} />
+              )}
+              {impactPct !== undefined && impactPct > 3 && (
+                <div className="text-[13px] text-muted">
+                  a buy this size moves the price {impactPct.toFixed(0)}%. the quote above already includes that; if the buy fails because the price moved before it landed, raise max slip.
+                </div>
+              )}
               {inEth && zp.isError && <div className="text-[13px] text-danger">no quote at this size. try a smaller amount{nativePair ? "" : `, or pay in ${qs}`}.</div>}
               {guarded && (
                 <div className="text-[13px] text-signal">
@@ -291,12 +369,19 @@ export function TradePanel({ d }: { d: TokenData }) {
                   launch window: a buy this second pays a {(snipeBps / 100).toFixed(snipeBps % 100 === 0 ? 0 : 1)}% snipe tax, burned. it is gone within five seconds of launch.
                 </div>
               )}
+              {renewNote && <div className="text-[13px] text-signal" role="status">{renewNote}</div>}
               <details className="trade-more">
                 <summary>breakdown</summary>
                 <Row k="Route" v={inEth ? (route.data?.label ?? "") : `${qs} → coin`} />
                 {!inEth && <Row k="Quote" v={buyIsEstimate ? "estimate from the pool's one position" : "the quoter, across every position"} />}
                 {inEth && !nativePair && <Row k={`Swapped to ${qs}`} v={zp.data ? `${fmtAmount(zp.data.quoteOut, qd)} ${qs}` : "-"} />}
-                <Row k="Pool fee" v={poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"} />
+                <Row k="Pool fee, this coin" v={poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"} />
+                <Row k="Fees, this coin's pool" v={fees ? bpsToPct(Math.round(fees.coinPips / 100)) : "-"} />
+                <Row k="Fees, getting there" v={fees ? bpsToPct(Math.round(fees.bridgePips / 100)) : "-"} />
+                <Row k="The chain's own fee" v={fees ? (fees.complete ? bpsToPct(Math.round(fees.chainPips / 100)) : "not read") : "-"} />
+                <Row k={fees && !fees.complete ? "Fees, whole route (at least)" : "Fees, whole route"} v={fees ? `${bpsToPct(totalFeeBps(fees))} across ${path.length} ${path.length === 1 ? "pool" : "pools"}` : "-"} />
+                <Row k="Not included" v={fees && !fees.complete ? "the chain's own protocol fee, and whatever an outside app charges" : "whatever an outside app charges"} />
+                <Row k="Slippage you allow" v={`${slipPct}%`} />
               </details>
             </>
           ) : (
@@ -307,7 +392,13 @@ export function TradePanel({ d }: { d: TokenData }) {
               <details className="trade-more">
                 <summary>breakdown</summary>
                 <Row k="Route" v={inEth ? `coin → ${route.data?.label?.replace(/ → coin$/, "").split(" → ").reverse().join(" → ") ?? "ETH"}` : `coin → ${qs}`} />
-                <Row k="Pool fee" v={poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"} />
+                <Row k="Pool fee, this coin" v={poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"} />
+                <Row k="Fees, this coin's pool" v={fees ? bpsToPct(Math.round(fees.coinPips / 100)) : "-"} />
+                <Row k="Fees, getting there" v={fees ? bpsToPct(Math.round(fees.bridgePips / 100)) : "-"} />
+                <Row k="The chain's own fee" v={fees ? (fees.complete ? bpsToPct(Math.round(fees.chainPips / 100)) : "not read") : "-"} />
+                <Row k={fees && !fees.complete ? "Fees, whole route (at least)" : "Fees, whole route"} v={fees ? `${bpsToPct(totalFeeBps(fees))} across ${path.length} ${path.length === 1 ? "pool" : "pools"}` : "-"} />
+                <Row k="Not included" v={fees && !fees.complete ? "the chain's own protocol fee, and whatever an outside app charges" : "whatever an outside app charges"} />
+                <Row k="Slippage you allow" v={`${slipPct}%`} />
               </details>
             </>
           )}

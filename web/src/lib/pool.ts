@@ -22,6 +22,14 @@ export function slot0Slot(poolId: Hex): Hex {
 }
 
 /** slot0 packs sqrtPriceX96 in its low 160 bits. */
+/**
+ * v4 packs a pool's slot0 as sqrtPriceX96 (160 bits), tick (24), protocolFee (24), lpFee (24). The protocol fee
+ * is itself two twelve bit halves, one per swap direction, each in pips.
+ */
+export function protocolFeeFromSlot0(slot0: Hex): number {
+  return Number((BigInt(slot0) >> 184n) & 0xffffffn);
+}
+
 export function sqrtPriceFromSlot0(slot0: Hex): bigint {
   return BigInt(slot0) & ((1n << 160n) - 1n);
 }

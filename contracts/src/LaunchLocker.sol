@@ -174,11 +174,13 @@ contract LaunchLocker is IERC721Receiver, ReentrancyGuard {
         }
     }
 
-    /// @dev The coin side burns in full: every fee taken in the launched coin on a sell goes to the dead address.
-    /// Nobody, the creator, the protocol or the club, is paid in the coin. Creators earn the quote on buys.
     /// @dev The coin side, split like the quote side: the base part by the frozen shares, the tax part whole to the
     /// creator. The creator's share and the tax go to the escrow in the coin; the protocol's and the club's shares
     /// are burned, so every sell still takes coins out of circulation.
+    ///
+    /// So the coin side is not the quote side's allocation. There is no buyback slice and no team slice here:
+    /// what the protocol would have taken is destroyed instead. Under a 40/60 policy that is 40% of the coin fee
+    /// to the creator and 60% burned, and it is deliberate, not an oversight of the split.
     function _splitCoin(address token, FeePolicy memory p, uint256 creatorTaxBps, uint256 coinOut)
         internal
         returns (uint256 creatorCoin, uint256 burnedCoin)

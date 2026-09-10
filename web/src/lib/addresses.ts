@@ -29,6 +29,8 @@ type Deployments = {
   genesisPool?: string;
   managedTickerHook?: string;
   managedTickerDeployer?: string;
+  marketTickerDeployer?: string;
+  marketTickerLauncher?: string;
   universalRouter?: string;
   v4Quoter?: string;
 };
@@ -80,6 +82,10 @@ export const ADDRESSES = {
   v3Factory: pick(d.v3Factory, process.env.NEXT_PUBLIC_V3_FACTORY, "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA"),
   /** Uniswap's v4 quoter, for executable quotes of a buy paid in the quote asset; zero where none is wired, and the site estimates */
   v4Quoter: pick(d.v4Quoter, process.env.NEXT_PUBLIC_V4_QUOTER),
+  /** The issuer of fixed-inventory name markets; zero where none is wired, and only wrapper names exist */
+  marketTickerDeployer: pick(d.marketTickerDeployer, process.env.NEXT_PUBLIC_MARKET_TICKER_DEPLOYER),
+  /** The registrar that launches a coin under one of those names; zero where none is wired */
+  marketTickerLauncher: pick(d.marketTickerLauncher, process.env.NEXT_PUBLIC_MARKET_TICKER_LAUNCHER),
 } as const;
 
 export const START_BLOCK: bigint = BigInt(

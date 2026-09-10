@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
 import type { Address } from "viem";
 import { TickerLauncherAbi, TickerTokenAbi } from "@/lib/abis";
+import { isHidden } from "@/lib/hidden";
+import { robinhoodChain } from "@/lib/chain";
 import { ADDRESSES, isZero } from "@/lib/addresses";
 
 /**
@@ -43,6 +45,9 @@ export function useTickers() {
         const sym = info[i * 2];
         const counter = info[i * 2 + 1];
         if (sym.status !== "success" || counter.status !== "success") return;
+        // a name kept out of the public lists is kept out of this one too, or it would still show in the
+        // pair chooser and in recent tickers
+        if (isHidden(robinhoodChain.id, a)) return;
         out.push({ quoteToken: a, ticker: String(sym.result), counterAsset: counter.result as Address });
       });
       return out;

@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { ATTRIBUTION, SOCIALS } from "@/lib/constants";
-import { EXPLORER } from "@/lib/chain";
 import { TickrIcon } from "./Mark";
 import { RainbowRule } from "./RainbowRule";
 
@@ -27,9 +26,6 @@ export function Footer() {
           <Link href="/docs">docs</Link>
           <a href={SOCIALS.x.href} target="_blank" rel="noreferrer" title={SOCIALS.x.handle}>
             {SOCIALS.x.label}
-          </a>
-          <a href={EXPLORER} target="_blank" rel="noreferrer">
-            explorer
           </a>
           {/* the code, as GitHub's own mark; last but one, so it sits near the right end of the row */}
           <a href="https://github.com/tickrdotfun/tickr" target="_blank" rel="noreferrer" title="the code on GitHub" aria-label="the code on GitHub" className="inline-flex">

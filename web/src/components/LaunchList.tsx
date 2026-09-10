@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useActivationSignals } from "./token/Activate";
 import { isOfficialCoin } from "@/lib/addresses";
 import { useMarketData, type Row, type WindowKey } from "@/hooks/useMarketData";
 import { DEPLOYED } from "@/lib/addresses";
@@ -28,7 +27,7 @@ const WINDOW_LABELS: { id: WindowKey; label: string }[] = [
 
 /** Every coin is live from its first block, so the grid is one list, newest first. */
 export function LaunchList() {
-  const [sort, setSort] = useState<SortKey>("new");
+  const [sort, setSort] = useState<SortKey>("mcap");
   const [window, setWindow] = useState<WindowKey>("all");
   const [q, setQ] = useState("");
   const market = useMarketData(window);
@@ -114,7 +113,7 @@ export function LaunchList() {
       {rows.length > 0 && (
         <Section title="live" count={rows.length}>
           {rows.map((r) => (
-            <LaunchCard key={r.launch.token} r={r} window={window} partial={partial} />
+            <LaunchCard key={r.launch.token} r={r} window={window} />
           ))}
         </Section>
       )}
@@ -134,7 +133,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
   );
 }
 
-function LaunchCard({ r, window, partial }: { r: Row; window: WindowKey; partial: boolean }) {
+function LaunchCard({ r, window }: { r: Row; window: WindowKey }) {
   const mcap = r.marketCapUsd !== undefined ? fmtUsd(r.marketCapUsd) : r.marketCap !== undefined ? `${fmtNumber(r.marketCap, { sig: 3 })} ${r.quote.symbol}` : "-";
   const vol = r.volumeUsd > 0 ? fmtUsd(r.volumeUsd) : r.volumeQuote > 0 ? `${fmtNumber(r.volumeQuote, { sig: 3 })} ${r.quote.symbol}` : "-";
   return (
@@ -142,14 +141,15 @@ function LaunchCard({ r, window, partial }: { r: Row; window: WindowKey; partial
       <div className="coin-art">
         <TokenArt src={r.logo} symbol={r.symbol} />
         <span className="coin-state num">live</span>
-        <span className={`coin-quote num ${quoteClass(r.quote.kind)}`}>{r.quote.kind === "ticker" ? `${r.quote.symbol}*` : r.quote.symbol}</span>
       </div>
       <div className="coin-body">
         <div className="flex items-baseline gap-2 min-w-0">
-          <span className="coin-name truncate">{r.name ?? shortAddr(r.launch.token)}</span>
-          <span className="coin-ticker num">{r.symbol ?? ""}</span>
+          <span className="coin-name num truncate">
+            {r.symbol ?? shortAddr(r.launch.token)}
+            <span className="coin-pair-slash">/</span>
+            <span className={quoteClass(r.quote.kind)}>{r.quote.kind === "ticker" ? `${r.quote.symbol}*` : r.quote.symbol}</span>
+          </span>
           {isOfficialCoin(r.launch.token) && <span className="badge sw-green">official</span>}
-          {r.fresh && <ActivationMark r={r} />}
         </div>
         <div className="coin-stats">
           <span>
@@ -161,19 +161,7 @@ function LaunchCard({ r, window, partial }: { r: Row; window: WindowKey; partial
             <span className="coin-stat-v num">{vol}</span>
           </span>
         </div>
-        <div className="coin-foot num">
-          liquidity locked · {partial ? "buys unknown" : `${r.buys} buy${r.buys === 1 ? "" : "s"}`}
-          {window === "all" || partial ? "" : ` in ${window}`}
-          {r.burnedPct !== undefined && r.burnedPct > 0 ? ` · ${r.burnedPct.toFixed(2)}% burned` : ""}
-        </div>
       </div>
     </Link>
   );
-}
-
-/** The same evidence the coin's page uses, for a fresh coin under a name: a mark only on a definite "not yet". */
-function ActivationMark({ r }: { r: Row }) {
-  const signals = useActivationSignals(r.launch.token, r.quote.address, { id: r.launch.poolId }, r.launch.blockNumber, true);
-  if (signals.data?.activated !== false) return null;
-  return <span className="badge sw-yellow">listing pending</span>;
 }
