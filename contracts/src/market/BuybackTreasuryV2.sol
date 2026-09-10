@@ -95,10 +95,18 @@ contract BuybackTreasuryV2 is ReentrancyGuard {
     /// @notice The floor applied to a market name the owner has not set one for, so a name onboards itself
     /// without an owner transaction. Set from the frozen policy at construction.
     ///
-    /// A per-token floor still wins wherever one is set, and a token floor may only be higher than this or the
-    /// conversion is refused, so this can raise protection for an unknown name but never lower it for a known
-    /// one. Without it a new name reverts NoPolicy on every collect and its revenue simply accumulates: safe,
-    /// but it means the agreed allocation never happens until someone remembers a transaction per launch.
+    /// Exactly what this does and does not constrain:
+    ///
+    /// - it applies only where `minRateToCounterX96[token]` / `minRateFromCounterX96[token]` is zero, which is
+    ///   the state of every name nobody has set a floor for
+    /// - it can be moved anywhere at or above the frozen policy, so it may be raised and later lowered back to
+    ///   the frozen value. It can never go below it
+    /// - it does **not** bound `setMinRate`. A per-token floor is a separate owner power with no lower bound of
+    ///   its own, so the owner can still set one token's floor below the frozen policy. That predates this
+    ///   default and is unchanged by it
+    ///
+    /// Without a default a new name reverts NoPolicy on every collect and its revenue accumulates: safe, but
+    /// the agreed allocation never happens until someone remembers a transaction per launch.
     uint256 public defaultMinRateToCounterX96;
     uint256 public defaultMinRateFromCounterX96;
 
@@ -205,6 +213,11 @@ contract BuybackTreasuryV2 is ReentrancyGuard {
     }
 
     /// @notice The floor a conversion of `token` must beat. Only the factory owner sets it.
+    ///
+    /// @dev This has no lower bound, so the owner can set a floor below the frozen policy for one token and
+    /// weaken its protection. That is a pre-existing owner power, stated here rather than implied away. Zero
+    /// means "no floor of its own", which sends the token to `defaultMinRateToCounterX96` instead of leaving
+    /// it unprotected.
     /// @param toCounter true for selling the name into counter, false for buying it with counter.
     function setMinRate(address token, bool toCounter, uint256 rateX96) external {
         if (msg.sender != factory.owner()) revert NotOwner();
@@ -213,8 +226,9 @@ contract BuybackTreasuryV2 is ReentrancyGuard {
         emit MinRateSet(token, toCounter, rateX96);
     }
 
-    /// @notice The floor for names with no floor of their own. Only the factory owner sets it, and it may
-    /// never go below the frozen policy: the default is a safety net, not a way to open one up.
+    /// @notice The floor for names with no floor of their own. Only the factory owner sets it, anywhere at or
+    /// above the frozen policy. It may therefore be raised and lowered again down to the frozen value, but
+    /// never under it. This does not constrain `setMinRate`, which is a separate per-token power.
     function setDefaultMinRate(bool toCounter, uint256 rateX96) external {
         if (msg.sender != factory.owner()) revert NotOwner();
         uint256 frozen = toCounter ? FeeSettings.MIN_RATE_NAME_TO_COUNTER_X96 : FeeSettings.MIN_RATE_COUNTER_TO_NAME_X96;
