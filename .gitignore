@@ -17,4 +17,6 @@ web/.open-next/
 web/.wrangler/
 workers/*/node_modules/
 workers/*/.wrangler/
+workers/*/test/.wrangler
+workers/*/test/.state
 contracts/deployments/*.json

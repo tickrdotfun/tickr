@@ -5,7 +5,8 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "run-once": "wrangler dev --test-scheduled",
-    "typecheck": "node ../../web/node_modules/typescript/bin/tsc -p tsconfig.json"
+    "typecheck": "node ../../web/node_modules/typescript/bin/tsc -p tsconfig.json",
+    "test:do": "node test/do.test.mjs"
   },
   "dependencies": {
     "viem": "^2.56.3"

@@ -77,11 +77,29 @@ export function afterResolve(o: ResolveOutcome): { clear: boolean; mayWrite: boo
    ordering they depend on can be tested directly rather than inferred from a live worker.
    ------------------------------------------------------------------ */
 
-export type LockState = { leaseUntil?: number; pending?: Pending };
+/**
+ * The lease, its owner, and whatever write is outstanding.
+ *
+ * `owner` is a token minted by the run that took the lease. Every mutation must present it. Without one, a run
+ * whose lease expired and was taken over by another could still come back and clear a record or release a lease
+ * that is no longer its own, which is precisely the case an expiry creates.
+ */
+export type LockState = { leaseUntil?: number; owner?: string; pending?: Pending };
+
+export type Rejected = { ok: false; reason: string };
+
+/** Every mutation checks this first: the caller must still hold the lease it is acting under. */
+function held(state: LockState, token: string): Rejected | undefined {
+  if (!state.owner) return { ok: false, reason: "no lease is held; acquire one first" };
+  if (state.owner !== token) return { ok: false, reason: "this run's lease was taken over; its changes are refused" };
+  return undefined;
+}
+
+
 
 export type Acquired =
-  | { ok: true; state: LockState; resolveFirst?: Pending }
-  | { ok: false; reason: string };
+  | { ok: true; state: LockState; token: string; resolveFirst?: Pending }
+  | Rejected;
 
 /**
  * Take the lease, or refuse.
@@ -91,31 +109,49 @@ export type Acquired =
  * not lock the keeper out forever. Whatever the last run left pending comes back with the lease, because it has
  * to be settled before this run writes anything.
  */
-export function acquire(state: LockState, now: number, leaseMs: number): Acquired {
+export function acquire(state: LockState, now: number, leaseMs: number, token: string): Acquired {
   if (state.leaseUntil !== undefined && state.leaseUntil > now) {
     return { ok: false, reason: `another run holds the lease for ${Math.ceil((state.leaseUntil - now) / 1000)}s` };
   }
+  // taking over an expired lease mints a new owner, which is what invalidates the previous run's token
   return {
     ok: true,
-    state: { ...state, leaseUntil: now + leaseMs },
+    token,
+    state: { ...state, leaseUntil: now + leaseMs, owner: token },
     ...(state.pending ? { resolveFirst: state.pending } : {}),
   };
 }
 
-/** Record a signed write. Refuses to overwrite one that is still unsettled. */
-export function record(state: LockState, p: Pending): { ok: boolean; state: LockState; reason?: string } {
+/** Record a signed write. Refuses to overwrite one that is still unsettled, or to act without the lease. */
+export function record(state: LockState, p: Pending, token: string): { ok: true; state: LockState } | Rejected {
+  const no = held(state, token);
+  if (no) return no;
   if (state.pending) {
-    return { ok: false, state, reason: `a write is already pending (${state.pending.label} ${state.pending.hash})` };
+    return { ok: false, reason: `a write is already pending (${state.pending.label} ${state.pending.hash})` };
   }
   return { ok: true, state: { ...state, pending: p } };
 }
 
-export function clear(state: LockState): LockState {
+/**
+ * Clear one specific record.
+ *
+ * The hash has to match. A run that resolved attempt A must not be able to clear attempt B, which is what a
+ * bare clear would do if a takeover happened in between and the new run had already recorded its own write.
+ */
+export function clear(state: LockState, hash: string, token: string): { ok: true; state: LockState } | Rejected {
+  const no = held(state, token);
+  if (no) return no;
+  if (!state.pending) return { ok: false, reason: "there is no pending write to clear" };
+  if (state.pending.hash !== hash) {
+    return { ok: false, reason: `the pending write is ${state.pending.hash}, not ${hash}; refusing to clear it` };
+  }
   const { pending: _drop, ...rest } = state;
-  return rest;
+  return { ok: true, state: rest };
 }
 
-export function release(state: LockState): LockState {
-  const { leaseUntil: _drop, ...rest } = state;
-  return rest;
+export function release(state: LockState, token: string): { ok: true; state: LockState } | Rejected {
+  const no = held(state, token);
+  if (no) return no;
+  const { leaseUntil: _l, owner: _o, ...rest } = state;
+  return { ok: true, state: rest };
 }

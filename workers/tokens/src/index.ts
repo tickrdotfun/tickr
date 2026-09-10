@@ -368,27 +368,32 @@ export class PinCounter {
   async keeper(url: URL, req: Request): Promise<Response> {
     const state = ((await this.state.storage.get<LockState>("keeper")) ?? {}) as LockState;
     const op = url.searchParams.get("op");
+    const token = url.searchParams.get("token") ?? "";
     if (op === "acquire") {
-      const a = acquire(state, Date.now(), Number(url.searchParams.get("lease") ?? 300_000));
+      const a = acquire(state, Date.now(), Number(url.searchParams.get("lease") ?? 300_000), token);
       if (!a.ok) return Response.json({ ok: false, reason: a.reason });
       await this.state.storage.put("keeper", a.state);
-      return Response.json({ ok: true, resolveFirst: a.resolveFirst ?? null });
+      return Response.json({ ok: true, token: a.token, resolveFirst: a.resolveFirst ?? null });
     }
     if (op === "record") {
-      const p = (await req.json()) as Pending;
-      const r = record(state, p);
+      const r = record(state, (await req.json()) as Pending, token);
       if (!r.ok) return Response.json({ ok: false, reason: r.reason });
       await this.state.storage.put("keeper", r.state);
       return Response.json({ ok: true });
     }
     if (op === "clear") {
-      await this.state.storage.put("keeper", clear(state));
+      const c = clear(state, url.searchParams.get("hash") ?? "", token);
+      if (!c.ok) return Response.json({ ok: false, reason: c.reason });
+      await this.state.storage.put("keeper", c.state);
       return Response.json({ ok: true });
     }
     if (op === "release") {
-      await this.state.storage.put("keeper", release(state));
+      const r = release(state, token);
+      if (!r.ok) return Response.json({ ok: false, reason: r.reason });
+      await this.state.storage.put("keeper", r.state);
       return Response.json({ ok: true });
     }
+    if (op === "peek") return Response.json({ ok: true, state });
     return Response.json({ ok: false, reason: "unknown op" }, { status: 400 });
   }
 }
@@ -446,6 +451,35 @@ const TREASURY_ABI = [{ type: "function", name: "collect", stateMutability: "non
   { type: "function", name: "buy", stateMutability: "nonpayable", inputs: [], outputs: [] },
   { type: "function", name: "nextBuyAt", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "earmarkedUsdg", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] }] as const;
+/**
+ * The transaction from `who` that used `nonce`, found by walking back over recent blocks.
+ *
+ * There is no way to ask a node "which transaction had this nonce"; the only honest answer comes from looking.
+ * The window is bounded, so a nonce consumed long ago is reported as not found rather than searched for
+ * forever, and not found means the keeper stays blocked rather than assuming.
+ */
+async function findByNonce(
+  pub: { getBlock: (a: { blockNumber: bigint; includeTransactions: true }) => Promise<{ transactions: { from: string; nonce: number; hash: `0x${string}` }[] }>; getTransactionReceipt: (a: { hash: `0x${string}` }) => Promise<{ status: "success" | "reverted" }> },
+  who: string,
+  nonce: number,
+  head: bigint,
+  window = 200n,
+): Promise<{ hash: `0x${string}`; status: "success" | "reverted" } | undefined> {
+  const lower = head > window ? head - window : 0n;
+  for (let n = head; n >= lower; n--) {
+    const block = await pub.getBlock({ blockNumber: n, includeTransactions: true }).catch(() => undefined);
+    if (!block) continue;
+    const hit = block.transactions.find((t) => t.from?.toLowerCase() === who.toLowerCase() && t.nonce === nonce);
+    if (hit) {
+      const rc = await pub.getTransactionReceipt({ hash: hit.hash }).catch(() => undefined);
+      if (!rc) return undefined;
+      return { hash: hit.hash, status: rc.status };
+    }
+    if (n === 0n) break;
+  }
+  return undefined;
+}
+
 async function keep(env: Env): Promise<string[]> {
   const out: string[] = [];
   if (!env.KEEPER_KEY || !env.KEEPER_LOCKER || !env.KEEPER_TREASURY || !env.KEEPER_COIN || !env.KEEPER_NAME) return ["keeper: not configured"];
@@ -501,12 +535,13 @@ async function keep(env: Env): Promise<string[]> {
   const pub = createPublicClient({ chain, transport: paced });
   const locker = env.KEEPER_LOCKER as `0x${string}`, treasury = env.KEEPER_TREASURY as `0x${string}`, coin = env.KEEPER_COIN as `0x${string}`, name = env.KEEPER_NAME as `0x${string}`;
   const lockStub = env.PIN_COUNTER.get(env.PIN_COUNTER.idFromName("keeper-lease"));
-  const lease = async (op: string, body?: unknown) =>
-    (await lockStub.fetch(new Request(`https://keeper/keeper?op=${op}`, body ? { method: "POST", body: JSON.stringify(body) } : undefined))).json() as Promise<{
-      ok: boolean;
-      reason?: string;
-      resolveFirst?: Pending | null;
-    }>;
+  // this run's proof that the lease is still its own. a run whose lease expired and was taken over presents a
+  // token the object no longer recognises, and every change it tries to make is refused.
+  const myToken = crypto.randomUUID();
+  const lease = async (op: string, extra = "", body?: unknown) =>
+    (await lockStub.fetch(
+      new Request(`https://keeper/keeper?op=${op}&token=${myToken}${extra}`, body ? { method: "POST", body: JSON.stringify(body) } : undefined),
+    )).json() as Promise<{ ok: boolean; reason?: string; resolveFirst?: Pending | null }>;
 
   const got = await lease("acquire");
   if (!got.ok) {
@@ -523,17 +558,30 @@ async function keep(env: Env): Promise<string[]> {
       const rc = await pub.waitForTransactionReceipt({ hash: p.hash as `0x${string}`, timeout: 60_000 });
       outcome = { settled: true as const, status: rc.status };
     } catch {
-      // no receipt under that hash. if the account has moved past its nonce, something else took it and this
-      // attempt can never land; otherwise it may still be in flight and nothing more may be sent.
+      // No receipt under our hash. A nonce that has moved on is NOT an answer: it says some transaction used
+      // that number, not which, and not what it did. Our own transaction may have been repriced by the node
+      // into a different hash, or something else may be signing with this key. Find the transaction that
+      // actually consumed the nonce and read its receipt; anything less is a guess, and a guess here unblocks
+      // the keeper on a conclusion nobody checked.
       const seen = await pub.getTransactionCount({ address: account.address }).catch(() => undefined);
-      outcome =
-        seen !== undefined && seen > p.nonce
-          ? { settled: true as const, status: "reverted" as const }
-          : { settled: false as const, reason: "no receipt and the nonce is still open" };
+      if (seen === undefined || seen <= p.nonce) {
+        outcome = { settled: false as const, reason: "no receipt, and that nonce is still unused" };
+      } else {
+        const found = await findByNonce(pub, account.address, p.nonce, await pub.getBlockNumber().catch(() => 0n));
+        if (!found) {
+          outcome = {
+            settled: false as const,
+            reason: `nonce ${p.nonce} was used by a transaction this run could not find; blocked for review`,
+          };
+        } else {
+          out.push(`${p.label}: nonce ${p.nonce} was consumed by ${found.hash} (${found.status})`);
+          outcome = { settled: true as const, status: found.status };
+        }
+      }
     }
     const d = afterResolve(outcome);
     out.push(`${p.label} (from an earlier run): ${d.note} ${p.hash}`);
-    if (d.clear) await lease("clear");
+    if (d.clear) await lease("clear", `&hash=${p.hash}`);
     mayWrite = d.mayWrite;
   }
 
@@ -568,7 +616,7 @@ async function keep(env: Env): Promise<string[]> {
       return;
     }
 
-    const rec = await lease("record", { label, hash, nonce, at: Date.now() } satisfies Pending);
+    const rec = await lease("record", "", { label, hash, nonce, at: Date.now() } satisfies Pending);
     if (!rec.ok) {
       out.push(`${label}: not sent (${rec.reason})`);
       mayWrite = false;
@@ -587,7 +635,7 @@ async function keep(env: Env): Promise<string[]> {
 
     try {
       const rc = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 });
-      await lease("clear");
+      await lease("clear", `&hash=${hash}`);
       out.push(`${label}: ${rc.status} ${hash}`);
     } catch (e) {
       mayWrite = false;

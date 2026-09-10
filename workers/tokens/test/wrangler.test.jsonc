@@ -1,0 +1,8 @@
+{
+  "name": "tickr-keeper-do-test",
+  "main": "do-entry.ts",
+  "compatibility_date": "2025-03-01",
+  "durable_objects": { "bindings": [{ "name": "PIN_COUNTER", "class_name": "PinCounter" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PinCounter"] }],
+  "vars": { "RPC_URL": "http://127.0.0.1:0/unused", "EXPLORER": "", "WETH": "", "USDG": "", "V3_FACTORY": "", "POOL_MANAGER": "", "MULTICALL3": "" }
+}
