@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IQuoteKind} from "./IQuoteKind.sol";
+import {FeeSettings} from "./FeeSettings.sol";
 import {QuoteConverter, ISeederLike} from "./QuoteConverter.sol";
 import {MarketTickerDeployer} from "./MarketTickerDeployer.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
@@ -91,6 +92,16 @@ contract BuybackTreasuryV2 is ReentrancyGuard {
     /// @notice How far ahead a caller's deadline may sit. Keeps a stale authorisation from being reused later.
     uint256 public maxTermsAhead = 15 minutes;
 
+    /// @notice The floor applied to a market name the owner has not set one for, so a name onboards itself
+    /// without an owner transaction. Set from the frozen policy at construction.
+    ///
+    /// A per-token floor still wins wherever one is set, and a token floor may only be higher than this or the
+    /// conversion is refused, so this can raise protection for an unknown name but never lower it for a known
+    /// one. Without it a new name reverts NoPolicy on every collect and its revenue simply accumulates: safe,
+    /// but it means the agreed allocation never happens until someone remembers a transaction per launch.
+    uint256 public defaultMinRateToCounterX96;
+    uint256 public defaultMinRateFromCounterX96;
+
     event MinRateSet(address indexed token, bool toCounter, uint256 rateX96);
     event BuybackHeld(address indexed token, uint256 amount);
     event BuybackReturned(address indexed token, uint256 counterIn);
@@ -160,6 +171,8 @@ contract BuybackTreasuryV2 is ReentrancyGuard {
         usdg = usdg_;
         teamWallet = teamWallet_;
         buybackShareBps = 5_000;
+        defaultMinRateToCounterX96 = FeeSettings.MIN_RATE_NAME_TO_COUNTER_X96;
+        defaultMinRateFromCounterX96 = FeeSettings.MIN_RATE_COUNTER_TO_NAME_X96;
     }
 
     // ---------------------------------------------------------------- the burn share, up only
@@ -200,6 +213,17 @@ contract BuybackTreasuryV2 is ReentrancyGuard {
         emit MinRateSet(token, toCounter, rateX96);
     }
 
+    /// @notice The floor for names with no floor of their own. Only the factory owner sets it, and it may
+    /// never go below the frozen policy: the default is a safety net, not a way to open one up.
+    function setDefaultMinRate(bool toCounter, uint256 rateX96) external {
+        if (msg.sender != factory.owner()) revert NotOwner();
+        uint256 frozen = toCounter ? FeeSettings.MIN_RATE_NAME_TO_COUNTER_X96 : FeeSettings.MIN_RATE_COUNTER_TO_NAME_X96;
+        if (rateX96 < frozen) revert TermsWeakerThanPolicy(address(0), rateX96, frozen);
+        if (toCounter) defaultMinRateToCounterX96 = rateX96;
+        else defaultMinRateFromCounterX96 = rateX96;
+        emit MinRateSet(address(0), toCounter, rateX96);
+    }
+
     function setMaxTermsAhead(uint256 seconds_) external {
         if (msg.sender != factory.owner()) revert NotOwner();
         require(seconds_ > 0 && seconds_ <= 1 hours, "BuybackTreasuryV2: window");
@@ -226,6 +250,9 @@ contract BuybackTreasuryV2 is ReentrancyGuard {
         returns (QuoteConverter.Terms memory)
     {
         uint256 floor = toCounter ? minRateToCounterX96[token] : minRateFromCounterX96[token];
+        // an unset token takes the default rather than being refused outright, which is what lets a name
+        // onboard itself. zero here means "not set", so a token can never end up with no floor at all
+        if (floor == 0) floor = toCounter ? defaultMinRateToCounterX96 : defaultMinRateFromCounterX96;
         if (floor == 0) revert NoPolicy(token);
         if (offered.minOutPerInX96 < floor) revert TermsWeakerThanPolicy(token, offered.minOutPerInX96, floor);
         uint256 latest = block.timestamp + maxTermsAhead;
@@ -325,9 +352,21 @@ contract BuybackTreasuryV2 is ReentrancyGuard {
                 // a wrapper the registry has not been told about yet: still legacy, still exact
                 ITickerToken(t).redeem(bal, address(this));
             } else if (quoteRegistry.provenanceOf(t) == IQuoteKind.Kind.FIXED_INVENTORY_MARKET) {
-                // a genuine market that simply has not been registered yet. Forwarding it would give away an
-                // asset a later registration would have converted, so it is kept until someone registers it.
-                emit AwaitingRegistration(t, bal);
+                // a genuine market that has not been recorded yet. The registry is permissionless and decides
+                // by provenance, so recording it here proves nothing new and skips nothing: the same issuer
+                // check runs either way. Doing it on the spot is what removes the owner transaction per launch.
+                try quoteRegistry.record(t) {
+                    try this.convertFixed(t, bal, terms[i]) {
+                        // whatever arrived is already in the balance below
+                    } catch (bytes memory reason) {
+                        emit NotConverted(t, bal, reason);
+                    }
+                } catch (bytes memory reason) {
+                    // provenance refused it, so it is not ours to convert. It stays put rather than going to
+                    // the team as though it were unconvertible
+                    emit AwaitingRegistration(t, bal);
+                    emit NotConverted(t, bal, reason);
+                }
             } else {
                 // a Stock Token, a coin used as a quote, anything else: nothing here converts it, so the team takes it whole
                 IERC20(t).safeTransfer(teamWallet, bal);

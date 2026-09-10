@@ -3,11 +3,11 @@
 import { useCallback, useRef, useState } from "react";
 import { explainRevert } from "@/lib/explain";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
-import { decodeErrorResult, type Abi, type Address, type Hash, type Hex, type TransactionReceipt } from "viem";
+import { decodeErrorResult, type Address, type Hash, type Hex, type TransactionReceipt } from "viem";
 import { errorMessage } from "@/lib/format";
 import { DEMO } from "@/lib/demoTransport";
 import { ADDRESSES } from "@/lib/addresses";
-import * as Abis from "@/lib/abis";
+import { KNOWN_ERRORS } from "@/lib/knownErrors";
 import { settleStep, type Replacement } from "@/lib/txSteps";
 import type { wagmiConfig } from "@/lib/wagmi";
 
@@ -41,11 +41,7 @@ async function walletSeesFactory(getProvider: () => Promise<unknown>): Promise<b
 type Client = NonNullable<ReturnType<typeof usePublicClient>>;
 
 /** Every custom error our contracts declare, plus the two that mean a pool key was taken first. */
-export const KNOWN_ERRORS: Abi = [
-  ...Object.values(Abis).flatMap((a) => (Array.isArray(a) ? (a as Abi).filter((x) => x.type === "error") : [])),
-  { type: "error", name: "PoolAlreadyExists", inputs: [] },
-  { type: "error", name: "PoolAlreadyInitialized", inputs: [] },
-];
+export { KNOWN_ERRORS };
 
 /** The revert data inside a viem error, wherever it nests it. */
 function revertData(e: unknown): Hex | undefined {

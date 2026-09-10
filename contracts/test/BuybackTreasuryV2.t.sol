@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IQuoteKind} from "../src/market/IQuoteKind.sol";
 import {QuoteRegistry, ITickerLauncherLike} from "../src/market/QuoteRegistry.sol";
 import {QuoteConverter} from "../src/market/QuoteConverter.sol";
+import {FeeSettings} from "../src/market/FeeSettings.sol";
 import {BuybackTreasuryV2} from "../src/market/BuybackTreasuryV2.sol";
 import {MarketTickerDeployer} from "../src/market/MarketTickerDeployer.sol";
 import {IFactory} from "../src/interfaces/IFactory.sol";
@@ -70,12 +71,29 @@ contract BuybackTreasuryV2ForkTest is Test {
     // ---------------------------------------------------------------- the terms policy
 
     /// @notice A caller cannot bring its own weak floor. Without a policy the conversion is refused outright.
-    function test_fork_aFixedInventoryConversionNeedsAPolicy() public {
+    /// @notice A name with no floor of its own is held to the default, not left unprotected and not refused.
+    ///
+    /// This asserted `NoPolicy` before the default existed. Refusing outright was safe but it meant an owner
+    /// transaction per launch, and a missed one stopped the allocation silently. The protection is unchanged:
+    /// terms this weak are still refused, now against the frozen policy rather than against nothing.
+    function test_fork_aFixedInventoryConversionIsHeldToTheDefaultPolicy() public {
         if (!forked) return;
         reg.record(TESTNAME);
         deal(TESTNAME, address(t), 100e6);
-        vm.expectRevert(abi.encodeWithSelector(BuybackTreasuryV2.NoPolicy.selector, TESTNAME));
+        assertEq(t.minRateToCounterX96(TESTNAME), 0, "no floor was set for this name");
+        assertEq(t.defaultMinRateToCounterX96(), FeeSettings.MIN_RATE_NAME_TO_COUNTER_X96, "so the frozen one applies");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BuybackTreasuryV2.TermsWeakerThanPolicy.selector, TESTNAME, (Q96 * 1) / 100, FeeSettings.MIN_RATE_NAME_TO_COUNTER_X96
+            )
+        );
         t.checkTerms(TESTNAME, true, terms(1, 60));
+
+        // and terms that meet the frozen floor are accepted with no setup at all. The floor is 99% of par,
+        // not par: a pool charges a fee, so demanding par exactly would refuse every real swap
+        QuoteConverter.Terms memory ok = t.checkTerms(TESTNAME, true, terms(99, 60));
+        assertGe(ok.minOutPerInX96, FeeSettings.MIN_RATE_NAME_TO_COUNTER_X96);
     }
 
     /// @notice And a caller may be stricter than the policy, never weaker.
@@ -174,32 +192,45 @@ contract BuybackTreasuryV2ForkTest is Test {
 
     /// @notice A real fixed-inventory name that nobody has registered yet is held, not handed to the team. The
     /// registry can prove the deployer made it, so it is ours whether or not anyone has recorded it.
-    function test_fork_anUnregisteredButGenuineMarketIsHeldNotForwarded() public {
+    /// @notice An unregistered but genuine market records itself and converts, and never reaches the team.
+    ///
+    /// This used to assert that the balance was held. Holding was the safe half of the answer; it was not the
+    /// whole one, because the revenue then sat there until somebody remembered a transaction. The registry is
+    /// permissionless and decides by provenance, so recording it here proves nothing the registry would not
+    /// have checked anyway. The property that must survive is the one below: it is never given away.
+    function test_fork_anUnregisteredButGenuineMarketRecordsItselfAndConverts() public {
         if (!forked) return;
         assertEq(uint256(reg.kindOf(TESTNAME)), uint256(IQuoteKind.Kind.UNKNOWN), "not registered");
+        assertEq(uint256(reg.provenanceOf(TESTNAME)), uint256(IQuoteKind.Kind.FIXED_INVENTORY_MARKET), "but genuine");
         deal(TESTNAME, address(t), 900e6);
 
-        vm.expectEmit(true, false, false, true, address(t));
-        emit BuybackTreasuryV2.AwaitingRegistration(TESTNAME, 900e6);
-        (uint256 total,,) = t.collect(one(TESTNAME), oneTerm(terms(50, 60)));
+        (uint256 total,,) = t.collect(one(TESTNAME), oneTerm(terms(99, 60)));
 
-        assertEq(total, 0, "nothing was converted");
-        assertEq(IERC20(TESTNAME).balanceOf(address(t)), 900e6, "and all of it is still ours");
-        assertEq(IERC20(TESTNAME).balanceOf(TEAM), 0, "none of it went to the team");
+        assertGt(total, 0, "it converted with no registration and no floor set by hand");
+        assertEq(uint256(reg.kindOf(TESTNAME)), uint256(IQuoteKind.Kind.FIXED_INVENTORY_MARKET), "and is now recorded");
+        assertEq(IERC20(TESTNAME).balanceOf(TEAM), 0, "and none of it went to the team");
+    }
+
+    /// @notice The same balance is still held, not forwarded, when the terms are refused.
+    function test_fork_aGenuineMarketIsHeldWhenTermsAreRefused() public {
+        if (!forked) return;
+        deal(TESTNAME, address(t), 900e6);
+        (uint256 total,,) = t.collect(one(TESTNAME), oneTerm(terms(50, 60)));
+        assertEq(total, 0, "terms under the floor convert nothing");
+        assertEq(IERC20(TESTNAME).balanceOf(address(t)), 900e6, "all of it is still ours");
+        assertEq(IERC20(TESTNAME).balanceOf(TEAM), 0, "and none of it went to the team");
     }
 
     /// @notice And once someone records it, the same balance converts. Registration is the only thing that was
     /// missing; the balance was never at risk in the meantime.
-    function test_fork_recordingItLaterUnblocksTheSameBalance() public {
+    /// @notice A name needs no unblocking: the first collect is the one that converts it.
+    function test_fork_theFirstCollectConvertsWithNoSetupAtAll() public {
         if (!forked) return;
+        assertEq(uint256(reg.kindOf(TESTNAME)), uint256(IQuoteKind.Kind.UNKNOWN), "nobody recorded it");
+        assertEq(t.minRateToCounterX96(TESTNAME), 0, "and nobody set a floor for it");
         deal(TESTNAME, address(t), 900e6);
-        t.collect(one(TESTNAME), oneTerm(terms(50, 60)));
-
-        reg.record(TESTNAME);
-        vm.prank(owner);
-        t.setMinRate(TESTNAME, true, (Q96 * 50) / 100);
-        (uint256 total,,) = t.collect(one(TESTNAME), oneTerm(terms(50, 60)));
-        assertGt(total, 0, "the held balance converted once it was registered");
+        (uint256 total,,) = t.collect(one(TESTNAME), oneTerm(terms(99, 60)));
+        assertGt(total, 0, "the very first collect converted it");
     }
 
     /// @notice A token with no provenance at all is still forwarded. Holding is for assets the registry can vouch

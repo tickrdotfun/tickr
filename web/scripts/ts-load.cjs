@@ -8,4 +8,14 @@ require.extensions[".ts"] = (m, f) =>
     }).outputText,
     f,
   );
-module.exports = { src: (p) => require(path.join(__dirname, "..", "src", p)) };
+// the product uses the "@/..." alias that tsconfig maps to src/. node does not know it, so map it here or
+// every module that imports a sibling by alias fails to load under test.
+const Module = require("node:module");
+const SRC = path.join(__dirname, "..", "src");
+const resolve = Module._resolveFilename;
+Module._resolveFilename = function (request, ...rest) {
+  if (request.startsWith("@/")) request = path.join(SRC, request.slice(2));
+  return resolve.call(this, request, ...rest);
+};
+
+module.exports = { src: (p) => require(path.join(SRC, p)) };

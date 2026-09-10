@@ -33,6 +33,26 @@ const EXPLANATIONS: Record<string, string> = {
   BadValue: "the amount is zero, or the ether sent does not match the amount asked for.",
 };
 
+/**
+ * The four-byte selector of each error above, so revert data can be recognised even when nothing decoded it
+ * into a name. A wrapped revert often reaches the browser as raw hex inside a message; matching only on names
+ * would leave exactly that case showing a selector to the user.
+ *
+ * Verified with `cast sig` against the signatures the contracts actually declare.
+ */
+const SELECTORS: Record<string, string> = {
+  "0x753098a4": "MarketExhausted",
+  "0x7c9c6e8f": "PriceLimitAlreadyExceeded",
+  "0xbb55fd27": "InsufficientLiquidity",
+  "0x7dd37f70": "Slippage",
+  "0x8b063d73": "V4TooLittleReceived",
+  "0xe9d27914": "ReceivedTooLow",
+  "0x5bf6f916": "TransactionDeadlinePassed",
+  "0x203d82d8": "Expired",
+  "0x683b3827": "WalletCapExceeded",
+  "0x0bba69fb": "BadValue",
+};
+
 /** The sentence for a named error, or undefined when we have nothing useful to add. */
 export function explainError(name?: string): string | undefined {
   if (!name) return undefined;
@@ -68,6 +88,12 @@ export function explainFromError(e: unknown, label?: string): string {
     cur = c.cause;
   }
   const text = parts.join(" | ");
+
+  // a selector anywhere in the text wins: it is the error itself, not a description of it
+  for (const [sel, name] of Object.entries(SELECTORS)) {
+    if (text.toLowerCase().includes(sel)) return explainRevert(name, label);
+  }
+
   for (const name of Object.keys(EXPLANATIONS)) {
     // word boundary: "Slippage" must not match inside "SlippageCheckFailed" from another protocol
     if (new RegExp(`\\b${name}\\b`).test(text)) return explainRevert(name, label);

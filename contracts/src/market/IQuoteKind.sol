@@ -44,6 +44,14 @@ interface IQuoteKind {
     /// @notice What kind of quote asset `token` is, by address, as recorded.
     function kindOf(address token) external view returns (Kind);
 
+    /// @notice Record `token` by its provenance, so it can be converted rather than held.
+    ///
+    /// Permissionless on purpose, and not a privilege: the registry decides by asking the issuers, so a caller
+    /// can only record what an issuer already claims. Anything else reverts. Components call it when they meet
+    /// a genuine market that nobody has recorded yet, which is what keeps a launch from needing an owner
+    /// transaction of its own.
+    function record(address token) external returns (Kind kind);
+
     /// @notice What the issuers say `token` is, whether or not it has been recorded yet. A component that is
     /// about to treat an asset as unsupported must consult this first: a market created five minutes ago is
     /// legitimate and simply has not been registered, and forwarding it as unconvertible would give away an
