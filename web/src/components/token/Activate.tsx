@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChainId, usePublicClient, useReadContract } from "wagmi";
-import { formatEther, formatUnits, parseAbiItem, toEventSelector, type Address } from "viem";
+import { formatEther, parseAbiItem, toEventSelector, type Address } from "viem";
 import { FactoryAbi } from "@/lib/abis";
 import { ADDRESSES, isZero, sameAddr } from "@/lib/addresses";
 import { fmtAmount, shortAddr } from "@/lib/format";
@@ -25,7 +24,11 @@ const explorer = (h: string) => `https://robinhoodchain.blockscout.com/tx/${h}`;
  * transaction through Uniswap's canonical router. The name into the creator's wallet first, then the coin with fresh
  * ETH. A coin is shown as done only when both receipts are canonical, ordered and show the delivery.
  */
-export function ActivateCard({ token, title, onDone }: { token: Address; title?: string; onDone?: () => void }) {
+/**
+ * @param celebrate whether a finished listing shows a congratulation. The create page wants one; a coin's own
+ * page does not, because the page already is the coin, and a card that says "listed" forever is clutter.
+ */
+export function ActivateCard({ token, title, onDone, celebrate = false }: { token: Address; title?: string; onDone?: () => void; celebrate?: boolean }) {
   const d = useTokenData(token);
   const own = useReadContract({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "poolKeyOf", args: [token], query: { enabled: !!d.launch, staleTime: Infinity } });
   // the pair is offered to the hook whatever it looks like: the hook asks the issuers what it is, and that
@@ -37,8 +40,6 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
   }, [d.launch, own.data, token]);
   const a = useActivation(target);
   const [hash, setHash] = useState("");
-  const [ack, setAck] = useState(false);
-  const reviewKey = a.review ? `${a.review.phase}:${a.review.preparedAt}` : "none";
   const doneOnce = useRef(false);
   useEffect(() => {
     if (!a.done || !onDone || doneOnce.current) return;
@@ -71,43 +72,41 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
       </div>
     );
   }
+  // a coin's own page drops the card the moment the listing is done
   const records = a.inspection?.records ?? [];
   const blocked = a.inspection?.blocked ?? "";
+  const settling = a.inspection?.pending ?? false;
+  if (a.done && !celebrate) return null;
   return (
     <div className="activate" data-state={a.done ? "done" : a.busy ? "busy" : "ready"}>
       <Confetti fire={a.celebrate} />
       <div className="label">{title ?? "listing"}</div>
       {a.done ? (
-        <div className="mt-3">
-          <div className="text-[20px] font-semibold">on-chain sequence confirmed. external trading still unverified.</div>
-          <p className="text-muted text-[14px] mt-2">
-            both purchases landed in your wallet in order, as their receipts show. chart sites and trackers index on their own clock: the reference&apos;s name showed
-            up minutes later, and a price on a chart is not yet a trade. total cost {formatEther(a.inspection?.cost ?? 0n)} eth, gas included.
-          </p>
-          <ul className="activate-steps mt-4">
-            {records.map((r, i) => (
-              <li key={i} data-done="true">
-                <span className="num">{i + 1}</span> {r.phase === "quote" ? `${qs} into your wallet` : `${ts} into your wallet`}: {fmtAmount(r.received, r.phase === "quote" ? (d.quote?.decimals ?? 6) : d.meta.decimals, { sig: 4 })}{" "}
-                {r.hash && (
-                  <a href={explorer(r.hash)} target="_blank" rel="noreferrer" className="num">
-                    {shortAddr(r.hash)}
-                  </a>
-                )}
-              </li>
-            ))}
-          </ul>
+        <div className="mt-3 activate-done">
+          <div className="text-[26px] font-semibold">{ts} is listed.</div>
+          <p className="text-muted text-[14px] mt-2">both purchases landed, in order.</p>
           <div className="mt-5">
-            <Link href={`/t/${token}`} className="btn btn-primary no-underline">
+            <a href={`/t/${token}`} className="btn btn-primary no-underline">
               open {ts}
-            </Link>
+            </a>
           </div>
+          {records.length > 0 && (
+            <p className="text-muted text-[12.5px] mt-4">
+              receipts:{" "}
+              {records.map((r, i) => (
+                <span key={i}>
+                  {i > 0 && " · "}
+                  <a href={explorer(r.hash ?? "")} target="_blank" rel="noreferrer" className="num">
+                    {r.phase === "quote" ? qs : ts}
+                  </a>
+                </span>
+              ))}
+            </p>
+          )}
         </div>
       ) : (
         <div className="mt-3">
           <div className="text-[20px] font-semibold">{ts} is live, listing pending</div>
-          <p className="text-muted text-[14px] mt-2">
-            two buys finish the listing, {formatEther(AMOUNTS.quote)} eth then {formatEther(AMOUNTS.coin)} eth, plus gas. you sign each one. nothing is sent automatically.
-          </p>
           <ul className="activate-steps mt-4">
             <li data-done={a.stageStatus(0) === "confirmed"}>
               <span className="num">1</span> buy {qs} through its own pool, into your wallet <em>{a.stageStatus(0)}</em>
@@ -121,7 +120,9 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
               <Spinner /> {a.busy}
             </p>
           )}
-          {(a.error || blocked) && (
+          {/* a transaction that is simply still landing is not a failure, and colouring it like one reads as
+              something broke. only a real stop gets a notice; waiting gets a quiet line. */}
+          {(a.error || (blocked && !settling)) && (
             <div className="mt-4">
               <Notice kind={a.readsDown ? "warn" : "danger"}>{a.error || blocked} the saved record is kept. do not resend, replace, cancel or speed up anything in the wallet.</Notice>
             </div>
@@ -148,30 +149,12 @@ export function ActivateCard({ token, title, onDone }: { token: Address; title?:
           {a.review && !a.unknown && (
             <div className="mt-5 activate-review">
               <div className="label">review this {symbol} purchase</div>
-              <dl className="facts mt-3">
-                <dt>you pay</dt>
-                <dd className="num">{formatEther(BigInt(a.review.request.value))} eth</dd>
-                <dt>quoted now</dt>
-                <dd className="num">
-                  {formatUnits(BigInt(a.review.quote), decimals)} {symbol}
-                </dd>
-                <dt>the least you accept (1% under)</dt>
-                <dd className="num">
-                  {formatUnits(BigInt(a.review.minimum), decimals)} {symbol}
-                </dd>
-                <dt>most this can cost, gas included</dt>
-                <dd className="num">{formatEther(BigInt(a.review.maximum))} eth</dd>
-                <dt>delivered to</dt>
-                <dd className="num">{shortAddr(a.review.request.from)}</dd>
-                <dt>quote expires</dt>
-                <dd className="num">{new Date(a.review.deadline * 1000).toLocaleTimeString()}</dd>
-              </dl>
-              <label className="flex items-start gap-2 mt-4 text-[14px]" key={reviewKey}>
-                <input type="checkbox" checked={ack && !!a.review} onChange={(e) => setAck(e.target.checked)} />
-                <span>i will review this one transaction in my wallet and sign it once. if the wallet stalls i will not resend it.</span>
-              </label>
+              <p className="text-[15px] mt-2">
+                <span className="num">{formatEther(BigInt(a.review.request.value))} eth</span> for about{" "}
+                <span className="num">{fmtAmount(BigInt(a.review.quote), decimals, { sig: 6 })} {symbol}</span>
+              </p>
               <div className="flex flex-wrap items-center gap-3 mt-4">
-                <button type="button" className="btn btn-gradient" disabled={!!a.busy || !ack || a.expired} onClick={() => void a.send()}>
+                <button type="button" className="btn btn-gradient" disabled={!!a.busy || a.expired} onClick={() => void a.send()}>
                   {a.expired ? "quote expired, check again" : `open the wallet for ${symbol}`}
                 </button>
                 <button type="button" className="btn" disabled={!!a.busy} onClick={() => void a.prepare(a.phase)}>

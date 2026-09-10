@@ -4,7 +4,7 @@ import type { Abi } from "viem";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useAccount, useChainId, usePublicClient, useReadContract } from "wagmi";
+import { useAccount, useChainId, usePublicClient, useReadContract, useReadContracts} from "wagmi";
 import { encodeFunctionData, erc20Abi, formatUnits, getAddress, isAddress, keccak256, parseAbi, parseEther, stringToHex, toHex, type Address, type Hash, type Hex } from "viem";
 
 /** The OpenZeppelin token errors a launch can surface, so a pre-flight names them instead of printing a selector. */
@@ -15,9 +15,9 @@ const ERC20_ERRORS = parseAbi([
 import { CoinQuoteLauncherAbi, TickerLauncherAbi, FactoryAbi, LaunchAndBuyRouterAbi, StockQuoteLauncherAbi, AnchorRegistryAbi, MarketQuoteLauncherAbi, LaunchDeployerAbi } from "@/lib/abis";
 import { ADDRESSES, DEPLOYED, ZERO, isZero, sameAddr } from "@/lib/addresses";
 import { TICKER_ALLOCATION } from "@/lib/constants";
-import { LAUNCHER_ABI as MarketLauncherAbi, isMarketLaunchWired } from "@/lib/marketLaunch";
+import { LAUNCHER_ABI as MarketLauncherAbi, isMarketLaunchWired, MARKET_BASE_FEE_BPS } from "@/lib/marketLaunch";
 import { applySlippage } from "@/lib/pool";
-import { bpsToPct, errorMessage, fmtAmount, safeParseUnits, splitLabel, type FeeSplit } from "@/lib/format";
+import { bpsToPct, errorMessage, fmtAmount, safeParseUnits, splitLabel, type FeeSplit, shortAddr} from "@/lib/format";
 import { useQuoteAssets, type QuoteAsset } from "@/hooks/useQuoteAssets";
 import { useEligibleQuoteCoins } from "@/hooks/useCoinQuotes";
 import { useTickers } from "@/hooks/useTickers";
@@ -25,6 +25,7 @@ import { useEligibleStockTokens } from "@/hooks/useStockTokens";
 import { useMarketData } from "@/hooks/useMarketData";
 import { useChainTokens } from "@/hooks/useChainTokens";
 import { QuotePicker, type PickItem } from "./QuotePicker";
+import { useMarketNames } from "@/hooks/useMarketNames";
 import { useEthUsd } from "@/hooks/useEthUsd";
 import { useTx, type WriteFn, KNOWN_ERRORS } from "@/hooks/useTx";
 import { afterRun } from "@/lib/launchOutcome";
@@ -199,7 +200,51 @@ export function CreateForm() {
   // the split every new launch is frozen with
   const policy = useReadContract({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "defaultPolicy", query: { enabled: DEPLOYED } });
   const configCount = useReadContract({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "launchConfigCount", query: { enabled: DEPLOYED } });
-  const cfgId = BigInt(Number(configId) || 0);
+  // Every invented name is a fixed-inventory market now. The redeemable wrapper is still what the live coins
+  // are priced in and still trades, but it is no longer something a new launch can create. Without a market
+  // launcher recorded there is nothing to launch through, and the invented-name path is unavailable.
+  const marketNames = isMarketLaunchWired();
+  const [useExisting, setUseExisting] = useState(false);
+  const chosenCfgId = BigInt(Number(configId) || 0);
+  // Every configuration the factory holds, so the one a market launch needs can be found rather than assumed.
+  const allConfigs = useReadContracts({
+    contracts: Array.from({ length: Number(configCount.data ?? 0n) }, (_, i) => ({
+      abi: FactoryAbi,
+      address: ADDRESSES.factory,
+      functionName: "getLaunchConfig" as const,
+      args: [BigInt(i)] as const,
+    })),
+    query: { enabled: DEPLOYED && (configCount.data ?? 0n) > 0n },
+  });
+  /**
+   * A fixed-inventory launch may only use the configuration at the frozen fee: the launcher reverts
+   * NotTheFrozenFee on any other, so id 0 (the older 100 bps one) is a revert, not a cheaper option.
+   * Undefined means there is none enabled, and the market path is blocked rather than sent to fail.
+   */
+  const marketCfgId = ((): bigint | undefined => {
+    const rows = allConfigs.data;
+    if (!rows) return undefined;
+    for (let i = 0; i < rows.length; i++) {
+      const c = rows[i]?.result as unknown as { baseFeeBps: bigint; enabled: boolean } | undefined;
+      if (c && Number(c.baseFeeBps) === MARKET_BASE_FEE_BPS && c.enabled) return BigInt(i);
+    }
+    return undefined;
+  })();
+
+  // every fixed-inventory name already in use, for the "use existing" picker
+  const existingNames = useMarketNames();
+  const namePickItems: PickItem[] = (existingNames.data ?? []).map((n) => ({
+    kind: "name" as const,
+    address: n.address,
+    symbol: n.symbol,
+    name: n.name,
+    // the picture is the first coin's; a name has none of its own
+    logo: n.logo,
+    figure: String(n.coins),
+    figureNote: n.coins === 1 ? "coin" : "coins",
+    weight: n.coins,
+  }));
+  const cfgId = marketNames && marketCfgId !== undefined ? marketCfgId : chosenCfgId;
   const config = useReadContract({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "getLaunchConfig", args: [cfgId], query: { enabled: DEPLOYED } });
 
   const usdgAsset: QuoteAsset | undefined = assets.data?.find((a) => sameAddr(a.address, ADDRESSES.usdg)) ?? assets.data?.find((a) => a.kind === 1 && a.active);
@@ -253,8 +298,13 @@ export function CreateForm() {
   const sharedOn = diyOn && diyMode === "existing";
   // the split this launch will freeze: 50 / 10 / 40 under a ticker, where the club exists; elsewhere the club's
   // share is the creator's, 60 / 40
+  // The club's slice exists only where the launch has a club, and only a wrapper name does: the factory asks
+  // its club whether it knows the pair token, and the club is the legacy ticker launcher, which knows only the
+  // names it issued. A market name therefore always folds the club's slice into the creator's at launch, so
+  // showing a club share for one would promise a split the coin will not be frozen with.
+  const hasClubShare = diyOn && !marketNames;
   const split: FeeSplit | undefined = policy.data
-    ? diyOn
+    ? hasClubShare
       ? { creatorShareBps: Number(policy.data[1]), clubShareBps: Number(policy.data[2]), protocolShareBps: Number(policy.data[3]) }
       : { creatorShareBps: Number(policy.data[1]) + Number(policy.data[2]), clubShareBps: 0, protocolShareBps: Number(policy.data[3]) }
     : undefined;
@@ -277,13 +327,18 @@ export function CreateForm() {
   // A name can be either kind. A wrapper mints a dollar for a dollar and has always been the one on offer here;
   // a market holds a fixed inventory and has a price. They launch through different contracts and a coin under
   // either has to sort below it, so the kind is chosen before anything is ground.
-  const [nameKind, setNameKind] = useState<"wrapper" | "market">("wrapper");
-  const marketNames = nameKind === "market" && isMarketLaunchWired();
   const marketTyped = diy.anchorTicker.trim();
   // one field, two ways to use it: a short symbol invents a name, a full address picks one that already exists
   // case is not the point of an address here, so the checksum is not required of what was typed
   const marketExisting = isAddress(marketTyped, { strict: false }) ? (getAddress(marketTyped) as Address) : undefined;
   const marketSymbol = marketExisting ? "" : marketTyped.toUpperCase();
+  const existingNameSymbol = useReadContract({
+    abi: erc20Abi,
+    address: marketExisting,
+    functionName: "symbol",
+    query: { enabled: !!marketExisting },
+  });
+
   const marketNameSalt = useMemo(() => (marketSymbol ? keccak256(stringToHex(marketSymbol)) : undefined), [marketSymbol]);
   const marketDecimals = useReadContract({
     abi: MarketLauncherAbi, address: ADDRESSES.marketTickerLauncher, functionName: "requiredDecimals",
@@ -590,9 +645,9 @@ export function CreateForm() {
       setPendingLaunch(r.record);
       setPendingNote(
         r.state === "waiting"
-          ? "your launch is not visible on chain under its hash yet. if the wallet repriced it, paste the new hash; it is matched against exactly what was reviewed. reads continue; nothing is resent."
+          ? "the launch is not visible on chain under its hash yet. if the wallet repriced it, paste the new hash."
           : r.state === "pending"
-            ? "your launch is pending on chain. reads continue; nothing is resent."
+            ? ""
             : r.state === "confirming"
               ? "your launch is in a block; waiting for one more."
               : "your launch reverted on chain; only gas was spent. you can start a new one.",
@@ -1128,7 +1183,10 @@ export function CreateForm() {
     tab === "diy"
       ? sharedOn
         ? (selectedDiyQuote?.ticker ?? "")
-        : tickerUp
+        // a name given by address is shown by its symbol: an address is 42 characters and reads as noise
+        : marketExisting
+          ? (existingNameSymbol.data ?? shortAddr(marketExisting))
+          : tickerUp
       : tab === "coin"
         ? (selectedCoin?.symbol ?? "")
         : tab === "market"
@@ -1156,8 +1214,8 @@ export function CreateForm() {
   const targetValue = econ ? `${fmtAmount(econ.phantom, econ.decimals, { sig: 4 })} ${econ.symbol}` : "-";
 
   const preview = (
-    <aside className="preview-card lg:sticky lg:top-28 mt-12 lg:mt-0">
-      <RainbowRule className="mb-4" />
+    <aside className="preview-card lg:sticky lg:top-28 mt-8 lg:mt-5">
+      <RainbowRule className="mb-3" />
       <div className="pv-eyebrow">preview</div>
 
       <div className="pv-pair num">
@@ -1306,7 +1364,7 @@ export function CreateForm() {
             )}
           </p>
         </div>
-        <ActivateCard token={activating.token} title="list your coin" onDone={() => void flowFor("own")?.clear().catch(() => undefined)} />
+        <ActivateCard token={activating.token} title="list your coin" celebrate onDone={() => void flowFor("own")?.clear().catch(() => undefined)} />
       </div>
     );
   }
@@ -1534,15 +1592,6 @@ export function CreateForm() {
             <Row k="Creator tax" v={bpsToPct(taxBps)} />
           </div>
 
-          {tab === "diy" && !sharedOn && marketNames && (
-            <div className="mt-8">
-              <div className="label mb-2">What {quoteSymbol || "the name you pair against"} is</div>
-              <div className="text-[13px] text-muted mt-2" data-testid="market-name-review">
-                a fixed inventory name. its whole supply goes into one pool against usdg and trades at a price
-                there. it cannot be minted or redeemed, so what it is worth is what that pool pays.
-              </div>
-            </div>
-          )}
           {tab === "diy" && !sharedOn && !marketNames && (
             <div className="mt-8">
               <div className="label mb-2">What {quoteSymbol || "the ticker you pair against"} is</div>
@@ -1604,7 +1653,9 @@ export function CreateForm() {
             onClick={() => {
               const err = validate();
               setFormError(err);
-              if (!err) ceremony.ask();
+              // straight to the wallet: the review step already is the confirmation, and asking twice for the
+              // same decision is friction, not safety
+              if (!err) void ceremony.run(submit, () => undefined);
             }}
           >
             {tx.busy ? tx.step ?? "Working…" : launchLabel}
@@ -1658,6 +1709,10 @@ export function CreateForm() {
         }
       />
     </div>
+
+      {/* the right column: what the coin is priced in, and the preview beneath it. One element, or the grid
+          puts the preview on a row of its own under the form instead of beside it. */}
+      <div className="min-w-0">
       {step === 0 && (
         <div className="pair-panel view-fade">
           <div className="pair-choose">
@@ -1784,42 +1839,42 @@ export function CreateForm() {
 
           {choice === "invent" && (
             <>
-              <p className="text-muted mt-3">
-                name the asset your coin is priced in. the pair reads{" "}
-                <span className="num text-white">
-                  {pairLeft}/<span className="sw-yellow">{tickerUp || example}</span>
-                </span>
-                .
-              </p>
-              {isMarketLaunchWired() && (
-                <div className="mt-4 flex gap-2" data-testid="name-kind">
+              <p className="text-muted mt-3">name the asset your coin is priced in.</p>
+              {marketNames && (
+                <div className="mt-4" data-testid="name-source">
                   <button
                     type="button"
-                    className={`btn btn-sm ${nameKind === "wrapper" ? "" : "is-quiet"}`}
-                    data-testid="kind-wrapper"
-                    aria-pressed={nameKind === "wrapper"}
-                    onClick={() => setNameKind("wrapper")}
+                    className={`btn btn-sm ${useExisting ? "" : "is-quiet"}`}
+                    data-testid="use-existing-name"
+                    aria-pressed={useExisting}
+                    onClick={() => {
+                      setUseExisting(!useExisting);
+                      upd("anchorTicker", "");
+                    }}
                   >
-                    redeemable
+                    use existing
                   </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${nameKind === "market" ? "" : "is-quiet"}`}
-                    data-testid="kind-market"
-                    aria-pressed={nameKind === "market"}
-                    onClick={() => setNameKind("market")}
-                  >
-                    fixed inventory
-                  </button>
+                  {useExisting && (
+                    <div className="mt-3">
+                      <QuotePicker
+                        items={namePickItems}
+                        loading={existingNames.isLoading}
+                        selected={marketExisting}
+                        onSelect={(it) => upd("anchorTicker", it.address)}
+                        onAddress={(v) => upd("anchorTicker", v)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
-              <div className="ticker-field mt-6">
+              {/* tuned so this field sits level with the ticker field in the left column */}
+              <div className="ticker-field mt-9">
                 <input
                   className="num ticker-input"
                   value={diy.anchorTicker}
                   // a symbol is upper case; an address is left as typed, so it stays an address
                   onChange={(e) => upd("anchorTicker", e.target.value.startsWith("0x") ? e.target.value : e.target.value.toUpperCase())}
-                  placeholder={example}
+                  placeholder={marketNames && marketExisting !== undefined ? "0x… the name's address" : example}
                   // a market name may be given as an address instead of a symbol, and an address is longer
                   maxLength={marketNames ? 42 : 12}
                   autoFocus
@@ -1830,27 +1885,6 @@ export function CreateForm() {
                   </span>
                 )}
               </div>
-              {marketNames && (
-                <p className="text-muted text-[13px] mt-3" data-testid="market-name-note">
-                  a fixed inventory name: it holds its whole supply in one pool and trades at a price, rather than
-                  minting a dollar for a dollar. it carries {marketDecimals.data ?? "-"} decimals, the same as the
-                  asset it is priced in.
-                  {marketExisting ? (
-                    <>
-                      {" "}
-                      you gave an address, so this launches under the name already at{" "}
-                      <span className="num text-white" data-testid="existing-name">{marketExisting}</span>, and your
-                      coin is ground to sort below it.
-                    </>
-                  ) : marketPredicted.data ? (
-                    <>
-                      {" "}
-                      it will be at <span className="num text-white" data-testid="predicted-name">{String(marketPredicted.data)}</span>, and your coin
-                      is ground to sort below it.
-                    </>
-                  ) : null}
-                </p>
-              )}
               {tickerTaken && (
                 <p className="text-[13px] text-signal mt-3">
                   <span className="num">{tickerUp}</span> already exists.{" "}
@@ -1878,6 +1912,7 @@ export function CreateForm() {
         </div>
       )}
       {preview}
+      </div>
     </div>
   );
 }

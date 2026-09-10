@@ -428,9 +428,13 @@ async function keep(env: Env): Promise<string[]> {
   const rpc = async (method: string, params: unknown, attempt = 0): Promise<unknown> => {
     // the fast endpoint where one is configured, the chain's public node otherwise
     const url = env.RPC_ENDPOINT || env.RPC_URL;
+    // A broadcast is never retried. Re-sending the identical signed payload cannot execute twice, but a send
+    // whose answer never arrived may still be in flight, and the keeper cannot tell that from one that was
+    // refused. Reads are safe to repeat; this one is left for the next run to observe.
+    const isBroadcast = method === "eth_sendRawTransaction";
     const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
     if (r.status === 429 || r.status >= 500) {
-      if (attempt < 5) {
+      if (!isBroadcast && attempt < 5) {
         await sleep(800 * (attempt + 1));
         return rpc(method, params, attempt + 1);
       }
@@ -440,7 +444,7 @@ async function keep(env: Env): Promise<string[]> {
     if (j.error) {
       // the node also answers a rate limit as a JSON error inside an HTTP 200 ("Rate Limit Hit, limit will reset
       // in 60 seconds"); that is worth waiting out, a few times, before giving the step up
-      if ((j.error.code === 429 || /rate limit/i.test(j.error.message ?? "")) && attempt < 4) {
+      if (!isBroadcast && (j.error.code === 429 || /rate limit/i.test(j.error.message ?? "")) && attempt < 4) {
         await sleep(15_000 * (attempt + 1));
         return rpc(method, params, attempt + 1);
       }
@@ -469,21 +473,59 @@ async function keep(env: Env): Promise<string[]> {
       const rc = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 });
       out.push(`${label}: ${rc.status} ${hash}`);
     } catch (e) {
+      // a step that did not resolve is reported and left alone. It is never sent again from here: the keeper
+      // runs every ten minutes and cannot tell a transaction that is slow from one that is lost, so a resend
+      // risks paying twice for work the first one is about to do.
       out.push(`${label}: skipped (${(e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 80)})`);
     }
   };
+
+  /**
+   * The gas limit for a write, estimated at the last moment and given bounded headroom.
+   *
+   * An estimate is a measurement of the chain as it is now, and these calls are not the only thing happening on
+   * it. `collectFees` is the case that bit us: with only quote-side fees it burns nothing, and a sell landing
+   * between the estimate and inclusion adds the coin-side burn, which costs more than the estimate allowed. The
+   * transaction then fails on gas having paid for the whole limit.
+   *
+   * The headroom is a multiplier, not a blank cheque: it is capped in absolute terms so a wrong estimate cannot
+   * drain the keeper, and the cap is well under a block's capacity.
+   */
+  // Measured on a fork of this chain (contracts/test/CollectFeesGas.t.sol): a collection with only buys costs
+  // 270,165 and the same collection after a sell costs 386,733, so the burn leg makes it 143% of the estimate.
+  // Twice the estimate covers that with real margin rather than the seven points 1.5x would have left.
+  const GAS_HEADROOM_NUM = 2n, GAS_HEADROOM_DEN = 1n;
+  // and it is bounded: twice a real collection is about 780,000, so this cap is far above anything legitimate
+  // and far below a block, which is what stops a wrong estimate from draining the keeper.
+  const GAS_CEILING = 3_000_000n;
+  const gasFor = async (params: Parameters<typeof pub.estimateContractGas>[0]) => {
+    const estimate = await pub.estimateContractGas({ ...params, account } as Parameters<typeof pub.estimateContractGas>[0]);
+    const padded = (estimate * GAS_HEADROOM_NUM) / GAS_HEADROOM_DEN;
+    return padded > GAS_CEILING ? GAS_CEILING : padded;
+  };
   // 1. the pool's fees, only when there is something to collect
   const pending = await pub.readContract({ address: locker, abi: LOCKER_ABI, functionName: "pendingFees", args: [coin] }).catch(() => [0n, 0n] as const);
-  if (pending[0] > 0n || pending[1] > 0n) await step("collectFees", () => wallet.writeContract({ address: locker, abi: LOCKER_ABI, functionName: "collectFees", args: [coin] }));
+  if (pending[0] > 0n || pending[1] > 0n) {
+    await step("collectFees", async () => {
+      const call = { address: locker, abi: LOCKER_ABI, functionName: "collectFees", args: [coin] } as const;
+      return wallet.writeContract({ ...call, gas: await gasFor(call) });
+    });
+  }
   else out.push("collectFees: nothing pending");
   // 2. the treasury's cut, converted
-  await step("treasury.collect", () => wallet.writeContract({ address: treasury, abi: TREASURY_ABI, functionName: "collect", args: [[name]] }));
+  await step("treasury.collect", async () => {
+    const call = { address: treasury, abi: TREASURY_ABI, functionName: "collect", args: [[name]] } as const;
+    return wallet.writeContract({ ...call, gas: await gasFor(call) });
+  });
   // 3. a buy, when its interval has passed and dollars are set aside
   const [next, earmarked] = await Promise.all([
     pub.readContract({ address: treasury, abi: TREASURY_ABI, functionName: "nextBuyAt" }).catch(() => 0n),
     pub.readContract({ address: treasury, abi: TREASURY_ABI, functionName: "earmarkedUsdg" }).catch(() => 0n),
   ]);
-  if (earmarked > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next) await step("treasury.buy", () => wallet.writeContract({ address: treasury, abi: TREASURY_ABI, functionName: "buy" }));
+  if (earmarked > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next) await step("treasury.buy", async () => {
+    const call = { address: treasury, abi: TREASURY_ABI, functionName: "buy" } as const;
+    return wallet.writeContract({ ...call, gas: await gasFor(call) });
+  });
   else out.push(`treasury.buy: waiting (earmarked ${earmarked}, next at ${next})`);
   return out;
 }

@@ -151,7 +151,7 @@ export function createActivationFlow(d: Deps) {
       if (!receipt) {
         s.pending = true;
         rec.status = "pending";
-        s.blocked = "the transaction is pending. do not speed it up, replace or resend it; reads continue.";
+        s.blocked = "";
         return s;
       }
       rec.cost = tx.value + receipt.gasUsed * receipt.effectiveGasPrice;
@@ -178,7 +178,7 @@ export function createActivationFlow(d: Deps) {
       if (head <= receipt.blockNumber) {
         s.pending = true;
         rec.status = "confirming";
-        s.blocked = "waiting for one more block.";
+        s.blocked = "";
         return s;
       }
       try {

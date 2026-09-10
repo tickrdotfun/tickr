@@ -7,17 +7,15 @@ import { erc20Abi } from "viem";
 import type { TokenData } from "@/hooks/useTokenData";
 import { useTx, type WriteFn } from "@/hooks/useTx";
 import { quoterQuoteOnce, useQuoterQuote } from "@/hooks/useQuoterQuote";
-import { useRouteProtocolFees } from "@/hooks/useRouteProtocolFees";
 import { previewZapOnce, previewZapSellOnce, useZapPreview, useZapSellPreview, zapParams, zapSellParams } from "@/hooks/useZap";
 import { useZapRoute } from "@/hooks/useZapRoute";
 import { TokenAbi, ZapRouterAbi } from "@/lib/abis";
 import { ADDRESSES, ZERO } from "@/lib/addresses";
 import { DEFAULT_SLIPPAGE_BPS } from "@/lib/constants";
-import { bpsToPct, fmtAmount, safeParseUnits } from "@/lib/format";
+import { fmtAmount, safeParseUnits } from "@/lib/format";
 import { applySlippage, quoteExactIn } from "@/lib/pool";
 import { reverseRoute } from "@/lib/route";
-import { floorFor, hopFeesFromPath, routeFees, totalFeeBps, type Quote } from "@/lib/quote";
-import { TxStatus } from "../TxStatus";
+import { floorFor, type Quote } from "@/lib/quote";
 import { Notice, Panel, Row } from "../ui";
 import { GlideIndicator, useGlider } from "../motion/Glide";
 
@@ -27,7 +25,7 @@ import { GlideIndicator, useGlider } from "../motion/Glide";
  * path backwards.
  */
 export function TradePanel({ d }: { d: TokenData }) {
-  const { user, quote, nativePair, balances, meta, launch, pool, policy } = d;
+  const { user, quote, nativePair, balances, meta, launch, pool } = d;
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("");
   const [slippage, setSlippage] = useState((DEFAULT_SLIPPAGE_BPS / 100).toString());
@@ -125,7 +123,6 @@ export function TradePanel({ d }: { d: TokenData }) {
     return quoteExactIn({ amountIn: amt, liquidity: pool.liquidity, sqrtPriceX96: pool.sqrtP, feePips: Number(launch.poolFee), zeroForOne: !pool.key.tokenIs0 });
   }, [side, inEth, amt, launch, pool.key, pool.liquidity, pool.sqrtP]);
   const quotedBuy = quoter.data ?? localBuy;
-  const buyIsEstimate = side === "buy" && !inEth && quotedBuy !== undefined && !quoter.data;
   // the zap's preview already reports what the buyer keeps; the quoter and the local arithmetic report the pool's count
   const buyOut = inEth ? zp.data?.tokensOut : quotedBuy !== undefined && snipeBps > 0 ? quotedBuy - (quotedBuy * BigInt(snipeBps)) / 10_000n : quotedBuy;
   const impactPct = (() => {
@@ -142,10 +139,6 @@ export function TradePanel({ d }: { d: TokenData }) {
   // every hop charges its own pool's fee, so what a trade costs is the whole route and not the coin's pool
   // alone. v4's own protocol fee is per pool and per direction and is not read here, so the total is reported as
   // a lower bound rather than as the answer
-  const path = (side === "buy" ? buyPath : sellPath) ?? [];
-  const fromAsset = side === "buy" ? (inEth ? ZERO : launch?.pairToken) : launch?.token;
-  const proto = useRouteProtocolFees(path.length ? path : undefined, fromAsset);
-  const fees = path.length ? routeFees(hopFeesFromPath(path, side, (i) => proto.byHop[i])) : undefined;
   const sellOut = inEth ? ZERO : (launch?.pairToken ?? ZERO);
   const zs = useZapSellPreview(side === "sell" ? launch?.token : undefined, sellPath, side === "sell" ? amt : undefined, user, sellOut);
 
@@ -278,9 +271,6 @@ export function TradePanel({ d }: { d: TokenData }) {
   const setMax = () => setShare(10_000n);
   const amountBox = useRef<HTMLInputElement>(null);
 
-  const poolFeeBps = launch ? Number(launch.poolFee) / 100 : undefined;
-  const baseBps = policy ? Number(policy.hookFeeBps) : undefined;
-
   return (
     <Panel
       title={
@@ -370,36 +360,12 @@ export function TradePanel({ d }: { d: TokenData }) {
                 </div>
               )}
               {renewNote && <div className="text-[13px] text-signal" role="status">{renewNote}</div>}
-              <details className="trade-more">
-                <summary>breakdown</summary>
-                <Row k="Route" v={inEth ? (route.data?.label ?? "") : `${qs} → coin`} />
-                {!inEth && <Row k="Quote" v={buyIsEstimate ? "estimate from the pool's one position" : "the quoter, across every position"} />}
-                {inEth && !nativePair && <Row k={`Swapped to ${qs}`} v={zp.data ? `${fmtAmount(zp.data.quoteOut, qd)} ${qs}` : "-"} />}
-                <Row k="Pool fee, this coin" v={poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"} />
-                <Row k="Fees, this coin's pool" v={fees ? bpsToPct(Math.round(fees.coinPips / 100)) : "-"} />
-                <Row k="Fees, getting there" v={fees ? bpsToPct(Math.round(fees.bridgePips / 100)) : "-"} />
-                <Row k="The chain's own fee" v={fees ? (fees.complete ? bpsToPct(Math.round(fees.chainPips / 100)) : "not read") : "-"} />
-                <Row k={fees && !fees.complete ? "Fees, whole route (at least)" : "Fees, whole route"} v={fees ? `${bpsToPct(totalFeeBps(fees))} across ${path.length} ${path.length === 1 ? "pool" : "pools"}` : "-"} />
-                <Row k="Not included" v={fees && !fees.complete ? "the chain's own protocol fee, and whatever an outside app charges" : "whatever an outside app charges"} />
-                <Row k="Slippage you allow" v={`${slipPct}%`} />
-              </details>
             </>
           ) : (
             <>
               <Row k={`Receive (${outSymbol})`} v={zs.data ? fmtAmount(zs.data.amountOut, outDecimals) : amt && zs.isFetching ? "quoting" : "-"} />
               <Row k="Min. after slippage" v={zs.data ? `${fmtAmount(applySlippage(zs.data.amountOut, slipBps), outDecimals)} ${outSymbol}` : "-"} />
               {zs.isError && <div className="text-[13px] text-danger">no quote at this size. try a smaller amount{inEth && !nativePair ? `, or receive ${qs}` : ""}.</div>}
-              <details className="trade-more">
-                <summary>breakdown</summary>
-                <Row k="Route" v={inEth ? `coin → ${route.data?.label?.replace(/ → coin$/, "").split(" → ").reverse().join(" → ") ?? "ETH"}` : `coin → ${qs}`} />
-                <Row k="Pool fee, this coin" v={poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"} />
-                <Row k="Fees, this coin's pool" v={fees ? bpsToPct(Math.round(fees.coinPips / 100)) : "-"} />
-                <Row k="Fees, getting there" v={fees ? bpsToPct(Math.round(fees.bridgePips / 100)) : "-"} />
-                <Row k="The chain's own fee" v={fees ? (fees.complete ? bpsToPct(Math.round(fees.chainPips / 100)) : "not read") : "-"} />
-                <Row k={fees && !fees.complete ? "Fees, whole route (at least)" : "Fees, whole route"} v={fees ? `${bpsToPct(totalFeeBps(fees))} across ${path.length} ${path.length === 1 ? "pool" : "pools"}` : "-"} />
-                <Row k="Not included" v={fees && !fees.complete ? "the chain's own protocol fee, and whatever an outside app charges" : "whatever an outside app charges"} />
-                <Row k="Slippage you allow" v={`${slipPct}%`} />
-              </details>
             </>
           )}
         </div>
@@ -467,11 +433,6 @@ export function TradePanel({ d }: { d: TokenData }) {
             try again
           </button>
         )}
-        <TxStatus {...tx} />
-        <div className="text-[12.5px] text-dim">
-          pool fee {poolFeeBps !== undefined ? bpsToPct(poolFeeBps) : "-"}
-          {launch && launch.creatorTaxBps > 0 && baseBps !== undefined ? ` (${bpsToPct(baseBps)} base + ${bpsToPct(launch.creatorTaxBps)} creator tax)` : ""}, inside the swap.
-        </div>
       </div>
     </Panel>
   );

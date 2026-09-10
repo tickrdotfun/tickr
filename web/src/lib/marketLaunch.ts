@@ -124,3 +124,37 @@ export function launchReadsFrom(
     launchFee,
   };
 }
+
+/**
+ * The only pool fee a fixed-inventory launch may carry, in basis points.
+ *
+ * `MarketTickerLauncher._launch` reverts `NotTheFrozenFee` unless the chosen configuration's base fee is this
+ * and the creator surcharge is zero. So the launch configuration is not a free choice on this path: sending
+ * the wrong one is a revert, not a different fee.
+ */
+export const MARKET_BASE_FEE_BPS = 82;
+
+export type ConfigReads = {
+  launchConfigCount(): Promise<bigint>;
+  getLaunchConfig(id: bigint): Promise<{ baseFeeBps: bigint; enabled: boolean }>;
+};
+
+/**
+ * The enabled configuration a market launch must use, found by asking the factory rather than written down.
+ *
+ * Hard-coding an id would break the moment the owner adds another configuration, and hard-coding zero is
+ * simply wrong: id 0 is the older 100 bps one and the launcher refuses it. Undefined means there is no
+ * enabled configuration at the frozen fee, and the caller must block rather than fall back to another.
+ */
+export async function findMarketConfigId(reads: ConfigReads): Promise<number | undefined> {
+  const count = Number(await reads.launchConfigCount());
+  for (let i = 0; i < count; i++) {
+    try {
+      const c = await reads.getLaunchConfig(BigInt(i));
+      if (Number(c.baseFeeBps) === MARKET_BASE_FEE_BPS && c.enabled) return i;
+    } catch {
+      // a configuration that cannot be read is not one we can launch on
+    }
+  }
+  return undefined;
+}
