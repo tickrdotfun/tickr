@@ -14,7 +14,7 @@ export const HUES = {
 } as const;
 
 export const INK = "#070807";
-export const GROUND = "#0B1F14";
+export const GROUND = "#0B161B";
 export const PAPER = "#F4F7F4";
 
 /** Colours an object may be drawn in. Red is deliberately absent. */

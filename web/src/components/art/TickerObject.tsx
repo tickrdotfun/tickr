@@ -1,4 +1,4 @@
-import { DRAW_HUES, FONT, HUES, INK, PAPER, STROKE, hashOf, pick, shade } from "./system";
+import { DRAW_HUES, FONT, GROUND, HUES, INK, PAPER, STROKE, hashOf, pick, shade } from "./system";
 
 /**
  * The picture a launch gets when its creator uploaded none: a letterpress sort with the ticker on its face,
@@ -21,7 +21,7 @@ export function TickerObject({ ticker, className = "" }: { ticker: string; class
   const { hue, ribbon, letters } = artFor(ticker);
   return (
     <svg viewBox="0 0 240 240" className={className} role="img" aria-label={`${letters} artwork`} preserveAspectRatio="xMidYMid slice">
-      <rect width="240" height="240" fill="#0B1F14" />
+      <rect width="240" height="240" fill={GROUND} />
       {/* the ribbon bleeds off both edges, so it reads as one band the full width of the card */}
       <path d="M-24 206 L264 146 L264 88 L-24 148 Z" fill={ribbon} opacity="0.9" />
       <g stroke={INK} strokeWidth={STROKE} strokeLinejoin="round" strokeLinecap="round">

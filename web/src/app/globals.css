@@ -7,9 +7,16 @@
   /* One column width for the header, every page and the footer. 1044 minus the 32px gutters leaves a 980px
      content box, which is the width the homepage modules already had: the chrome came in to meet them. */
   --measure: 1044px;
-  --tickr-ink: #0B1F14;
-  --tickr-green: #1F6A45;
-  --tickr-signal: #3DDC84;
+  /* The ground, decided 2026-09-11: steel blue that drifts into violet in the far corner. It is one
+     surface, not two, so nothing downstream needs a rule about which colour a given block gets.
+     --tickr-ink is the steel where type sits; anything flat (panels, chips, active states) uses it. */
+  --tickr-ink: #0B161B;
+  --tickr-violet: #1A0E2F;
+  --tickr-ground: linear-gradient(142deg, #0B161B 0%, #0D1423 42%, #1A0E2F 100%);
+  /* Deep accent, the button fill: the same relationship to the ground the old forest green had, at hue 195. */
+  --tickr-deep: #1F586B;
+  --tickr-green: #1F6A45;   /* swatch bar and logo letters only, never a UI colour */
+  --tickr-signal: #3DC2DC;
   --tickr-black: #070807;
   --tickr-white: #F4F7F4;
 
@@ -28,8 +35,8 @@
   --bg-2: var(--tickr-black);
   --panel: var(--tickr-ink);
   --panel-2: var(--tickr-black);
-  --border: rgb(61 220 132 / 0.18);   /* hairline: signal at low opacity */
-  --border-2: rgb(61 220 132 / 0.4);
+  --border: rgb(140 130 220 / 0.18);   /* hairline: the ground's violet end, at low opacity */
+  --border-2: rgb(140 130 220 / 0.4);
   --text: var(--tickr-white);
   --muted: rgb(244 247 244 / 0.72);
   --dim: rgb(244 247 244 / 0.48);
@@ -84,7 +91,8 @@
   }
 
   body {
-    background: var(--bg);
+    /* fixed, so the drift spans the viewport once instead of restarting down a long page */
+    background: var(--tickr-ground) fixed;
     color: var(--text);
     font-family: var(--font-ui);
     font-weight: 500;
@@ -152,7 +160,7 @@
   input::placeholder, textarea::placeholder { color: var(--dim); }
   input[type="number"]::-webkit-inner-spin-button,
   input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
-  input[type="checkbox"] { accent-color: var(--tickr-green); width: 14px; height: 14px; border-radius: 4px; }
+  input[type="checkbox"] { accent-color: var(--tickr-deep); width: 14px; height: 14px; border-radius: 4px; }
   select { appearance: none; }
 }
 
@@ -225,24 +233,24 @@
     font-size: 14.5px;
     font-weight: 600;
     letter-spacing: -0.013em;
-    border: 1px solid var(--tickr-green);
+    border: 1px solid var(--tickr-deep);
     background: transparent;
     color: var(--tickr-white);
     cursor: pointer;
     white-space: nowrap;
     transition: transform 80ms ease, background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
   }
-  .btn:hover { background: rgb(31 106 69 / 0.08); }
-  .btn:active { background: rgb(31 106 69 / 0.18); }
+  .btn:hover { background: rgb(31 88 107 / 0.10); }
+  .btn:active { background: rgb(31 88 107 / 0.22); }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn-primary, .btn-buy {
-    background: var(--tickr-green);
-    border-color: var(--tickr-green);
+    background: var(--tickr-deep);
+    border-color: var(--tickr-deep);
     color: var(--tickr-white);
   }
-  .btn-primary:hover, .btn-buy:hover { background: #17513A; border-color: #17513A; }
+  .btn-primary:hover, .btn-buy:hover { background: #17495A; border-color: #17495A; }
   .btn-primary:active, .btn-buy:active { background: var(--tickr-ink); border-color: var(--tickr-ink); }
-  .btn-sell { background: transparent; border-color: var(--tickr-green); color: var(--tickr-white); }
+  .btn-sell { background: transparent; border-color: var(--tickr-deep); color: var(--tickr-white); }
   .btn-sm { padding: 5px 14px; font-size: 13.5px; }
 
   /* ---- badges: eyebrow chips, spot colour only ------------------------- */
@@ -337,8 +345,8 @@
     /* wheel order, so no pair blends through grey, and oklab so the mix holds its saturation */
     background: linear-gradient(
       118deg in oklab,
-      #F5C63C, #F0862A, #E23B2E, #F4B8C6, #5B78F0, #3DDC84,
-      #F5C63C, #F0862A, #E23B2E, #F4B8C6, #5B78F0, #3DDC84, #F5C63C
+      #F5C63C, #F0862A, #E23B2E, #F4B8C6, #5B78F0, #3DC2DC,
+      #F5C63C, #F0862A, #E23B2E, #F4B8C6, #5B78F0, #3DC2DC, #F5C63C
     );
   }
   .btn-gradient:hover { color: var(--tickr-black); filter: brightness(1.06); }
@@ -762,12 +770,15 @@
     width: 1500px;
     height: 500px;
     overflow: hidden;
-    background: var(--tickr-ink);
+    /* the site's drift, re-angled for a 3:1 banner: steel behind the lockup, violet out at the planet */
+    background: linear-gradient(104deg, #0B161B 0%, #0D1423 44%, #1A0E2F 100%);
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .x-header-art { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--tickr-signal); opacity: 0.2; }
+    /* Periwinkle, not the accent: the banner crosses both ends of the drift, and a cyan hairline that reads
+     on the steel side disappears into the violet. This one holds across the whole width. */
+  .x-header-art { position: absolute; inset: 0; width: 100%; height: 100%; color: #9BB4E8; opacity: 0.26; }
   .x-header-lockup {
     position: relative;
     display: flex;
@@ -1551,7 +1562,7 @@
   .tickr-mark.on-light .c { color: #C8991A; }
   .tickr-mark.on-light .k { color: #D98BA1; }
   .tickr-mark.on-light .r { color: #C4291D; }
-  .tickr-mark.on-light .tittle { background: var(--tickr-green); }
+  .tickr-mark.on-light .tittle { background: var(--tickr-deep); }
 
   /* t + dot lockup (§3) for sizes below 24px: white t rotated -2.5deg, detached signal dot. */
   .tickr-icon {
