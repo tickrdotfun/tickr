@@ -13,6 +13,8 @@ import { createPublicClient, erc20Abi, getAddress, http, parseAbi, type Address,
 /** Addresses arrive from configuration, where the checksum casing may be anything. */
 const addr = (a: string): Address => getAddress(a.toLowerCase());
 
+import { gasWithHeadroom, decideStart, afterResolve, type Pending } from "./keeper-policy";
+
 type Env = {
   TICKR_KV: KVNamespace;
   KEEPER_KEY?: string;
@@ -467,42 +469,80 @@ async function keep(env: Env): Promise<string[]> {
   const wallet = createWalletClient({ account, chain, transport: paced });
   const pub = createPublicClient({ chain, transport: paced });
   const locker = env.KEEPER_LOCKER as `0x${string}`, treasury = env.KEEPER_TREASURY as `0x${string}`, coin = env.KEEPER_COIN as `0x${string}`, name = env.KEEPER_NAME as `0x${string}`;
-  const step = async (label: string, fn: () => Promise<`0x${string}`>) => {
+  const PENDING_KEY = "keeper:pending", LOCK_KEY = "keeper:lock";
+  const now = Date.now();
+
+  // one run at a time. two overlapping runs would each read the same nonce and send against it.
+  const lockUntil = Number((await env.TICKR_KV.get(LOCK_KEY)) ?? 0) || undefined;
+  const carried = JSON.parse((await env.TICKR_KV.get(PENDING_KEY)) ?? "null") as Pending | null;
+  const start = decideStart(now, lockUntil, carried ?? undefined);
+  if (!start.run) {
+    out.push(`keeper: ${start.reason}`);
+    return out;
+  }
+  await env.TICKR_KV.put(LOCK_KEY, String(now + 5 * 60_000), { expirationTtl: 600 });
+
+  // anything an earlier run left in flight is settled before this one writes
+  let mayWrite = true;
+  if (start.resolveFirst) {
+    const p = start.resolveFirst;
+    let outcome;
     try {
-      const hash = await fn();
+      const rc = await pub.waitForTransactionReceipt({ hash: p.hash as `0x${string}`, timeout: 60_000 });
+      outcome = { settled: true as const, status: rc.status };
+    } catch (e) {
+      outcome = { settled: false as const, reason: (e as Error).message?.slice(0, 60) ?? "no receipt" };
+    }
+    const d = afterResolve(outcome);
+    out.push(`${p.label} (from an earlier run): ${d.note} ${p.hash}`);
+    if (d.clear) await env.TICKR_KV.delete(PENDING_KEY);
+    mayWrite = d.mayWrite;
+  }
+
+  /**
+   * One write, recorded before it is waited on.
+   *
+   * The hash is persisted the moment it exists, so a run that dies between sending and confirming leaves
+   * something the next run can reconcile. Nothing is ever sent again from here; an attempt that does not
+   * resolve stops this run and every write after it.
+   */
+  const step = async (label: string, fn: () => Promise<`0x${string}`>) => {
+    if (!mayWrite) {
+      out.push(`${label}: not attempted, an earlier send is unresolved`);
+      return;
+    }
+    let hash: `0x${string}`;
+    try {
+      hash = await fn();
+    } catch (e) {
+      out.push(`${label}: not sent (${(e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 80)})`);
+      return;
+    }
+    await env.TICKR_KV.put(PENDING_KEY, JSON.stringify({ label, hash, at: Date.now() } satisfies Pending));
+    try {
       const rc = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 });
+      await env.TICKR_KV.delete(PENDING_KEY);
       out.push(`${label}: ${rc.status} ${hash}`);
     } catch (e) {
-      // a step that did not resolve is reported and left alone. It is never sent again from here: the keeper
-      // runs every ten minutes and cannot tell a transaction that is slow from one that is lost, so a resend
-      // risks paying twice for work the first one is about to do.
-      out.push(`${label}: skipped (${(e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 80)})`);
+      // the send happened and its answer did not. the record stays, and nothing else is written until it settles.
+      mayWrite = false;
+      out.push(`${label}: unresolved ${hash} (${(e as Error).message?.slice(0, 60)}); later steps skipped`);
     }
   };
 
   /**
-   * The gas limit for a write, estimated at the last moment and given bounded headroom.
+   * The gas limit for a write: estimated at the last moment, doubled, and refused if that does not fit.
    *
-   * An estimate is a measurement of the chain as it is now, and these calls are not the only thing happening on
-   * it. `collectFees` is the case that bit us: with only quote-side fees it burns nothing, and a sell landing
-   * between the estimate and inclusion adds the coin-side burn, which costs more than the estimate allowed. The
-   * transaction then fails on gas having paid for the whole limit.
-   *
-   * The headroom is a multiplier, not a blank cheque: it is capped in absolute terms so a wrong estimate cannot
-   * drain the keeper, and the cap is well under a block's capacity.
+   * Clipping to the ceiling would send less gas than the estimate asked for, which buys a failure. Over the
+   * ceiling the work is larger than the keeper should send unattended.
    */
-  // Measured on a fork of this chain (contracts/test/CollectFeesGas.t.sol): a collection with only buys costs
-  // 270,165 and the same collection after a sell costs 386,733, so the burn leg makes it 143% of the estimate.
-  // Twice the estimate covers that with real margin rather than the seven points 1.5x would have left.
-  const GAS_HEADROOM_NUM = 2n, GAS_HEADROOM_DEN = 1n;
-  // and it is bounded: twice a real collection is about 780,000, so this cap is far above anything legitimate
-  // and far below a block, which is what stops a wrong estimate from draining the keeper.
-  const GAS_CEILING = 3_000_000n;
   const gasFor = async (params: Parameters<typeof pub.estimateContractGas>[0]) => {
     const estimate = await pub.estimateContractGas({ ...params, account } as Parameters<typeof pub.estimateContractGas>[0]);
-    const padded = (estimate * GAS_HEADROOM_NUM) / GAS_HEADROOM_DEN;
-    return padded > GAS_CEILING ? GAS_CEILING : padded;
+    const d = gasWithHeadroom(estimate);
+    if (!d.ok) throw new Error(d.reason);
+    return d.gas;
   };
+
   // 1. the pool's fees, only when there is something to collect
   const pending = await pub.readContract({ address: locker, abi: LOCKER_ABI, functionName: "pendingFees", args: [coin] }).catch(() => [0n, 0n] as const);
   if (pending[0] > 0n || pending[1] > 0n) {

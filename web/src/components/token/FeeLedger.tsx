@@ -1,7 +1,9 @@
 "use client";
 
 import type { TokenData } from "@/hooks/useTokenData";
+import { gasWithHeadroom } from "@/lib/gasHeadroom";
 import { useTx } from "@/hooks/useTx";
+import { usePublicClient } from "wagmi";
 import { FeeEscrowAbi, LaunchLockerAbi } from "@/lib/abis";
 import { ADDRESSES, sameAddr } from "@/lib/addresses";
 import { fmtAmount, shortAddr, type FeeSplit, fmtUsd } from "@/lib/format";
@@ -15,6 +17,7 @@ import { MoveFees } from "./CreatorControls";
  */
 export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSplit; burnedUsd?: number }) {
   const { user, quote, nativePair, fees, escrow, launch, meta } = d;
+  const client = usePublicClient();
   const tx = useTx();
   if (!launch) return null;
 
@@ -30,9 +33,33 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
   const coinClaimable = escrow.coin ?? 0n;
   const collected = fees.collected;
 
+  /**
+   * Collecting costs more when a sell has landed since the estimate, because the coin side has to be burned.
+   * The wallet estimates for itself and is subject to the same race, so the limit is set here with headroom
+   * measured on chain rather than left to whatever the wallet last saw.
+   */
   const collect = () =>
     tx
-      .run([{ label: "collect fees", request: (w) => w({ abi: LaunchLockerAbi, address: ADDRESSES.launchLocker, functionName: "collectFees", args: [launch.token] }) }])
+      .run([
+        {
+          label: "collect fees",
+          request: async (w) => {
+            const call = { abi: LaunchLockerAbi, address: ADDRESSES.launchLocker, functionName: "collectFees", args: [launch.token] } as const;
+            let gas: bigint | undefined;
+            if (client && user) {
+              try {
+                const d2 = gasWithHeadroom(await client.estimateContractGas({ ...call, account: user }));
+                if (!d2.ok) throw new Error(d2.reason);
+                gas = d2.gas;
+              } catch (e) {
+                // an estimate that will not resolve is not a reason to send blind; the wallet's own is the floor
+                if (e instanceof Error && /more gas than is safe/.test(e.message)) throw e;
+              }
+            }
+            return w({ ...call, ...(gas ? { gas } : {}) });
+          },
+        },
+      ])
       .then((h) => h && d.refetch());
 
   const claimCoin = () =>
