@@ -25,3 +25,14 @@ test("an unactivated genesis, a rehearsal record, a foreign field, the wrong cha
   assert.deepEqual(schema.missingRequired({ ...genesisRecord(), universalRouter: schema.ZERO }, { NEXT_PUBLIC_UNIVERSAL_ROUTER: A(4) }), []);
   assert.match(p(genesisRecord(), { origin: "kept" }).join(";"), /not read from/);
 });
+test("a record that also carries the v2 genesis passes, and a malformed v2 field is refused", () => {
+  const p = (r) => schema.liveProblems(r, { chainId: 4663, origin: "copied", src: "x", env: {} });
+  const v2 = { ...genesisRecord(), marketTickerLauncher: A(28), marketTickerDeployer: A(29), genesisV2Token: A(30), genesisV2Name: A(31), genesisV2Pool: `0x${"cd".repeat(32)}` };
+  assert.deepEqual(p(v2), []);
+  assert.match(p({ ...v2, genesisV2Token: "0x1234" }).join(";"), /genesisV2Token is not an address/);
+  assert.match(p({ ...v2, genesisV2Pool: A(33) }).join(";"), /genesisV2Pool is not a 32 byte hash/);
+});
+test("the v2 genesis never records the treasury: the record is bundled into the site's public code", () => {
+  assert.ok(!schema.ADDRESSES.has("genesisV2Treasury"));
+  assert.match(schema.liveProblems({ ...genesisRecord(), genesisV2Treasury: A(32) }, { chainId: 4663, origin: "copied", src: "x", env: {} }).join(";"), /not a field/);
+});

@@ -4,7 +4,7 @@ import type { Address } from "viem";
 import { useTokenData } from "@/hooks/useTokenData";
 import { DEPLOYED } from "@/lib/addresses";
 import { fmtAmount, fmtNumber, fmtPrice, shortAddr, fmtUsd } from "@/lib/format";
-import { isOfficialCoin, isZero, ADDRESSES } from "@/lib/addresses";
+import { isAnyOfficialCoin, isOfficialCoin, isZero, ADDRESSES } from "@/lib/addresses";
 import { TokenLogo } from "../TokenLogo";
 import { Panel, Spinner } from "../ui";
 import { TradePanel } from "./TradePanel";
@@ -78,10 +78,11 @@ export function TokenPage({ address }: { address: Address }) {
               <TokenLogo src={meta.logo} symbol={meta.symbol} size={64} />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="truncate">{meta.name ?? shortAddr(address)}</h1>
+                  {/* the interface reads lowercase; an official coin's name keeps the casing it was launched with */}
+                  <h1 className={`truncate${isAnyOfficialCoin(address) ? " cap" : ""}`}>{meta.name ?? shortAddr(address)}</h1>
                   <span className="num text-muted text-[18px]">{meta.symbol}</span>
                   <span className="badge sw-signal">live</span>
-                  {isOfficialCoin(address) && <span className="badge sw-green">official coin</span>}
+                  {isAnyOfficialCoin(address) && <span className="badge sw-green">official coin</span>}
                 </div>
                 {(isOfficialCoin(address) ? "tickr.fun genesis token" : meta.description) && <p className="text-muted mt-3 max-w-2xl whitespace-pre-wrap break-words">{isOfficialCoin(address) ? "tickr.fun genesis token" : meta.description}</p>}
                 {links.length > 0 && (

@@ -36,6 +36,24 @@
   --panel: var(--tickr-ink);
   --panel-2: var(--tickr-black);
   --border: rgb(140 130 220 / 0.18);   /* hairline: the ground's violet end, at low opacity */
+  /* One dial for every glass surface: the header, the stats panel, the generation tabs. Tuned so the blur is
+     about the size of a glyph — words behind it smear past reading while the lines they sit on stay visible.
+     Never hand-write the -webkit- alias next to backdrop-filter; the build adds it, and writing both makes
+     Lightning CSS drop the standard property. */
+  --glass-filter: blur(16px) saturate(190%) brightness(0.62);
+  --glass-tint: color-mix(in srgb, var(--tickr-ink) 20%, transparent);
+  /* The shine, kept separate from the tint so the surface can be made glossier without going lighter. A pane
+     reads as glass from the light it catches, not from being brighter: one raking highlight across the face,
+     and a hairline rim where the edge turns. Both ride above the contents, so the card looks like something
+     light falls on rather than something printed under. */
+  --glass-spec: linear-gradient(
+    112deg,
+    rgb(255 255 255 / 0) 26%,
+    rgb(255 255 255 / 0.055) 42%,
+    rgb(255 255 255 / 0.015) 53%,
+    rgb(255 255 255 / 0) 68%
+  );
+  --glass-rim: inset 0 0 0 1px rgb(255 255 255 / 0.05), inset 0 1px 0 rgb(255 255 255 / 0.08);
   --border-2: rgb(140 130 220 / 0.4);
   --text: var(--tickr-white);
   --muted: rgb(244 247 244 / 0.72);
@@ -577,6 +595,34 @@
   }
   @media (min-width: 720px) { .stats-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   .stat-cell { background: var(--tickr-ink); padding: 22px 22px 24px; position: relative; }
+  /* The panel is glass and the cells are the tint on top of it, so the blur is computed once for the whole
+     card rather than six times. The 1px grid gaps still draw the dividers: the row's own background is what
+     shows through them, so it keeps the hairline colour and simply stops being opaque. Solid is the default
+     and glass is layered on only where backdrop-filter exists, since a translucent cell with no blur behind
+     it would put page artwork straight through the numbers. */
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .stats-row {
+      position: relative;
+      background: color-mix(in srgb, var(--border) 55%, transparent);
+      backdrop-filter: var(--glass-filter);
+    }
+    .stat-cell { background: var(--glass-tint); }
+    .seg-version { position: relative; backdrop-filter: var(--glass-filter); }
+    /* The shine sits above the cells, which is the whole point — a highlight painted under the contents
+       reads as a background, not as a surface. Absolutely positioned so it stays out of layout: .stats-row is
+       a grid and .seg-version a flex row, and an in-flow pseudo-element would become an item in each. */
+    .stats-row::after,
+    .seg-version::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      border-radius: inherit;
+      background: var(--glass-spec);
+      box-shadow: var(--glass-rim);
+    }
+  }
   .stat-cell::before {
     content: "";
     position: absolute;
@@ -2060,14 +2106,47 @@
   /* ------------------------------------------------------------------
      Header: no rule, generous height, the mark centered under glass.
      ------------------------------------------------------------------ */
+  /* Real glass, not a painted bar. The header is sticky, so the page genuinely passes underneath it: the
+     blur is what you are seeing through, and the saturation is what keeps the sky's violet from going grey
+     behind it. No bottom rule — the pane is held off the page by the soft shadow alone.
+
+     The pane is deliberately barely tinted. Almost all of the darkening that keeps the nav readable is
+     brightness() inside the filter, not opacity in the background: brightness multiplies what is behind the
+     glass, so shapes and colour keep moving through it, where a heavier background would simply cover them.
+
+     The blur radius is tuned to the text behind it, not maximised. At roughly the size of a glyph it smears
+     words into unreadable smudges while the lines of a paragraph stay visible as bands — you can see where
+     the sentences are without being able to read one. Push it much past this and the lines merge into flat
+     fog, which loses the detail that makes it read as glass rather than as a panel. */
   .header-glass {
     position: relative;
-    overflow: hidden;
-    background: var(--tickr-ink);
+    background: var(--glass-tint);
+    backdrop-filter: var(--glass-filter);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.07),
+      0 10px 30px -22px rgb(0 0 0 / 0.9);
+  }
+  /* Without backdrop-filter there is no blur and no brightness to lean on, and a 20% pane over scrolling
+     content is unreadable, so that case gets the solid bar. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .header-glass { background: var(--tickr-ink); }
+  }
+  /* The gloss: a soft highlight along the top edge, strongest at the left, the way light catches a real pane. */
+  .header-glass::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 52%;
+    pointer-events: none;
+    z-index: 0;
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.055), transparent);
   }
 
   .header-row { height: 104px; gap: 40px; }
 
+  /* Clips the sheen to the bar. The header itself must not clip: the wallet chooser hangs below it, and with
+     overflow:hidden on .header-glass it was cut off at the header's bottom edge, invisible on every device. */
+  .header-fx { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
   /* A slow specular pass over the glass. Transform only, so it never touches layout. */
   .header-sheen {
     position: absolute;
@@ -2242,6 +2321,43 @@
   .sw-red { color: var(--tickr-sw-red); }
   .sw-orange { color: var(--tickr-sw-orange); }
   .sw-signal { color: var(--tickr-signal); }
+
+  /* The create page's panels, on the same glass as the home page: the ink tint, the raking highlight above
+     the contents, the hairline rim.
+
+     Placed at the end of @layer components on purpose. Unlayered CSS outranks every layer, so declaring this
+     below .module (which is unlayered) would also beat Tailwind's utilities and kill the preview card's
+     lg:sticky. Inside the layer, utilities still win where they should, and being last in the layer is enough
+     to beat the panels' own earlier backgrounds. Single-class specificity throughout, so the more specific
+     state rules — .logo-drop.is-dragging, .collapse-toggle:hover — still take over.
+
+     The text inputs are deliberately left out. They are wells you type into, and the near-black ground is
+     what marks them as fields; giving them a lit surface would make them read as panels instead. */
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .pair-panel,
+    .preview-card,
+    .module,
+    .logo-drop,
+    .collapse-toggle {
+      position: relative;
+      background: var(--glass-tint);
+      backdrop-filter: var(--glass-filter);
+    }
+    .pair-panel::after,
+    .preview-card::after,
+    .module::after,
+    .logo-drop::after,
+    .collapse-toggle::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      border-radius: inherit;
+      background: var(--glass-spec);
+      box-shadow: var(--glass-rim);
+    }
+  }
 }
 
 /* the last characters of a coin's address, the 6942 every tickr coin ends in */

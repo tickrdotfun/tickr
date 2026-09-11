@@ -33,9 +33,6 @@ export default function Home() {
             <Link href="/create" className="btn btn-gradient hero-cta no-underline hover:no-underline">
               create
             </Link>
-            <a href="#launches" className="btn no-underline hover:no-underline">
-              see live launches
-            </a>
           </div>
         </div>
       </section>

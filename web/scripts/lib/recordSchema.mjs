@@ -1,8 +1,10 @@
 // The deployment record's schema, and the checks a live build makes on it. One module, so the release guard and
 // its tests read the same rules, and so a field genesis writes cannot be unknown to the guard.
 export const ZERO = "0x0000000000000000000000000000000000000000";
-export const ADDRESSES = new Set(["factory", "managedTickerHook", "managedTickerDeployer", "universalRouter", "feeEscrow", "launchLocker", "launchDeployer", "launchSeeder", "buybackVault", "buybackTreasury", "anchorRegistry", "launchAndBuyRouter", "tickerLauncher", "coinQuoteLauncher", "stockQuoteLauncher", "marketQuoteLauncher", "marketQuoteLauncherDeployed", "marketTickerLauncher", "marketTickerDeployer", "v3Factory", "zapRouter", "poolManager", "positionManager", "permit2", "usdg", "weth", "v4Quoter", "genesisToken", "genesisTicker", "stockAAPL", "stockF", "stockNVDA"]);
-export const HASHES = new Set(["genesisPool"]);
+export const ADDRESSES = new Set(["factory", "managedTickerHook", "managedTickerDeployer", "universalRouter", "feeEscrow", "launchLocker", "launchDeployer", "launchSeeder", "buybackVault", "buybackTreasury", "anchorRegistry", "launchAndBuyRouter", "tickerLauncher", "coinQuoteLauncher", "stockQuoteLauncher", "marketQuoteLauncher", "marketQuoteLauncherDeployed", "marketTickerLauncher", "marketTickerDeployer", "v3Factory", "zapRouter", "poolManager", "positionManager", "permit2", "usdg", "weth", "v4Quoter", "genesisToken", "genesisTicker", "genesisV2Token", "genesisV2Name", "stockAAPL", "stockF", "stockNVDA"]);
+export const HASHES = new Set(["genesisPool", "genesisV2Pool"]);
+// genesisV2*: written by GenesisV2.s.sol when the v2 official coin launches. Optional, unlike v1's genesis fields:
+// a record from before that launch has none of them and is still a complete record.
 export const NUMBERS = new Set(["chainId", "startBlock"]);
 export const BOOLEANS = new Set(["sepolia", "genesisActivated"]);
 /** what every live build must carry as a real address, from the record or its documented override */

@@ -27,6 +27,9 @@ type Deployments = {
   genesisToken?: string;
   genesisTicker?: string;
   genesisPool?: string;
+  genesisV2Token?: string;
+  genesisV2Name?: string;
+  genesisV2Pool?: string;
   managedTickerHook?: string;
   managedTickerDeployer?: string;
   marketTickerDeployer?: string;
@@ -53,6 +56,19 @@ export const OFFICIAL = {
 /** Where the protocol's share of the coin side of every fee goes. Nothing can move it out. */
 export const BURN: Address = "0x000000000000000000000000000000000000dEaD";
 export const isOfficialCoin = (a?: string) => !!a && OFFICIAL.token !== ZERO && a.toLowerCase() === OFFICIAL.token.toLowerCase();
+
+/**
+ * The official coin of the v2 path, and the name it is priced in. Zero until `GenesisV2.s.sol` records it, so
+ * nothing about it exists in the site before its launch: the coin's name, symbol and description are read from the
+ * coin itself, never written here. `isOfficialCoin` stays the first genesis coin alone, because the fixed
+ * description and the buyback panel belong to that coin; badges ask `isAnyOfficialCoin`.
+ */
+export const OFFICIAL_V2 = {
+  token: pick(d.genesisV2Token, process.env.NEXT_PUBLIC_GENESIS_V2_TOKEN),
+  name: pick(d.genesisV2Name, process.env.NEXT_PUBLIC_GENESIS_V2_NAME),
+};
+export const isOfficialV2Coin = (a?: string) => !!a && OFFICIAL_V2.token !== ZERO && a.toLowerCase() === OFFICIAL_V2.token.toLowerCase();
+export const isAnyOfficialCoin = (a?: string) => isOfficialCoin(a) || isOfficialV2Coin(a);
 
 export const ADDRESSES = {
   factory: pick(d.factory, process.env.NEXT_PUBLIC_FACTORY),

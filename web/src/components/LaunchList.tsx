@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { isOfficialCoin } from "@/lib/addresses";
+import { isAnyOfficialCoin } from "@/lib/addresses";
 import { useMarketData, type Row, type WindowKey } from "@/hooks/useMarketData";
 import { DEPLOYED } from "@/lib/addresses";
 import { fmtNumber, fmtUsd, shortAddr } from "@/lib/format";
@@ -203,7 +203,7 @@ function LaunchCard({ r, window }: { r: Row; window: WindowKey }) {
             <span className="coin-pair-slash">/</span>
             <span className={quoteClass(r.quote.kind)}>{r.quote.kind === "ticker" ? `${r.quote.symbol}*` : r.quote.symbol}</span>
           </span>
-          {isOfficialCoin(r.launch.token) && <span className="badge sw-green">official</span>}
+          {isAnyOfficialCoin(r.launch.token) && <span className="badge sw-green">official</span>}
         </div>
         <div className="coin-stats">
           <span>

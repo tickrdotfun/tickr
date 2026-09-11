@@ -21,7 +21,9 @@ export function Header() {
 
   return (
     <header className="header-glass sticky top-0 z-20">
-      <span className="header-sheen" aria-hidden="true" />
+      {/* the sheen is clipped by its own wrapper, never by the header: the header must let the wallet chooser
+          drop out below it, and an overflow:hidden header cut that dropdown off at its bottom edge */}
+      <span className="header-fx" aria-hidden="true"><span className="header-sheen" /></span>
       <div className="measure header-row relative flex items-center">
         <Link href="/" className="header-mark no-underline hover:no-underline" aria-label="tickr home">
           <TickrMark size={48} buildIn blink drift />
