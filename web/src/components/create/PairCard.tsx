@@ -46,7 +46,7 @@ export function PairCard({ address }: { address: Address }) {
           {kind === "stock" && <OfficialBadge />}
           {lookalike && <span className="badge sw-red">lookalike</span>}
           {kind === "ticker" && <span className="badge sw-pink">creator-issued</span>}
-          {kind === "coin" && <span className="badge sw-yellow">tickr coin</span>}
+          {kind === "coin" && <span className="badge sw-accent">tickr coin</span>}
           {(api.isLoading || chain.isLoading) && <span className="text-dim text-[12px]">reading…</span>}
         </span>
       </div>

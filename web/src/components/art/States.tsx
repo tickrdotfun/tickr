@@ -52,7 +52,6 @@ export function ErrorArt({ className = "" }: { className?: string }) {
 export function EmptyState({ title, body, action }: { title: string; body: string; action?: React.ReactNode }) {
   return (
     <div className="state-block">
-      <EmptyArt className="state-art" />
       <div>
         <h3 className="state-title">{title}</h3>
         <p className="state-body">{body}</p>

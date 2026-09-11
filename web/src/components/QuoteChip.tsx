@@ -28,7 +28,7 @@ export function QuoteChip({ meta, size = "sm" }: { meta?: QuoteMeta; size?: "sm"
 
 /** The pair is a Stock Token from the registry. Says so about the pair, never about the coin next to it. */
 export function OfficialBadge() {
-  return <span className="badge sw-yellow cap">Stock Token pair</span>;
+  return <span className="badge sw-accent cap">Stock Token pair</span>;
 }
 
 export function CreatorIssuedBadge() {

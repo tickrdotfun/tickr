@@ -10,6 +10,7 @@ import { TokenArt } from "./TokenArt";
 import { Spinner } from "./ui";
 import { EmptyState, ErrorState } from "./art/States";
 import { quoteClass } from "./QuoteChip";
+import { MARKET_BASE_FEE_BPS } from "@/lib/marketLaunch";
 
 type SortKey = "new" | "mcap" | "volume" | "buys";
 
@@ -25,16 +26,43 @@ const WINDOW_LABELS: { id: WindowKey; label: string }[] = [
   { id: "all", label: "all time" },
 ];
 
+/**
+ * Which generation a coin belongs to, read off the pool fee its launch froze.
+ *
+ * v2 is the market release: a coin under a fixed-inventory name pays a base fee of 82 bps and no creator tax,
+ * and `MarketTickerLauncher` reverts on anything else, so `(82 + 0) * 100` is exact and cannot be reached by a
+ * v1 launch, whose base is 100 and whose tax only adds to it. Reading the fee rather than the configuration id
+ * means a new configuration added later lands on the right side of the tab without anyone remembering to
+ * update a list of ids.
+ */
+type VersionKey = "v2" | "v1";
+const V2_POOL_FEE = MARKET_BASE_FEE_BPS * 100;
+const versionOf = (r: Row): VersionKey => (r.launch.poolFee === V2_POOL_FEE ? "v2" : "v1");
+
+const VERSIONS: { id: VersionKey; label: string }[] = [
+  { id: "v2", label: "v2" },
+  { id: "v1", label: "v1 (deprecated)" },
+];
+
 /** Every coin is live from its first block, so the grid is one list, newest first. */
 export function LaunchList() {
+  const [version, setVersion] = useState<VersionKey>("v2");
   const [sort, setSort] = useState<SortKey>("mcap");
   const [window, setWindow] = useState<WindowKey>("all");
   const [q, setQ] = useState("");
   const market = useMarketData(window);
 
   const partial = market.data?.partial ?? false;
-  const rows = useMemo(() => {
+
+  // both generations counted before the version filter, so each tab shows its own total and an empty v2 can
+  // point at what is actually there
+  const counts = useMemo(() => {
     const all = market.data?.rows ?? [];
+    return { v2: all.filter((r) => versionOf(r) === "v2").length, v1: all.filter((r) => versionOf(r) === "v1").length };
+  }, [market.data]);
+
+  const rows = useMemo(() => {
+    const all = (market.data?.rows ?? []).filter((r) => versionOf(r) === version);
     const needle = q.trim().toLowerCase();
     const match = (r: Row) =>
       !needle ||
@@ -57,7 +85,7 @@ export function LaunchList() {
       return Number(b.createdBlock - a.createdBlock) || b.launch.index - a.launch.index;
     };
     return all.filter(match).sort(cmp);
-  }, [market.data, q, sort, partial]);
+  }, [market.data, q, sort, partial, version]);
 
   if (!DEPLOYED) return <div className="text-muted">nothing to show until the factory is deployed.</div>;
   if (market.isLoading)
@@ -72,6 +100,16 @@ export function LaunchList() {
   return (
     <div>
       {partial && <p className="detail-note detail-note-tight">the swap history did not load, so volume and buys are unknown right now; the list is newest first.</p>}
+      {/* The generation tab leads the controls: it decides what the rest of them are filtering. */}
+      <div className="seg seg-version" role="group" aria-label="Generation">
+        {VERSIONS.map((v) => (
+          <button key={v.id} type="button" className="seg-item" data-active={version === v.id} onClick={() => setVersion(v.id)}>
+            {v.label}
+            <span className="seg-count num">{counts[v.id]}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="grid-controls">
         <input className="grid-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="search name, ticker or address" aria-label="Search launches" />
         <div className="seg" role="group" aria-label="Sort">
@@ -95,11 +133,27 @@ export function LaunchList() {
       {rows.length === 0 && (
         <div className="mt-8">
           {q ? (
-            <EmptyState title="nothing matches that" body="try a shorter word, a ticker, or paste a token address." />
+            <EmptyState title="nothing matches that" body={`nothing in ${version} matches. try a shorter word, a ticker, or paste a token address.`} />
+          ) : version === "v2" && counts.v1 > 0 ? (
+            // the ordinary case on the day v2 opens: nothing here yet, and the older coins are one tab away
+            <EmptyState
+              title="no v2 coins yet"
+              body={`nobody has launched under a fixed-inventory name on this chain. ${counts.v1} ${counts.v1 === 1 ? "coin" : "coins"} on v1.`}
+              action={
+                <span className="inline-flex items-center gap-2">
+                  <Link href="/create" className="btn btn-sm no-underline hover:no-underline">
+                    launch the first
+                  </Link>
+                  <button type="button" className="btn btn-sm btn-quiet" onClick={() => setVersion("v1")}>
+                    see v1
+                  </button>
+                </span>
+              }
+            />
           ) : (
             <EmptyState
               title="no launches yet"
-              body="the first invented ticker on this chain is still unclaimed."
+              body="the first invented name on this chain is still unclaimed."
               action={
                 <Link href="/create" className="btn btn-sm no-underline hover:no-underline">
                   invent one
@@ -111,7 +165,7 @@ export function LaunchList() {
       )}
 
       {rows.length > 0 && (
-        <Section title="live" count={rows.length}>
+        <Section title={`live ${version}`} count={rows.length}>
           {rows.map((r) => (
             <LaunchCard key={r.launch.token} r={r} window={window} />
           ))}

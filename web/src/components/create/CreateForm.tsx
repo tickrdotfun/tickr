@@ -1221,7 +1221,7 @@ export function CreateForm() {
       <div className="pv-pair num">
         {pairLeft}
         <span className="pv-slash">/</span>
-        <span className="sw-yellow">{pairRight}</span>
+        <span className="sw-accent">{pairRight}</span>
       </div>
       {tab === "diy" && tickerUp.length > 0 && (
         <div className={`pv-avail ${sharedOn ? "shared" : tickerState}`}>
@@ -1384,7 +1384,7 @@ export function CreateForm() {
             onClick={() => i <= step && setStep(i)}
             disabled={i > step}
           >
-            <span className={`num mr-2 ${["sw-yellow", "sw-blue", "sw-pink"][i]}`}>{i + 1}</span>
+            <span className={`num mr-2 ${["sw-accent", "sw-blue", "sw-pink"][i]}`}>{i + 1}</span>
             {label}
           </button>
         ))}
@@ -1430,7 +1430,7 @@ export function CreateForm() {
             </Field>
           </div>
           <div className="mt-7">
-            <Collapse label="Social links (optional)" defaultOpen>
+            <Collapse label="Social links (optional)">
               <div className="grid sm:grid-cols-3 gap-5">
                 {SOCIAL_FIELDS.map((f) => (
                   <Field key={f.key} label={f.label}>
@@ -1538,7 +1538,7 @@ export function CreateForm() {
           <div className="mt-6">
             <span className="label label-muted">the pair people will see</span>
             <div className="num mt-2 text-[clamp(26px,4.4vw,40px)] font-bold leading-none">
-              {pairLeft}/<span className="sw-yellow">{pairRight}</span>
+              {pairLeft}/<span className="sw-accent">{pairRight}</span>
             </div>
           </div>
 

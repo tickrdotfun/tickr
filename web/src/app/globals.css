@@ -291,14 +291,14 @@
   /* The first quote-asset tab carries the product: it reads as a card with the yellow swatch. */
   .tab-hero {
     padding: 8px 14px;
-    border: 1px solid color-mix(in srgb, var(--tickr-sw-yellow) 30%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tickr-signal) 30%, transparent);
     border-radius: 999px;
     background: transparent;
     color: var(--text);
   }
   .tab-hero[data-active="true"] {
-    background: color-mix(in srgb, var(--tickr-sw-yellow) 14%, transparent);
-    border-color: var(--tickr-sw-yellow);
+    background: color-mix(in srgb, var(--tickr-signal) 14%, transparent);
+    border-color: var(--tickr-signal);
   }
   /* The pill already reads as selected. A green rule under a yellow pill is two accents on one item, so the
      travelling indicator hides while the hero tab holds it and resumes on every other tab. */
@@ -587,7 +587,7 @@
     background: currentColor;
     opacity: 0.9;
   }
-  .stats-row .stat-cell:nth-child(1) { color: var(--tickr-sw-yellow); }
+  .stats-row .stat-cell:nth-child(1) { color: var(--tickr-signal); }
   .stats-row .stat-cell:nth-child(2) { color: var(--tickr-sw-orange); }
   .stats-row .stat-cell:nth-child(3) { color: var(--tickr-signal); }
   .stats-row .stat-cell:nth-child(4) { color: var(--tickr-sw-blue-type); }
@@ -628,6 +628,59 @@
   }
   .seg-item:hover { color: var(--text); }
   .seg-item[data-active="true"] { color: var(--text); border-bottom-color: var(--tickr-signal); }
+
+  /* The generation tab. Heavier than the sort and window segs on purpose: those refine a list, this one
+     decides which list. Pills rather than underlines, so the two read as a choice between two things. */
+  .seg-version {
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 18px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--tickr-white) 3%, transparent);
+  }
+  .seg-version .seg-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 15px;
+    border-radius: 999px;
+    border-bottom: 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    transition: background 0.28s ease, color 0.28s ease;
+  }
+  .seg-version .seg-item:hover { background: color-mix(in srgb, var(--tickr-white) 5%, transparent); }
+  .seg-version .seg-item[data-active="true"] {
+    color: var(--tickr-black);
+    background: var(--tickr-signal);
+    border-bottom-color: transparent;
+  }
+  /* the per-tab total, so the choice shows what is behind it before it is made */
+  .seg-count {
+    min-width: 20px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--dim);
+    background: color-mix(in srgb, var(--tickr-white) 7%, transparent);
+  }
+  .seg-version .seg-item[data-active="true"] .seg-count {
+    color: var(--tickr-black);
+    background: rgb(7 8 7 / 0.14);
+  }
+
+  /* a second action that must not compete with the primary one beside it */
+  .btn-quiet {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--dim);
+  }
+  .btn-quiet:hover { color: var(--text); border-color: color-mix(in srgb, var(--tickr-signal) 45%, transparent); }
 
   .card-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); }
 
@@ -766,7 +819,7 @@
     background: currentColor;
     opacity: 0.9;
   }
-  .stats-row .stat-cell:nth-child(1) { color: var(--tickr-sw-yellow); }
+  .stats-row .stat-cell:nth-child(1) { color: var(--tickr-signal); }
   .stats-row .stat-cell:nth-child(2) { color: var(--tickr-sw-orange); }
   .stats-row .stat-cell:nth-child(3) { color: var(--tickr-signal); }
   .stats-row .stat-cell:nth-child(4) { color: var(--tickr-sw-blue-type); }
@@ -1477,9 +1530,7 @@
     z-index: 0;
     pointer-events: none;
     color: var(--tickr-signal);
-    /* lifted from 0.17: the sky is meant to be noticed now, not just found when you look for it. The fade
-       mask still pulls it away from the edges, so the type sits on the calm middle either way. */
-    opacity: 0.26;
+    opacity: 0.17;
     --px: 0;
     --py: 0;
   }
@@ -1507,29 +1558,7 @@
 
     /* a comet crosses, then waits a long time before the next one */
     .bd-comet { animation: bd-comet 26s cubic-bezier(0.4, 0, 0.7, 1) infinite; opacity: 0; }
-    /* the second one runs the other way on a longer wait, so the two rarely share the sky */
-    .bd-comet-2 { animation: bd-comet-2 43s cubic-bezier(0.35, 0, 0.65, 1) infinite; }
-
-    /* the clouds breathe and slide, each on its own long cycle so the sky never repeats visibly */
-    .bd-cloud-a { animation: bd-drift-a 68s ease-in-out infinite; }
-    .bd-cloud-b { animation: bd-drift-b 91s ease-in-out infinite; }
-    .bd-cloud-c { animation: bd-drift-c 77s ease-in-out infinite; }
-
-    /* the stuck-on stars pulse like the glow-in-the-dark ones, slower and deeper than the pinprick stars */
-    .bd-star { animation: bd-star 11s ease-in-out infinite; }
-
-    /* dust rises and wanders */
-    .bd-mote { animation-name: bd-mote; animation-timing-function: linear; animation-iteration-count: infinite; }
-
-    .bd-crescent { animation: bd-bob 26s ease-in-out infinite; }
   }
-
-  /* the clouds sit under the hairlines and are the only colour in the sky */
-  .bd-clouds { opacity: 0.9; will-change: transform; transform: translate3d(calc(var(--px) * 10px), calc(var(--py) * 8px), 0); }
-  .bd-cloud { transform-box: fill-box; transform-origin: center; }
-  .bd-ceiling { will-change: transform; transform: translate3d(calc(var(--px) * 38px), calc(var(--py) * 30px), 0); }
-  .bd-star { transform-box: fill-box; transform-origin: center; opacity: 0.55; }
-  .bd-crescent { transform-box: fill-box; transform-origin: center; }
 
   @keyframes bd-twinkle {
     0%, 100% { opacity: 0.28; }
@@ -1545,47 +1574,6 @@
     26% { opacity: 0.9; }
     30% { transform: translate(1560px, 470px) rotate(14deg); opacity: 0; }
     100% { transform: translate(1560px, 470px) rotate(14deg); opacity: 0; }
-  }
-  /* right to left and downward, mirrored so the trail still leads the head */
-  @keyframes bd-comet-2 {
-    0% { transform: translate(1580px, 120px) rotate(196deg); opacity: 0; }
-    3% { opacity: 0.85; }
-    18% { opacity: 0.85; }
-    22% { transform: translate(-140px, 690px) rotate(196deg); opacity: 0; }
-    100% { transform: translate(-140px, 690px) rotate(196deg); opacity: 0; }
-  }
-
-  /* the clouds: slow, wide, and never quite back where they started until the cycle closes */
-  @keyframes bd-drift-a {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    50% { transform: translate(90px, -46px) scale(1.14); }
-  }
-  @keyframes bd-drift-b {
-    0%, 100% { transform: translate(0, 0) scale(1.06); }
-    50% { transform: translate(-104px, 38px) scale(0.94); }
-  }
-  @keyframes bd-drift-c {
-    0%, 100% { transform: translate(0, 0) scale(0.96); }
-    50% { transform: translate(56px, 60px) scale(1.1); }
-  }
-
-  /* a stuck-on star holds its glow, then fades and comes back, the way the real ones do as they discharge */
-  @keyframes bd-star {
-    0%, 100% { opacity: 0.34; transform: scale(0.94) rotate(0deg); }
-    45% { opacity: 0.92; transform: scale(1.07) rotate(3deg); }
-  }
-
-  /* dust: up and across, fading in at the bottom of its run and out at the top */
-  @keyframes bd-mote {
-    0% { transform: translate(0, 0); opacity: 0; }
-    12% { opacity: 0.5; }
-    80% { opacity: 0.42; }
-    100% { transform: translate(46px, -190px); opacity: 0; }
-  }
-
-  @keyframes bd-bob {
-    0%, 100% { transform: translateY(0) rotate(-4deg); }
-    50% { transform: translateY(-16px) rotate(4deg); }
   }
 
   .preview-card {
@@ -2246,6 +2234,9 @@
 
   /* The mark's swatches, available as accents across the interface. */
   .sw-yellow { color: var(--tickr-sw-yellow); }
+  /* The accent role. Was the yellow swatch; it is the light blue now, and it is not a swatch: the six
+     swatches stay the mark's, and warnings stay amber, which is the one thing this must not be confused with. */
+  .sw-accent { color: var(--tickr-signal); }
   .sw-blue { color: var(--tickr-sw-blue-type); }
   .sw-pink { color: var(--tickr-sw-pink); }
   .sw-red { color: var(--tickr-sw-red); }
@@ -2281,9 +2272,9 @@
   .dev-row input { flex: 1; min-width: 0; }
   .dev-unit { display: flex; align-items: center; padding: 0 16px; border: 1px solid var(--border); border-radius: 14px; color: var(--muted); font-size: 14px; white-space: nowrap; }
   .tax-range { -webkit-appearance: none; appearance: none; flex: 1; height: 6px !important; padding: 0 !important; border: 0 !important; border-radius: 999px !important; background: var(--border) !important; box-shadow: none !important; cursor: pointer; }
-  .tax-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--tickr-sw-yellow); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--border); }
-  .tax-range::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--tickr-sw-yellow); border: 2px solid var(--bg); }
-  .tax-range:focus-visible { outline: 2px solid var(--tickr-sw-yellow); outline-offset: 4px; }
+  .tax-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--tickr-signal); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--border); }
+  .tax-range::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--tickr-signal); border: 2px solid var(--bg); }
+  .tax-range:focus-visible { outline: 2px solid var(--tickr-signal); outline-offset: 4px; }
 
 /* ---- activation: the two buys after a launch */
 .confetti {
@@ -2340,6 +2331,6 @@
   color: var(--tickr-signal);
   margin-left: 4px;
 }
-.coin-card .badge.sw-yellow {
-  color: var(--tickr-sw-yellow);
+.coin-card .badge.sw-accent {
+  color: var(--tickr-signal);
 }

@@ -8,7 +8,7 @@ export function StatsRow() {
   const m = useMarketData("all");
   const d = m.data;
   const items: { k: string; v: string; note?: string; cls: string }[] = [
-    { k: "tickers invented", v: d ? String(d.tickersInvented) : "-", cls: "sw-yellow" },
+    { k: "tickers invented", v: d ? String(d.tickersInvented) : "-", cls: "sw-accent" },
     { k: "coins launched", v: d ? String(d.rows.length) : "-", cls: "sw-signal" },
     {
       k: "market cap",
