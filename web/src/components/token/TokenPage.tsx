@@ -5,6 +5,7 @@ import { useTokenData } from "@/hooks/useTokenData";
 import { DEPLOYED } from "@/lib/addresses";
 import { fmtAmount, fmtNumber, fmtPrice, shortAddr, fmtUsd } from "@/lib/format";
 import { isAnyOfficialCoin, isOfficialCoin, isZero, ADDRESSES } from "@/lib/addresses";
+import { CopyIcon } from "@/components/CopyIcon";
 import { TokenLogo } from "../TokenLogo";
 import { Panel, Spinner } from "../ui";
 import { TradePanel } from "./TradePanel";
@@ -83,6 +84,7 @@ export function TokenPage({ address }: { address: Address }) {
                   <span className="num text-muted text-[18px]">{meta.symbol}</span>
                   <span className="badge sw-signal">live</span>
                   {isAnyOfficialCoin(address) && <span className="badge sw-green">official coin</span>}
+                  <CopyIcon address={address} size={17} />
                 </div>
                 {(isOfficialCoin(address) ? "tickr.fun genesis token" : meta.description) && <p className="text-muted mt-3 max-w-2xl whitespace-pre-wrap break-words">{isOfficialCoin(address) ? "tickr.fun genesis token" : meta.description}</p>}
                 {links.length > 0 && (
