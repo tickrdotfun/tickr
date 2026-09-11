@@ -59,3 +59,20 @@ test("a launch configuration can be hidden, which an address prediction cannot g
 test("a configuration id on another chain is not hidden", () => {
   assert.equal(h.isHiddenConfig(1, 1n), false);
 });
+
+test("IDK and its name MAN, and both probes with their name TESTNAME, are hidden by address", () => {
+  const ours = {
+    IDK: "0xEA3d0DD63981Cd90181A5a76A85B4E95d88F6942",
+    MAN: "0xF7dd24482e69c47c6f469F82F95CB2a8Cd9260EA",
+    PROBE: "0x82237bEFCEce5085e324a60858b1Dc64ecaE3850",
+    PROBETWO: "0x151073687c3f5B569fdEC876bEb3DBcEF5F3Ac83",
+    TESTNAME: "0x4Dd89f107d9b8395237719FA9d621a7A5BC00c52",
+  };
+  for (const [name, a] of Object.entries(ours)) {
+    assert.equal(h.isHidden(CHAIN, a), true, `${name} is excluded`);
+    assert.equal(h.isHidden(CHAIN, a.toLowerCase()), true, `${name}, whatever case it is written in`);
+    assert.equal(h.isHidden(11155111, a), false, `${name} only on the chain it was listed for`);
+  }
+  assert.equal(h.isHidden(CHAIN, "0x51d553Efd2E8D772AEe6d602A9ea26C56c9a6942"), false, "and TICKR is not");
+});
+

@@ -37,6 +37,14 @@ export const HIDDEN: readonly Hidden[] = [
     address: "0x400D1CDE38775AF5Ee5Db600d6852a30DddeEc6A",
     note: "acceptance run, coin B",
   },
+  // 2026-09-11, on request: our own launches that are not for the public lists. Checked on chain that no other
+  // coin is priced in MAN or TESTNAME, so hiding those names hides nobody else's coin. A coin launched under either
+  // name later would be hidden with it, since a coin priced in a hidden name is dropped.
+  { chainId: 4663, address: "0xEA3d0DD63981Cd90181A5a76A85B4E95d88F6942", note: "IDK, launched on genesis night" },
+  { chainId: 4663, address: "0xF7dd24482e69c47c6f469F82F95CB2a8Cd9260EA", note: "MAN, the name IDK is priced in" },
+  { chainId: 4663, address: "0x82237bEFCEce5085e324a60858b1Dc64ecaE3850", note: "PROBE, the v2 live probe's coin" },
+  { chainId: 4663, address: "0x151073687c3f5B569fdEC876bEb3DBcEF5F3Ac83", note: "PROBETWO, the v2 live probe's second coin" },
+  { chainId: 4663, address: "0x4Dd89f107d9b8395237719FA9d621a7A5BC00c52", note: "TESTNAME, the name both probes are priced in" },
 ] as const;
 
 /**
