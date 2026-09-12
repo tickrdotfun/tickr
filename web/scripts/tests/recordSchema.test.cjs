@@ -42,5 +42,6 @@ test("a record that also carries the v2 genesis passes; a malformed or partly wr
 });
 test("the v2 genesis never records the treasury: the record is bundled into the site's public code", () => {
   assert.ok(!schema.ADDRESSES.has("genesisV2Treasury"));
+  assert.ok(schema.ADDRESSES.has("buybackTreasuryHoly"), "the HOLY treasury is a record field");
   assert.match(schema.liveProblems({ ...genesisRecord(), genesisV2Treasury: A(32) }, { chainId: 4663, origin: "copied", src: "x", env: {} }).join(";"), /not a field/);
 });
