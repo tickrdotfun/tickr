@@ -25,8 +25,17 @@ export function siteTransport(): Transport {
   const direct = http(PUBLIC_NODE, { batch: true });
   return custom({
     async request({ method, params }: { method: string; params?: unknown }) {
-      const t = (WIDE.has(method) ? direct : viaSite)({ chain: robinhoodChain, retryCount: 1 });
-      return t.request({ method, params } as Parameters<typeof t.request>[0]);
+      const req = { method, params } as Parameters<ReturnType<typeof viaSite>["request"]>[0];
+      if (!WIDE.has(method)) return viaSite({ chain: robinhoodChain, retryCount: 1 }).request(req);
+      // a log query goes to the public node first, from the visitor's own connection. That node answers some
+      // browsers and refuses others (CORS), and rate-limits everyone under load: when it fails, the same query goes
+      // through the site, which tries the public node from its side and then its own node. A scan that fails
+      // twice is a scan that fails; it must never be the reason a launch is missing from the list
+      try {
+        return await direct({ chain: robinhoodChain, retryCount: 0 }).request(req);
+      } catch {
+        return viaSite({ chain: robinhoodChain, retryCount: 1 }).request(req);
+      }
     },
   });
 }

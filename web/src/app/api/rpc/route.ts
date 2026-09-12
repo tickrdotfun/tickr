@@ -37,13 +37,14 @@ export async function POST(req: Request) {
   // a batch that mixes wide and narrow reads goes to the node that can serve all of it
   const wide = calls.some((c) => WIDE.has(c.method as string));
   const target = wide || !upstream ? PUBLIC_NODE : upstream;
+  const send = (to: string) =>
+    fetch(to, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(25_000) });
   try {
-    const r = await fetch(target, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(25_000),
-    });
+    let r = await send(target);
+    // the public node rate-limits under load. A wide read it refused is tried on the site's own node, which caps
+    // block ranges but answers: a small range (a coin's recent trades) gets through, a huge one gets that node's
+    // own error back, and either is better than a 429 the page cannot act on
+    if (wide && upstream && (r.status === 429 || r.status >= 500)) r = await send(upstream);
     const text = await r.text();
     return new Response(text, { status: r.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
   } catch (e) {
