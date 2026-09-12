@@ -75,7 +75,7 @@ test("a coin under a v2 name and a coin under a v1 wrapper: both coins and both 
     { coin: A(0x6942), name: A(0xf0), kind: "market-name" },
     { coin: A(0x1111), name: A(0xf9), kind: "managed-name" },
   ]);
-  const r = await verifyNewLaunches(w.deps);
+  const r = await verifyNewLaunches({ ...w.deps, maxExplorerSubmits: 4 });
   assert.equal(r.checked, 4);
   assert.equal(r.verified.length, 4);
   assert.deepEqual(r.retry, []);
@@ -86,17 +86,18 @@ test("a coin under a v2 name and a coin under a v1 wrapper: both coins and both 
   assert.ok(w.explorerPosts.every((p) => p.compiler === `v${COMPILER}` && p.file instanceof Blob), "as multipart standard input, the explorer's compiler spelling");
 });
 
-test("an address is done only when Sourcify and the explorer both have it; the explorer's rate limit is a retry that does not re-ask Sourcify", async () => {
-  const w = world([{ coin: A(0x7777) }], { explorerRefuse: new Set([A(0x7777)]) });
-  const r = await verifyNewLaunches(w.deps);
+test("an address is done only when Sourcify and the explorer both have it; the explorer's rate limit is a retry that does not re-ask Sourcify, and ends the run's submissions", async () => {
+  const w = world([{ coin: A(0x7777) }, { coin: A(0x7778) }], { explorerRefuse: new Set([A(0x7777)]) });
+  const r = await verifyNewLaunches({ ...w.deps, maxExplorerSubmits: 5 });
   assert.deepEqual(r.verified, []);
-  assert.deepEqual(r.retry.map((a) => a.toLowerCase()), [A(0x7777)]);
+  assert.deepEqual(r.retry.map((a) => a.toLowerCase()), [A(0x7777), A(0x7778)]);
+  assert.equal(w.explorerPosts.length, 1, "after a 429 nothing else is submitted this run");
   assert.equal(w.kv.get(`verify:${A(0x7777)}`), "match", "Sourcify's success is remembered on its own");
   assert.equal(w.kv.get(`explorer:${A(0x7777)}`), undefined);
   w.explorerRefuse.clear(); // next run: the explorer accepts
-  const r2 = await verifyNewLaunches(w.deps);
-  assert.deepEqual(r2.verified.map((a) => a.toLowerCase()), [A(0x7777)]);
-  assert.equal(w.posts.length, 1, "Sourcify was asked once in total");
+  const r2 = await verifyNewLaunches({ ...w.deps, maxExplorerSubmits: 5 });
+  assert.deepEqual(r2.verified.map((a) => a.toLowerCase()), [A(0x7777), A(0x7778)]);
+  assert.equal(w.posts.length, 2, "Sourcify was asked once per address in total");
   assert.equal(w.kv.get(`explorer:${A(0x7777)}`), "verified");
 });
 
@@ -115,6 +116,13 @@ test("a run submits only so many to the explorer; the rest wait in the retry lis
   assert.deepEqual(r3.retry, []);
 });
 
+test("one explorer submission per run by default", async () => {
+  const w = world([{ coin: A(0x9001) }, { coin: A(0x9002) }]);
+  const r = await verifyNewLaunches(w.deps);
+  assert.equal(w.explorerPosts.length, 1);
+  assert.equal(r.retry.length, 1);
+});
+
 test("what the explorer already shows is not submitted to it again", async () => {
   const w = world([{ coin: A(0x8888) }], { explorer: { [A(0x8888)]: true } });
   await verifyNewLaunches(w.deps);
@@ -124,9 +132,9 @@ test("what the explorer already shows is not submitted to it again", async () =>
 
 test("what is already verified, or was verified by an earlier run, is not submitted again", async () => {
   const w = world([{ coin: A(0x6942), name: A(0xf0), kind: "market-name" }], { sourcify: { [A(0x6942)]: "match" } });
-  await verifyNewLaunches(w.deps);
+  await verifyNewLaunches({ ...w.deps, maxExplorerSubmits: 9 });
   assert.deepEqual(w.posts.map((p) => p.address.toLowerCase()), [A(0xf0)], "only the name needed submitting");
-  const again = await verifyNewLaunches(w.deps);
+  const again = await verifyNewLaunches({ ...w.deps, maxExplorerSubmits: 9 });
   assert.equal(again.checked, 0, "nothing new: nothing asked");
   assert.equal(w.posts.length, 1);
 });
@@ -141,11 +149,11 @@ test("a coin priced in ETH, USDG, a stock or another coin submits the coin only"
 test("a refusal is kept for retry, tried first next run, and does not stall the rest", async () => {
   const launches = [{ coin: A(0x4444), refuse: true }, { coin: A(0x5555) }];
   const w = world(launches);
-  const r = await verifyNewLaunches(w.deps);
+  const r = await verifyNewLaunches({ ...w.deps, maxExplorerSubmits: 9 });
   assert.deepEqual(r.retry.map((a) => a.toLowerCase()), [A(0x4444)]);
   assert.deepEqual(r.verified.map((a) => a.toLowerCase()), [A(0x5555)], "the good one went through");
   launches[0].refuse = false; // whatever was wrong is fixed
-  const r2 = await verifyNewLaunches(w.deps);
+  const r2 = await verifyNewLaunches({ ...w.deps, maxExplorerSubmits: 9 });
   assert.deepEqual(r2.verified.map((a) => a.toLowerCase()), [A(0x4444)]);
   assert.deepEqual(r2.retry, []);
   assert.equal(w.kv.get("verify:retry"), "[]");

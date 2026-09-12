@@ -163,6 +163,7 @@ async function ensureExplorer(d: Deps, address: string, kind: Kind, budget: { le
   budget.left--;
   const line = await explorerSubmit(d.fetch, address, kind, sleep, d.explorerKey);
   d.log?.(`explorer: ${kind} ${address} -> ${line}`);
+  if (line.startsWith("refused 429")) budget.left = 0;
   if (line === "verified") {
     await d.kv.put(doneExplorer(address), "verified");
     return true;
@@ -183,7 +184,10 @@ async function nameKind(chain: Chain, pair: string): Promise<Kind | null> {
  */
 export async function verifyNewLaunches(d: Deps): Promise<{ checked: number; verified: string[]; retry: string[] }> {
   const max = d.maxPerRun ?? 20;
-  const budget = { left: d.maxExplorerSubmits ?? 6 };
+  // the explorer throttles verification submissions hard (a burst of six from one run got one through and five
+  // 429s, and the 429s then outlasted the next run): one per fifteen-minute run drains a backlog in hours and is
+  // more than a launchpad's usual pace; a 429 ends this run's submissions rather than spending the next one's
+  const budget = { left: d.maxExplorerSubmits ?? 1 };
   const count = await d.chain.launchCount();
   const next = Number((await d.kv.get(NEXT)) ?? "0");
   const retry: { address: string; kind: Kind }[] = JSON.parse((await d.kv.get(RETRY)) ?? "[]");
