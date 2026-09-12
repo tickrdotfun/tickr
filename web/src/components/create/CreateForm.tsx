@@ -309,7 +309,9 @@ export function CreateForm() {
       : { creatorShareBps: Number(policy.data[1]) + Number(policy.data[2]), clubShareBps: 0, protocolShareBps: Number(policy.data[3]) }
     : undefined;
   const diyQuotesQ = useTickers();
-  const diyQuotes = diyQuotesQ.data ?? [];
+  // the wrapper names are the old system: once market names are wired, nothing here offers them, so no new coin
+  // can be priced in one — the invented-name path makes a market, and the list and the paste box do not know them
+  const diyQuotes = useMemo(() => (marketNames ? [] : (diyQuotesQ.data ?? [])), [marketNames, diyQuotesQ.data]);
   const selectedDiyQuote = diyQuotes.find((q) => sameAddr(q.quoteToken, diyQuote));
   // one preview serves both paths: the ticker's address is deterministic, so a launch can hash its terms
   // against a ticker that will only be created inside the launch
@@ -1071,7 +1073,6 @@ export function CreateForm() {
   const pickItems: PickItem[] = useMemo(() => {
     const out: PickItem[] = [];
     const coins = coinsQ.data ?? [];
-    const diyQuotes = diyQuotesQ.data ?? [];
     for (const t of chainTokens) {
       out.push({ kind: "market", address: t.address, symbol: t.symbol, name: t.name, logo: t.logo, figure: t.marketCapUsd ? `${compact(t.marketCapUsd)}` : undefined, figureNote: `${compact(t.depthEth)} ETH depth`, tags: t.venues, weight: t.depthEth });
     }
@@ -1085,7 +1086,7 @@ export function CreateForm() {
       out.push({ kind: "name", address: q.quoteToken, symbol: q.ticker, name: "", figure: `${under} ${under === 1 ? "coin" : "coins"}`, figureNote: "priced in it, one USDG each", weight: under });
     }
     return out;
-  }, [coinsQ.data, diyQuotesQ.data, marketRows, chainTokens]);
+  }, [coinsQ.data, diyQuotes, marketRows, chainTokens]);
   const pickLoading = coinsQ.isLoading || diyQuotesQ.isLoading || chainQ.isLoading;
   const selectedPick: Address | undefined = choice !== "token" ? undefined : tab === "coin" ? quoteCoin : tab === "market" ? marketToken : tab === "diy" && diyMode === "existing" ? diyQuote : undefined;
   function pick(it: PickItem) {
@@ -1885,7 +1886,12 @@ export function CreateForm() {
                   </span>
                 )}
               </div>
-              {tickerTaken && (
+              {tickerTaken && marketNames && (
+                <p className="text-[13px] text-signal mt-3">
+                  <span className="num">{tickerUp}</span> is a v1 name, and v1 names do not take new coins. Pick another.
+                </p>
+              )}
+              {tickerTaken && !marketNames && (
                 <p className="text-[13px] text-signal mt-3">
                   <span className="num">{tickerUp}</span> already exists.{" "}
                   <button

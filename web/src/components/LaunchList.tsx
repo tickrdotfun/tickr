@@ -36,21 +36,24 @@ const WINDOW_LABELS: { id: WindowKey; label: string }[] = [
  * means a new configuration added later lands on the right side of the tab without anyone remembering to
  * update a list of ids.
  */
-type VersionKey = "all" | "v2" | "v1";
+type VersionKey = "v2" | "v1";
+/**
+ * v2 is an era, not a fee: everything launched from the first coin on the v2 terms onward, whatever it is priced
+ * in and whatever creator tax it carries (a tax raises the pool fee, so the fee alone called a taxed v2 launch "v1"
+ * and hid it under the deprecated tab). The first v2 launch is the fifteenth in the factory's list.
+ */
+const V2_FIRST_LAUNCH = 15;
 const V2_POOL_FEE = MARKET_BASE_FEE_BPS * 100;
-const versionOf = (r: Row): VersionKey => (r.launch.poolFee === V2_POOL_FEE ? "v2" : "v1");
+const versionOf = (r: Row): VersionKey => (r.launch.index >= V2_FIRST_LAUNCH || r.launch.poolFee === V2_POOL_FEE ? "v2" : "v1");
 
-/** "all" first and by default: a coin launched a minute ago must be on the first screen whatever it is priced in.
- *  The generation tabs narrow it; they are not the door. */
 const VERSIONS: { id: VersionKey; label: string }[] = [
-  { id: "all", label: "all" },
   { id: "v2", label: "v2" },
   { id: "v1", label: "v1 (deprecated)" },
 ];
 
 /** Every coin is live from its first block, so the grid is one list, newest first. */
 export function LaunchList() {
-  const [version, setVersion] = useState<VersionKey>("all");
+  const [version, setVersion] = useState<VersionKey>("v2");
   const [sort, setSort] = useState<SortKey>("mcap");
   const [window, setWindow] = useState<WindowKey>("all");
   const [q, setQ] = useState("");
@@ -62,11 +65,11 @@ export function LaunchList() {
   // point at what is actually there
   const counts = useMemo(() => {
     const all = market.data?.rows ?? [];
-    return { all: all.length, v2: all.filter((r) => versionOf(r) === "v2").length, v1: all.filter((r) => versionOf(r) === "v1").length };
+    return { v2: all.filter((r) => versionOf(r) === "v2").length, v1: all.filter((r) => versionOf(r) === "v1").length };
   }, [market.data]);
 
   const rows = useMemo(() => {
-    const all = (market.data?.rows ?? []).filter((r) => version === "all" || versionOf(r) === version);
+    const all = (market.data?.rows ?? []).filter((r) => versionOf(r) === version);
     const needle = q.trim().toLowerCase();
     const match = (r: Row) =>
       !needle ||
@@ -137,7 +140,7 @@ export function LaunchList() {
       {rows.length === 0 && (
         <div className="mt-8">
           {q ? (
-            <EmptyState title="nothing matches that" body={`${version === "all" ? "nothing" : `nothing in ${version}`} matches. try a shorter word, a ticker, or paste a token address.`} />
+            <EmptyState title="nothing matches that" body={`nothing in ${version} matches. try a shorter word, a ticker, or paste a token address.`} />
           ) : version === "v2" && counts.v1 > 0 ? (
             // the ordinary case on the day v2 opens: nothing here yet, and the older coins are one tab away
             <EmptyState
@@ -169,7 +172,7 @@ export function LaunchList() {
       )}
 
       {rows.length > 0 && (
-        <Section title={version === "all" ? "live" : `live ${version}`} count={rows.length}>
+        <Section title={`live ${version}`} count={rows.length}>
           {rows.map((r) => (
             <LaunchCard key={r.launch.token} r={r} window={window} />
           ))}

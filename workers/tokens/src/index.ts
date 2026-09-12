@@ -13,7 +13,7 @@ import { createPublicClient, encodeFunctionData, erc20Abi, getAddress, http, kec
 /** Addresses arrive from configuration, where the checksum casing may be anything. */
 const addr = (a: string): Address => getAddress(a.toLowerCase());
 
-import { verifyNewLaunches } from "./verify";
+import { verifyNewLaunches, explorerStatus, explorerSubmit, lastExplorerNote } from "./verify";
 import { gasWithHeadroom, afterResolve, acquire, record, clear, release, noteRun, runOutcome, balanceWarning, type Pending, type LockState, type RunHistory, type WorkOutcome } from "./keeper-policy";
 
 type Env = {
@@ -353,7 +353,7 @@ async function verifyLaunches(env: Env): Promise<string> {
   };
   const kv = { get: (k: string) => env.TICKR_KV.get(k), put: (k: string, v: string) => env.TICKR_KV.put(k, v) };
   try {
-    const r = await verifyNewLaunches({ chain, kv, fetch: fetch.bind(globalThis), log: (m) => console.log(m) });
+    const r = await verifyNewLaunches({ chain, kv, fetch: fetch.bind(globalThis), log: (m) => console.log(m), explorerKey: env.BLOCKSCOUT_KEY });
     return `verify: checked ${r.checked}, verified ${r.verified.length}, retry ${r.retry.length}`;
   } catch (e) {
     return `verify: did not run (${(e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 160)})`;
@@ -809,6 +809,15 @@ export default {
     const url = new URL(req.url);
     if (url.pathname === "/verify") {
       if (!env.REFRESH_KEY || req.headers.get("x-refresh-key") !== env.REFRESH_KEY) return new Response("not found", { status: 404 });
+      // `?explorer=<address>&kind=coin` asks the explorer about one address and submits it if needed: a check that
+      // this network can reach the explorer at all, and a way to push one launch through by hand
+      const one = url.searchParams.get("explorer");
+      if (one) {
+        const kind = (url.searchParams.get("kind") ?? "coin") as "coin" | "market-name" | "managed-name";
+        const before = await explorerStatus(fetch.bind(globalThis), one, env.BLOCKSCOUT_KEY);
+        const line = before ? "already verified" : await explorerSubmit(fetch.bind(globalThis), one, kind, (ms: number) => new Promise<void>((r) => setTimeout(r, ms)), env.BLOCKSCOUT_KEY);
+        return new Response(`explorer: ${kind} ${one} -> status ${before} (${lastExplorerNote}) -> ${line}`, { headers: { "content-type": "text/plain" } });
+      }
       return new Response(await verifyLaunches(env), { headers: { "content-type": "text/plain" } });
     }
     if (url.pathname === "/keep") {
