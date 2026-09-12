@@ -1,4 +1,4 @@
-# 13 · The official coin: TICKR, priced in FUN
+# 13 · The official coins: TICKR, priced in FUN, and HOLY on v2
 
 tickr has one coin of its own. Its ticker is **TICKR**, it is priced in **FUN**, and it is the first launch on the platform. It runs on exactly the rules every other launch runs on. This page lists what makes it different, which is only who launched it and when.
 
@@ -69,3 +69,38 @@ Chart sites price a pair by walking from its quote token to a dollar through poo
 ## Its address
 
 TICKR's address ends in `6942`, like every coin launched from the site. The genesis script grinds the salt against the deployed `LaunchDeployer`'s own prediction and refuses to launch if the predicted address does not end that way, so the suffix is checked before anything is sent.
+
+## v2: HOLY, priced in COW
+
+The v2 path has an official coin of its own. Its ticker is **HOLY**, it is priced in **COW**, and it is the first coin launched on v2. It runs on exactly the rules every v2 launch runs on; what sets it apart is who launched it and what happened to its first buy.
+
+| | |
+| --- | --- |
+| Coin | HOLY, name `HOLY`, 18 decimals, `0x49f39Ce9bEBC9047DF7266B55D98e46c84526942` |
+| Pair | COW, a fixed-inventory name: 500,000,000 COW, all of it placed in one locked position against USDG at a dollar, `0xF3b977f5b0c3F03eb265D1b26BF0F8961c1bE4f7` |
+| Supply | 1,000,000,000 |
+| Pool fee | 0.82%. No creator tax: the v2 path carries none |
+| Creator share | to the team treasury, the same wallet that receives TICKR's |
+| Description | `HOLY COW. genesis tickr V2.` |
+| Launched | block 61,243,389 on Robinhood Chain, by the wallet that launched TICKR |
+
+### The first buy
+
+The v2 launcher only launches; it has no buy. So the first buy was the very next transaction, and it landed in block 61,243,420. In the blocks between, every other buyer paid the snipe tax and was capped at 5% of supply, and the launching wallet is exempt from both; a buyer who keeps its coins as claims inside the pool manager is not stopped by either (docs 09).
+
+It bought 71,921,606 HOLY, a little over 7% of supply, and once its receipts were confirmed one transaction split it exactly:
+
+- **5%, 50,000,000 HOLY, to the wallets that held TICKR** at block 57,934,294 (8 September 2026, 19:18 UTC), pro-rata: each wallet's share of the 5% is its share of the qualifying TICKR, 0.211868 HOLY per TICKR. 79 wallets. Not counted: pools, the burn address, protocol contracts, the team treasury, one contract that is not a wallet, and anything under 1,000 TICKR. The snapshot was rebuilt from the chain's own transfer logs, and every one of the 1,000,000,000 TICKR is accounted for in it. Nothing to claim: each wallet was sent its HOLY directly.
+- **2%, 20,000,000 HOLY, is the team's**, all of it to the team treasury.
+- **798,912 HOLY to one early holder** who sold before the snapshot, sent with the airdrop. It comes out of what the buy brought in past the 7% — the part that is otherwise burned — so it is taken from neither the holders' 5% nor the team's 2%.
+- **1,122,695 HOLY burned**: everything the buys brought in past the 7%, less the early holder's share above, so the figures here are exact rather than approximately right.
+
+Every transfer is on the explorer: [HOLY's token transfers](https://robinhoodchain.blockscout.com/token/0x49f39Ce9bEBC9047DF7266B55D98e46c84526942?tab=token_transfers).
+
+| Step | Transaction |
+| --- | --- |
+| Launch | `0x45da1ca83f71d42b6f854f08535355bcbc24af55156013a65af23f4dcbf44223` |
+| First buy | `0x2a44fde8ee41b3a5909bcd089eb39cc6a44f1522eae4aedb8d7ab51c69ce5d2a` |
+| Listing buy, COW | `0xffbecee5237fc018855b659178349e9fe18e95bc7f3e115c3f3ec9869e8a2de0` |
+| The split: the team's 2% to the treasury and the excess burned, in one transaction | `0xc6d728de3b79d80444598622c02aaa9174f5504ce463f915ffbe3d26c661e4dd` |
+| The airdrop: every wallet on the list, in one transaction | `0x50a32633ce36db424b9a57dd6d222dc2bac95991c9bda3d070b4aa2a44c4bb99` |

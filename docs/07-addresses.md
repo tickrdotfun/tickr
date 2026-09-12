@@ -85,3 +85,13 @@ it is not. Find them from `TokenLaunched`, `TickerCreated` and `NameCreated` eve
 `Factory.getLaunchedToken(token)`, `TickerLauncher.isTicker(addr)` and `QuoteRegistry.kindOf(addr)`.
 
 `BuybackTreasury` is deployed before the factory, because the factory names it as the protocol fee recipient and that address is frozen into every launch from the first one on. It has no owner, so it is not in the handover below. The deploy runs in a fixed order: `Deploy.s.sol`, then `RegisterStockTokens.s.sol`, then `Genesis.s.sol`, all signed by the deployer while it is still the owner; only then does the owner wallet call `acceptOwnership()` on the six owned contracts (`Factory`, `AnchorRegistry`, `BuybackVault`, `CoinQuoteLauncher`, `StockQuoteLauncher`, `MarketQuoteLauncher`). Genesis opens launches and removes the deployer's own pass. Start `getLogs` from `startBlock`. The owner is the deployer key unless `OWNER` was set, in which case ownership of `Factory`, `AnchorRegistry`, `BuybackVault`, `CoinQuoteLauncher`, `StockQuoteLauncher` and `MarketQuoteLauncher` is offered to it (`TickerLauncher` has no owner) and must be accepted with `acceptOwnership()` on each.
+
+## The v2 official coin
+
+| | |
+|---|---|
+| HOLY | `0x49f39Ce9bEBC9047DF7266B55D98e46c84526942` |
+| COW, the name it is priced in | `0xF3b977f5b0c3F03eb265D1b26BF0F8961c1bE4f7` |
+| HOLY/COW pool id | `0xaf7ab01a4776a95c24e38f4935a1f7d0b9687adb1c57c81ff7a4e84a58e988ef` |
+
+COW is a fixed-inventory name, made by the `MarketTickerLauncher` above in the same transaction as HOLY.

@@ -437,7 +437,7 @@ test("a request that failed is not forge saying it sent nothing: the stage is he
     },
   });
   c.forgeOutput = "Error: error sending request for url (https://rpc.example)\nCaused by: operation timed out";
-  await stops(c.runner().genesis(), /left no transaction behind, and forge did not say it stopped before sending/);
+  await stops(c.runner().genesis(), /left no identifiable transaction behind[\s\S]*forge did not say it stopped before sending/);
   assert.equal(c.journal.stages.listCoin.status, "stopped");
   assert.equal(c.journal.stages.listCoin.noSendEvidence, undefined, "nothing attested, so nothing is claimed");
   for (const _ of [1, 2]) await stops(c.runner().genesis(), /stopped earlier/);
@@ -474,7 +474,7 @@ test("forge's own words after an accepted transaction are not an attestation: th
     },
   });
   c.forgeOutput = CAPTURED;
-  await stops(c.runner().genesis(), /left no transaction behind, and forge did not say it stopped before sending/);
+  await stops(c.runner().genesis(), /left no identifiable transaction behind[\s\S]*forge did not say it stopped before sending/);
   assert.equal(c.journal.stages.listCoin.status, "stopped");
   for (const _ of [1, 2]) await stops(c.runner().genesis(), /stopped earlier/);
   assert.equal(c.calls.filter((x) => x === "listCoin").length, 1, "no second purchase");
@@ -489,7 +489,7 @@ test("forge's own words after an accepted transaction are not an attestation: th
 test("a hash from another stage is refused, and clears nothing", async () => {
   const c = world({ sends: { listCoin: () => {} } });
   c.forgeOutput = "";
-  await stops(c.runner().genesis(), /left no transaction behind/);
+  await stops(c.runner().genesis(), /left no identifiable transaction behind/);
   const nameHash = c.journal.stages.listName.txs[0].hash; // the stage before it, a real transaction of ours
   await stops(c.runner().resolve("listCoin", nameHash), /that is a transaction of another stage; nothing was changed/);
   assert.equal(c.journal.stages.listCoin.status, "stopped", "the stage is still there");
@@ -505,7 +505,7 @@ test("a hash from another stage is refused, and clears nothing", async () => {
 test("a hash that turns up while a stage is held blocks `resolve`, whatever the stage was flagged with", async () => {
   const c = world({ sends: { listCoin: () => {} } });
   c.forgeOutput = ""; // ran, said nothing, left nothing
-  await stops(c.runner().genesis(), /left no transaction behind/);
+  await stops(c.runner().genesis(), /left no identifiable transaction behind/);
   assert.equal(c.journal.stages.listCoin.reviewRequired, true);
 
   // the artifact turns up late, naming a transaction of ours that has no receipt yet
@@ -546,7 +546,7 @@ test("a stage that ran and left nothing behind, with no word from forge, is held
   let ran = 0;
   const c = world({ sends: { listCoin: () => (ran++ === 0 ? undefined : c.ok.listCoin()) } }); // the first attempt says nothing about why it sent nothing
   c.forgeOutput = "";
-  await stops(c.runner().genesis(), /left no transaction behind, and forge did not say it stopped before sending/);
+  await stops(c.runner().genesis(), /left no identifiable transaction behind[\s\S]*forge did not say it stopped before sending/);
   assert.equal(c.journal.stages.listCoin.status, "stopped");
   assert.equal(c.journal.stages.listCoin.reviewRequired, true);
   for (const _ of [1, 2]) await stops(c.runner().genesis(), /stopped earlier/);

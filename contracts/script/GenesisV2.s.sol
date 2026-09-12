@@ -224,6 +224,16 @@ contract GenesisV2 is Script {
         _listingBuy(c, pl, _route(c, pl.name, pl.coin, 3), pl.coinListingEth);
     }
 
+    /// @notice The coin's listing buy on its own, for when it did not land with the stages and the wallet has since
+    /// been emptied by the airdrop. Nothing depends on it: it is the mark chart sites read a coin's first price from.
+    /// Same route, same wallet, a fresh quote, and the tolerance of `V2_LISTING_SLIPPAGE_BPS` — which a coin already
+    /// being traded needs, because the price moves between the quote and the send.
+    function relistCoin() external {
+        (Ctx memory c, Plan memory pl,) = _setup();
+        _requireLaunched(c, pl);
+        _listingBuy(c, pl, _route(c, pl.name, pl.coin, 3), vm.envOr("V2_LISTING_COIN_ETH", uint256(0.001 ether)));
+    }
+
     /// @notice Stage 4: the split, from the balance the chain shows now, in one transaction that moves coins.
     function split() external returns (uint256 toTreasury, uint256 burned) {
         (Ctx memory c, Plan memory pl,) = _setup();
@@ -474,7 +484,14 @@ contract GenesisV2 is Script {
     /// the broadcast, one percent under.
     function _listingBuy(Ctx memory c, Plan memory pl, PoolKey[] memory route, uint256 eth) internal {
         require(pl.me.balance >= eth + GAS_ALLOWANCE, "genesis v2: the wallet cannot pay for the listing buy");
-        uint256 minOut = UniversalRouterBuy.minimum(UniversalRouterBuy.quote(c.quoter, route, eth));
+        // the listing buys are a mark for the chart sites, not a position: a few dollars each. Their tolerance is
+        // tunable because a coin that is already being traded moves between the quote and the send, and a listing
+        // buy that reverts on a tenth of a percent is worth nothing to anybody. V2_LISTING_SLIPPAGE_BPS, default 1%
+        uint256 quoted = UniversalRouterBuy.quote(c.quoter, route, eth);
+        uint256 bps = vm.envOr("V2_LISTING_SLIPPAGE_BPS", uint256(100));
+        require(bps <= 2_000, "genesis v2: the listing tolerance must stay within 20%");
+        uint256 minOut = (quoted * (10_000 - bps)) / 10_000;
+        require(minOut > 0, "genesis v2: the listing quote is zero");
         vm.startBroadcast(c.pk);
         UniversalRouterBuy.buy(c.router, pl.me, route, eth, minOut, block.timestamp + 30 minutes);
         vm.stopBroadcast();

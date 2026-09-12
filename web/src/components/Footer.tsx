@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SOCIALS } from "@/lib/constants";
 import { TickrIcon } from "./Mark";
 import { RainbowRule } from "./RainbowRule";
+import { XIcon } from "./XIcon";
 
 export function Footer() {
   return (
@@ -9,11 +10,12 @@ export function Footer() {
       <div className="measure pt-8">
         <RainbowRule width="full" />
       </div>
-      <div className="measure py-8 flex flex-col sm:flex-row gap-4 sm:items-center text-muted">
-        <span className="pt-2">
+      {/* one line at every width: the mark on the left, everything else pushed to the right */}
+      <div className="measure py-8 flex flex-row items-center gap-3 sm:gap-4 text-muted">
+        <span className="inline-flex items-center">
           <TickrIcon size={20} />
         </span>
-        <span className="sm:ml-auto flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px]">
+        <span className="ml-auto flex flex-nowrap items-center gap-x-4 sm:gap-x-6 text-[14px]">
           {/* the chain, as its mark rather than a line of text */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -23,8 +25,16 @@ export function Footer() {
             className="footer-chain-mark"
           />
           <Link href="/docs">docs</Link>
-          <a href={SOCIALS.x.href} target="_blank" rel="noreferrer" title={SOCIALS.x.handle}>
-            {SOCIALS.x.label}
+          {/* X as its own mark, the same one the header uses, rather than the letter */}
+          <a
+            href={SOCIALS.x.href}
+            target="_blank"
+            rel="noreferrer"
+            title={SOCIALS.x.handle}
+            aria-label={`tickr on X, ${SOCIALS.x.handle}`}
+            className="inline-flex no-underline hover:no-underline"
+          >
+            <XIcon size={16} />
           </a>
           {/* the code, as GitHub's own mark; last but one, so it sits near the right end of the row */}
           <a href="https://github.com/tickrdotfun/tickr" target="_blank" rel="noreferrer" title="the code on GitHub" aria-label="the code on GitHub" className="inline-flex">

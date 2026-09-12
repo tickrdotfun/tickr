@@ -587,7 +587,8 @@
     border-radius: 18px;
     overflow: hidden;
   }
-  @media (min-width: 720px) { .stats-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  /* four figures: two by two on a phone, one row on a desktop */
+  @media (min-width: 720px) { .stats-row { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   .stat-cell { background: var(--tickr-ink); padding: 22px 22px 24px; position: relative; }
   /* The panel is glass and the cells are the tint on top of it, so the blur is computed once for the whole
      card rather than six times. The 1px grid gaps still draw the dividers: the row's own background is what

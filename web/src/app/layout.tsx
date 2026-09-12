@@ -30,11 +30,32 @@ const instrumentSans = Instrument_Sans({
   display: "swap",
 });
 
+const DESCRIPTION =
+  "Pair anything on Robinhood Chain. Launch a coin priced against ETH, USDG, a Stock Token, another coin, or a ticker you invent.";
+/** The share card, drawn at /brand/og and captured to public/og.png. Absolute through metadataBase, because chat
+ *  clients and X fetch it from outside the page. */
+const OG_IMAGE = { url: "/og.png", width: 1682, height: 884, alt: "tickr: pair anything on Robinhood Chain" };
+
 export const metadata: Metadata = {
+  metadataBase: new URL("https://tickrfun.gg"),
   title: "tickr",
-  description: "Pair anything on Robinhood Chain. Launch a coin priced against ETH, USDG, a Stock Token, another coin, or a ticker you invent.",
-  openGraph: { title: "tickr: pair anything on Robinhood Chain", siteName: "tickr" },
-  twitter: { card: "summary_large_image", site: "@tickrdotfun_rh", creator: "@tickrdotfun_rh" },
+  description: DESCRIPTION,
+  openGraph: {
+    title: "tickr: pair anything on Robinhood Chain",
+    description: DESCRIPTION,
+    siteName: "tickr",
+    url: "https://tickrfun.gg",
+    type: "website",
+    images: [OG_IMAGE],
+  },
+  twitter: {
+    card: "summary_large_image",
+    site: "@tickrdotfun_rh",
+    creator: "@tickrdotfun_rh",
+    title: "tickr: pair anything on Robinhood Chain",
+    description: DESCRIPTION,
+    images: [OG_IMAGE],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

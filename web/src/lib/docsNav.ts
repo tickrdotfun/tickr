@@ -17,7 +17,7 @@ export const DOC_GROUPS: DocGroup[] = [
       { slug: "curve-math", file: "03-curve-math.md", title: "price and market cap", blurb: "the locked position as a constant product curve, opening market caps, fees in the math." },
       { slug: "fees", file: "06-fees.md", title: "fees", blurb: "launch fee, the pool fee, creator tax, the 60/10/30 split, collecting, burning, claims." },
       { slug: "liquidity-lock", file: "14-liquidity-lock.md", title: "liquidity lock", blurb: "what the locker holds, what it can do, what it cannot, and how to check it yourself." },
-      { slug: "official-coin", file: "13-official-coin.md", title: "the official coin", blurb: "TICKR, priced in FUN. the first launch, on the same rules as every launch, and how it was made first." },
+      { slug: "official-coin", file: "13-official-coin.md", title: "the official coins", blurb: "TICKR, priced in FUN, and HOLY, priced in COW: the first launch of each version, on the same rules as every launch." },
       { slug: "risks", file: "09-risks.md", title: "risks", blurb: "what can go wrong, the exact list of owner powers, unaudited status." },
       { slug: "spec", file: "SPEC.md", title: "full specification", blurb: "the build spec, in the order the protocol is best understood." },
     ],

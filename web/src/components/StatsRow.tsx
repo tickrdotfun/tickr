@@ -9,9 +9,8 @@ export function StatsRow() {
   const d = m.data;
   const items: { k: string; v: string; note?: string; cls: string }[] = [
     { k: "tickers invented", v: d ? String(d.tickersInvented) : "-", cls: "sw-accent" },
-    { k: "coins launched", v: d ? String(d.rows.length) : "-", cls: "sw-signal" },
     {
-      k: "market cap",
+      k: "total market cap",
       v: d ? fmtUsd(d.totalMarketCapUsd) : "-",
       note: d && d.pricedShare < 1 ? "of priced launches" : undefined,
       cls: "sw-orange",
@@ -27,12 +26,6 @@ export function StatsRow() {
       v: d ? (d.partial ? "-" : fmtUsd(d.paidToCreatorsUsd)) : "-",
       note: d ? (d.partial ? "history unavailable right now" : d.pricedShare < 1 ? "of priced launches" : undefined) : undefined,
       cls: "sw-green",
-    },
-    {
-      k: "tickr burned",
-      v: d && d.officialBurnedPct !== undefined ? `${d.officialBurnedPct.toFixed(2)}%` : "-",
-      note: undefined,
-      cls: "sw-pink",
     },
   ];
   return (

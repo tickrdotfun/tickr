@@ -190,8 +190,15 @@ export function createRunner({ rpc, forge, forgeJson, broadcast, record, journal
   async function recorded(spec, s) {
     // the journal is the record of what this stage ever signed: forge's file can be replaced or lost, and a hash it
     // once showed is knowledge we keep. Both sources together, never one instead of the other
-    const seen = new Map((s.known ?? []).map((t) => [lower(t.hash), t]));
-    for (const t of broadcast(spec)) if (!seen.has(lower(t.hash))) seen.set(lower(t.hash), { hash: t.hash, nonce: t.nonce });
+    const isHash = (h) => typeof h === "string" && /^0x[0-9a-fA-F]{64}$/.test(h);
+    // forge writes its broadcast file before it has the answers, so an entry can carry no hash at all: a transaction
+    // it prepared and never got a hash back for. There is nothing to ask the chain about, so these are kept as the
+    // evidence they are — the stage still ends up held for review, because nothing identifiable landed
+    const unnamed = broadcast(spec).filter((t) => !isHash(t.hash) && t.nonce >= s.nonceBefore);
+    if (unnamed.length > 0) s.unnamed = unnamed.map((t) => ({ nonce: t.nonce }));
+    else delete s.unnamed;
+    const seen = new Map((s.known ?? []).filter((t) => isHash(t.hash)).map((t) => [lower(t.hash), t]));
+    for (const t of broadcast(spec)) if (isHash(t.hash) && !seen.has(lower(t.hash))) seen.set(lower(t.hash), { hash: t.hash, nonce: t.nonce });
     const out = [];
     for (const t of seen.values()) {
       const tx = await rpc("eth_getTransactionByHash", [t.hash]);
@@ -241,7 +248,8 @@ export function createRunner({ rpc, forge, forgeJson, broadcast, record, journal
         outcome = "noRecord";
         return halt(
           id,
-          `it ran and left no transaction behind, and forge did not say it stopped before sending. nothing is sent again on the assumption that nothing was. ` +
+          `it ran and left no identifiable transaction behind${s.unnamed ? ` (forge recorded nonce ${s.unnamed.map((u) => u.nonce).join(", ")} without a hash)` : ""}, and forge did not say it stopped before sending. ` +
+            `nothing is sent again on the assumption that nothing was. ` +
             `check the explorer for a transaction from this wallet at nonce ${s.nonceBefore}: if there is one, run again so it can be read; ` +
             `if there is none, say so with "node script/genesis-v2.mjs resolve ${id}".`,
           { reviewRequired: true },
@@ -522,6 +530,34 @@ export function createRunner({ rpc, forge, forgeJson, broadcast, record, journal
       }
     },
 
+    /**
+     * "This stage is not going to happen, and the run may go on without it." Only for a stage that sends nothing
+     * anyone depends on — the listing buys are a mark for the chart sites, not part of the split — and only after the
+     * chain has been looked at again, so a transaction that did land cannot be skipped over.
+     */
+    async skip(id) {
+      await setup();
+      if (!["listName", "listCoin"].includes(id)) stop(`${id} cannot be skipped: only the listing buys can.`);
+      const s = j.stages[id];
+      if (s?.status === "confirmed") stop(`${id} is confirmed; there is nothing to skip.`);
+      if (s) {
+        log(`== ${id}: looking again before it is skipped`);
+        s.status = "sending";
+        save();
+        try {
+          await reconcile(id);
+          log(`== ${id}: it had landed after all; nothing was skipped.`);
+          return;
+        } catch (e) {
+          if (!(e instanceof Stop)) throw e;
+          if (outcome !== "noRecord") throw e;
+        }
+      }
+      j.stages[id] = { status: "confirmed", skipped: true, at: new Date().toISOString(), txs: [], note: "skipped by the operator: nothing landed, and nothing downstream needs it" };
+      save();
+      log(`== ${id}: skipped on your word. run the genesis to go on.`);
+    },
+
     async airdrop() {
       await setup();
       if (j.stages.verify?.status !== "confirmed") stop("the genesis is not verified yet: run the genesis first.");
@@ -603,12 +639,12 @@ async function main() {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   });
   const cmd = process.argv[2] ?? "genesis";
-  if (!["genesis", "airdrop", "buy", "resolve", "status"].includes(cmd)) {
-    console.error("usage: node script/genesis-v2.mjs [genesis|buy|resolve <stage>|airdrop|status]");
+  if (!["genesis", "airdrop", "buy", "resolve", "skip", "status"].includes(cmd)) {
+    console.error("usage: node script/genesis-v2.mjs [genesis|buy|resolve <stage>|skip <stage>|airdrop|status]");
     process.exit(2);
   }
-  if (cmd === "resolve" && !process.argv[3]) {
-    console.error("usage: node script/genesis-v2.mjs resolve <stage> [hash]");
+  if ((cmd === "resolve" || cmd === "skip") && !process.argv[3]) {
+    console.error(`usage: node script/genesis-v2.mjs ${cmd} <stage>`);
     process.exit(2);
   }
   try {
