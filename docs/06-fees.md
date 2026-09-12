@@ -47,12 +47,13 @@ not in it. So a coin launched under a fixed-inventory name freezes at **60% crea
 1000 bps club share folds into the creator's 5000. Nothing was configured to make that happen; it is what
 `Factory._launch` already did for any pair without a club.
 
-Two treasuries are now in the records, and which one a coin pays is decided once, at its launch, and never again.
+Three treasuries are now in the records, and which one a coin pays is decided once, at its launch, and never again.
 
 | launched | protocol fee recipient | what it does with a name it collects |
 | --- | --- | --- |
 | before the market release | `BuybackTreasury` `0x60C1276f...` | mints and redeems a redeemable name one for one; a name it cannot convert is forwarded to the team whole |
 | from the market release on | `BuybackTreasuryV2` `0x8dcaBBf0...` | converts a fixed-inventory name through that name's own market, so the buyback share is not lost to the team |
+| from 13 September 2026 on | `BuybackTreasuryHoly` `0x29d6427d...` | the same, and what it buys and burns is HOLY, in COW's market and then HOLY's pool. It is also HOLY's creator-fee recipient, so HOLY's own 60% creator share lands here: the HOLY part is burned as it is (`burnCoin`), the COW part becomes dollars and buys HOLY |
 
 That was the reason for the second treasury. The first one has no way to value a name that is not a dollar, so
 every fixed-inventory name's fees would have gone to the team in full and the burn share of them would have been
@@ -69,7 +70,7 @@ revenue.
 
 `FeesCollected` reports every figure of a collection. `LaunchLocker.pendingFees(token)` shows what is owed before one.
 
-The protocol's 40% is paid to the `BuybackTreasury`, not to a wallet: half of it buys and burns TICKR, half funds the team. The half and half split between buybacks and the team applies to revenue the treasury can convert to USDG, which is USDG, ETH and redeemable names; fees paid in an asset it cannot convert at par, a Stock Token or a coin used as a quote, are forwarded to the team in full; and the protocol's and the club's sell-side shares, paid in the launched coin, are burned by the locker directly and never reach the treasury. See [13 the official coin](./13-official-coin.md). Inside a coin's first five seconds, a buy pays a snipe tax on the coin side too, burned to the dead address like every other coin-side fee; see [02 lifecycle](./02-lifecycle.md). The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
+The protocol's 40% is paid to a treasury, not to a wallet: half of it buys and burns the treasury's coin (TICKR for the first two treasuries, HOLY for the third), half funds the team. The half and half split between buybacks and the team applies to revenue the treasury can convert to USDG, which is USDG, ETH and redeemable names; fees paid in an asset it cannot convert at par, a Stock Token or a coin used as a quote, are forwarded to the team in full; and the protocol's and the club's sell-side shares, paid in the launched coin, are burned by the locker directly and never reach the treasury. See [13 the official coin](./13-official-coin.md). Inside a coin's first five seconds, a buy pays a snipe tax on the coin side too, burned to the dead address like every other coin-side fee; see [02 lifecycle](./02-lifecycle.md). The club a launch pays is frozen with its split: `FeePolicy.club` is written at launch and the locker pays that address and no other. A later change of the factory's club, or a club that is not a contract, touches no existing launch; a slice with nobody to book it goes to the protocol.
 
 ## Who collects
 

@@ -24,6 +24,13 @@ type Env = {
   KEEPER_TREASURY?: string;
   KEEPER_COIN?: string;
   KEEPER_NAME?: string;
+  /** the v2 coin the keeper also serves: its pool's fees, its name converted by the v2 treasury, that treasury's buys */
+  KEEPER_V2_COIN?: string;
+  KEEPER_V2_NAME?: string;
+  KEEPER_V2_TREASURY?: string;
+  KEEPER_ESCROW?: string;
+  /** the HOLY treasury: the v2 coin's own buy-and-burn, fed by its creator share and by future launches' protocol share */
+  KEEPER_HOLY_TREASURY?: string;
   PIN_COUNTER: DurableObjectNamespace;
   BUDGET_KEY?: string;
   RPC_URL: string;
@@ -509,6 +516,28 @@ const TREASURY_ABI = [{ type: "function", name: "collect", stateMutability: "non
   { type: "function", name: "buy", stateMutability: "nonpayable", inputs: [], outputs: [] },
   { type: "function", name: "nextBuyAt", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "earmarkedUsdg", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] }] as const;
+/** the v2 treasury: a market name converts under terms the caller offers, which the policy floor bounds from below */
+const TERMS = { type: "tuple", components: [{ name: "minOutPerInX96", type: "uint256" }, { name: "deadline", type: "uint256" }] } as const;
+const TREASURY_V2_ABI = [
+  { type: "function", name: "collect", stateMutability: "nonpayable", inputs: [{ name: "tokens", type: "address[]" }, { ...TERMS, name: "terms", type: "tuple[]" }], outputs: [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }] },
+  { type: "function", name: "buy", stateMutability: "nonpayable", inputs: [{ ...TERMS, name: "offered" }], outputs: [{ type: "uint256" }, { type: "uint256" }] },
+  { type: "function", name: "nextBuyAt", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "earmarkedUsdg", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "defaultMinRateToCounterX96", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "minRateToCounterX96", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "defaultMinRateFromCounterX96", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "minRateFromCounterX96", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+] as const;
+const TREASURY_HOLY_ABI = [
+  ...TREASURY_V2_ABI,
+  { type: "function", name: "burnCoin", stateMutability: "nonpayable", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "pendingCoin", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+] as const;
+const ESCROW_ABI = [
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "balanceOfToken", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
+] as const;
+const ERC20_BALANCE_ABI = [{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
 /**
  * The transaction from `who` that used `nonce`, and what it did.
  *
@@ -774,9 +803,80 @@ async function keep(env: Env): Promise<string[]> {
   ]);
   if (earmarked > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next) await step("treasury.buy", { address: treasury, abi: TREASURY_ABI, functionName: "buy" });
   else out.push(`treasury.buy: waiting (earmarked ${earmarked}, next at ${next})`);
+
+  // 4. the v2 coin, the same three steps. Its name is a market, not a wrapped dollar, so the v2 treasury converts it
+  // under terms: the offered rate floor is the treasury's own policy floor (so the policy decides, not this code,
+  // and a name trading under it simply waits), the deadline sits inside the window the treasury allows.
+  if (env.KEEPER_V2_COIN && env.KEEPER_V2_NAME && env.KEEPER_V2_TREASURY && env.KEEPER_ESCROW) {
+    const coin2 = env.KEEPER_V2_COIN as `0x${string}`, name2 = env.KEEPER_V2_NAME as `0x${string}`;
+    const treasury2 = env.KEEPER_V2_TREASURY as `0x${string}`, escrow = env.KEEPER_ESCROW as `0x${string}`;
+    const pending2 = await pub.readContract({ address: locker, abi: LOCKER_ABI, functionName: "pendingFees", args: [coin2] }).catch(() => [0n, 0n] as const);
+    if (pending2[0] > 0n || pending2[1] > 0n) await step("collectFees(v2)", { address: locker, abi: LOCKER_ABI, functionName: "collectFees", args: [coin2] });
+    else out.push("collectFees(v2): nothing pending");
+    const terms = async () => {
+      const set = await pub.readContract({ address: treasury2, abi: TREASURY_V2_ABI, functionName: "minRateToCounterX96", args: [name2] }).catch(() => 0n);
+      const floor = set > 0n ? set : await pub.readContract({ address: treasury2, abi: TREASURY_V2_ABI, functionName: "defaultMinRateToCounterX96" }).catch(() => 0n);
+      return { minOutPerInX96: floor, deadline: BigInt(Math.floor(Date.now() / 1000) + 600) };
+    };
+    // collect only when the escrow or the treasury holds something: a run that converts nothing has no reason to pay for the call
+    const [escEth, escName, heldName] = await Promise.all([
+      pub.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "balanceOf", args: [treasury2] }).catch(() => 0n),
+      pub.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "balanceOfToken", args: [treasury2, name2] }).catch(() => 0n),
+      pub.readContract({ address: name2, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [treasury2] }).catch(() => 0n),
+    ]);
+    if (escEth > 0n || escName > 0n || heldName > 0n) {
+      const t = await terms();
+      if (t.minOutPerInX96 === 0n) out.push("treasury2.collect: not attempted, no rate floor could be read");
+      else await step("treasury2.collect", { address: treasury2, abi: TREASURY_V2_ABI, functionName: "collect", args: [[name2], [t]] });
+    } else out.push("treasury2.collect: nothing to collect");
+    const [next2, earmarked2] = await Promise.all([
+      pub.readContract({ address: treasury2, abi: TREASURY_V2_ABI, functionName: "nextBuyAt" }).catch(() => 0n),
+      pub.readContract({ address: treasury2, abi: TREASURY_V2_ABI, functionName: "earmarkedUsdg" }).catch(() => 0n),
+    ]);
+    if (earmarked2 > 0n && BigInt(Math.floor(Date.now() / 1000)) >= next2) {
+      const t = await terms();
+      if (t.minOutPerInX96 === 0n) out.push("treasury2.buy: not attempted, no rate floor could be read");
+      else await step("treasury2.buy", { address: treasury2, abi: TREASURY_V2_ABI, functionName: "buy", args: [t] });
+    } else out.push(`treasury2.buy: waiting (earmarked ${earmarked2}, next at ${next2})`);
+
+    // 5. the HOLY treasury: the coin's creator share arrives here as HOLY (burned as is) and as COW (converted and
+    // spent on HOLY, which is burned). Same terms, same gating, plus the burn of what is already the coin.
+    if (env.KEEPER_HOLY_TREASURY) {
+      const holyT = env.KEEPER_HOLY_TREASURY as `0x${string}`;
+      const pendingCoin = await pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "pendingCoin" }).catch(() => 0n);
+      if (pendingCoin > 0n) await step("holy.burnCoin", { address: holyT, abi: TREASURY_HOLY_ABI, functionName: "burnCoin" });
+      else out.push("holy.burnCoin: nothing to burn");
+      const termsH = async () => {
+        const set = await pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "minRateToCounterX96", args: [name2] }).catch(() => 0n);
+        const floor = set > 0n ? set : await pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "defaultMinRateToCounterX96" }).catch(() => 0n);
+        return { minOutPerInX96: floor, deadline: BigInt(Math.floor(Date.now() / 1000) + 600) };
+      };
+      const [hEth, hName, hHeld] = await Promise.all([
+        pub.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "balanceOf", args: [holyT] }).catch(() => 0n),
+        pub.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "balanceOfToken", args: [holyT, name2] }).catch(() => 0n),
+        pub.readContract({ address: name2, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [holyT] }).catch(() => 0n),
+      ]);
+      if (hEth > 0n || hName > 0n || hHeld > 0n) {
+        const t = await termsH();
+        if (t.minOutPerInX96 === 0n) out.push("holy.collect: not attempted, no rate floor could be read");
+        else await step("holy.collect", { address: holyT, abi: TREASURY_HOLY_ABI, functionName: "collect", args: [[name2], [t]] });
+      } else out.push("holy.collect: nothing to collect");
+      const [nextH, earmarkedH] = await Promise.all([
+        pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "nextBuyAt" }).catch(() => 0n),
+        pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "earmarkedUsdg" }).catch(() => 0n),
+      ]);
+      if (earmarkedH > 0n && BigInt(Math.floor(Date.now() / 1000)) >= nextH) {
+        // buying the name with dollars is the other direction, so it is the other floor
+        const set = await pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "minRateFromCounterX96", args: [name2] }).catch(() => 0n);
+        const floor = set > 0n ? set : await pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "defaultMinRateFromCounterX96" }).catch(() => 0n);
+        if (floor === 0n) out.push("holy.buy: not attempted, no rate floor could be read");
+        else await step("holy.buy", { address: holyT, abi: TREASURY_HOLY_ABI, functionName: "buy", args: [{ minOutPerInX96: floor, deadline: BigInt(Math.floor(Date.now() / 1000) + 600) }] });
+      } else out.push(`holy.buy: waiting (earmarked ${earmarkedH}, next at ${nextH})`);
+    }
+  }
   // a balance that cannot cover a cycle is worth saying before it is worth failing over
   const bal = await pub.getBalance({ address: account.address }).catch(() => 0n);
-  const NEED_WEI = 460_000_000_000_000n; // one cycle's limits at twice the base fee, measured on a fork
+  const NEED_WEI = 920_000_000_000_000n; // one cycle's limits at twice the base fee, measured on a fork, doubled for the v2 steps
   const low = balanceWarning(bal, NEED_WEI);
   if (low) {
     out.push(low);

@@ -38,6 +38,10 @@ Anyone may then call `buy()`, at most once every ten minutes. It spends at most 
 
 the burn share starts at 50%, can be raised by the owner after a three-day delay, and can never be lowered. `buybackShareBps` is the share in force; `proposeBuybackShare(bps)` is the factory owner's proposal, upward only and at most all of it, and `applyBuybackShare()` puts it in force once `SHARE_DELAY` has passed, by anyone. A newer proposal replaces a pending one and the delay starts again. Burning takes coins out of circulation. It does not guarantee a higher price.
 
+### HOLY's own buybacks
+
+From 13 September 2026 there is a third treasury, `BuybackTreasuryHoly` `0x29d6427dc78b9B405DFAA118A9D634cE4CEf73f4`, built from the second one with two differences: the coin it buys and burns is HOLY, bought with dollars through COW's market and then HOLY's own pool; and it can burn HOLY it receives directly (`burnCoin()`, anyone may call). It has two incomes. It is HOLY's creator-fee recipient, so the creator's 60% of every HOLY pool fee comes to it: the HOLY part is burned as it is, the COW part becomes dollars, half to the team wallet and half spent on HOLY. And it is the factory's default protocol fee recipient, so every coin launched after that date pays its 40% protocol share here rather than to the TICKR treasury. HOLY's own 40% protocol share was frozen at its launch to `BuybackTreasuryV2` and still buys and burns TICKR; that cannot be moved. The same rules as the other treasuries: no owner, no withdrawal, buys at most once every ten minutes and at most 5% of the earmark, a burn share that starts at half and only ratchets up.
+
 ## The FUN club
 
 FUN is a redeemable name, so it has a ticker club like any other, and TICKR is in it.
