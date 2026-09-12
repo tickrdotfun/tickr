@@ -49,4 +49,6 @@ verify ZapRouter src/ZapRouter.sol:ZapRouter zapRouter
 # after genesis: the official name and the official coin; every later coin and name shares their bytecode
 verify FUN src/ManagedTickerToken.sol:ManagedTickerToken genesisTicker
 verify TICKR src/Token.sol:Token genesisToken
+verify COW src/market/MarketTickerToken.sol:MarketTickerToken genesisV2Name
+verify HOLY src/Token.sol:Token genesisV2Token
 echo "done: anything marked FAIL needs a look on $HOST"

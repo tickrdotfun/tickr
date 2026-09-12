@@ -13,6 +13,7 @@ import { createPublicClient, encodeFunctionData, erc20Abi, getAddress, http, kec
 /** Addresses arrive from configuration, where the checksum casing may be anything. */
 const addr = (a: string): Address => getAddress(a.toLowerCase());
 
+import { verifyNewLaunches } from "./verify";
 import { gasWithHeadroom, afterResolve, acquire, record, clear, release, noteRun, runOutcome, balanceWarning, type Pending, type LockState, type RunHistory, type WorkOutcome } from "./keeper-policy";
 
 type Env = {
@@ -33,6 +34,9 @@ type Env = {
   POOL_MANAGER: string;
   MULTICALL3: string;
   MARKET_QUOTE_LAUNCHER: string;
+  FACTORY?: string;
+  MARKET_DEPLOYER?: string;
+  TICKER_LAUNCHER?: string;
   BLOCKSCOUT_KEY?: string;
   REFRESH_KEY?: string;
 };
@@ -312,6 +316,44 @@ async function build(env: Env): Promise<{ tokens: ChainToken[]; stats: Record<st
  * A run that comes back empty is a bad day upstream, not an empty chain: the stored list stays as it was, and
  * the site keeps showing what it showed. Only a run that found something replaces it.
  */
+/**
+ * Source verification for every launch, on the same cron as the token list. The chain is read through viem with
+ * the four views it needs; Sourcify is reached with the worker's fetch; progress lives in KV. See verify.ts.
+ */
+async function verifyLaunches(env: Env): Promise<string> {
+  if (!env.FACTORY || !env.MARKET_DEPLOYER || !env.TICKER_LAUNCHER) return "verify: not configured";
+  const client = createPublicClient({ transport: http(env.RPC_URL, { retryCount: 3, retryDelay: 400, timeout: 20_000 }) });
+  const factory = addr(env.FACTORY), market = addr(env.MARKET_DEPLOYER), launcher = addr(env.TICKER_LAUNCHER);
+  const FACTORY_ABI = [
+    { type: "function", name: "launchCount", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+    { type: "function", name: "launchAt", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "address" }] },
+    { type: "function", name: "getLaunchedToken", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "tuple", components: [
+      { name: "token", type: "address" }, { name: "deployer", type: "address" }, { name: "creatorFeeRecipient", type: "address" }, { name: "pairToken", type: "address" },
+      { name: "phantomQuote", type: "uint256" }, { name: "poolFee", type: "uint24" }, { name: "tickSpacing", type: "int24" }, { name: "tickLower", type: "int24" }, { name: "tickUpper", type: "int24" },
+      { name: "liquidity", type: "uint128" }, { name: "lpTokenId", type: "uint256" }, { name: "creatorTaxBps", type: "uint16" }, { name: "buybackEnabled", type: "bool" }, { name: "launchedAt", type: "uint64" }, { name: "exists", type: "bool" } ] }] },
+  ] as const;
+  // Market's first field is the token, and every field of the struct is static, so one word is enough to read it
+  const MARKET_ABI = [{ type: "function", name: "market", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "tuple", components: [{ name: "token", type: "address" }] }] }] as const;
+  const LAUNCHER_ABI = [{ type: "function", name: "pairCount", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
+  const chain = {
+    launchCount: async () => Number(await client.readContract({ address: factory, abi: FACTORY_ABI, functionName: "launchCount" })),
+    launchAt: async (i: number) => client.readContract({ address: factory, abi: FACTORY_ABI, functionName: "launchAt", args: [BigInt(i)] }) as Promise<string>,
+    pairOf: async (coin: string) => (await client.readContract({ address: factory, abi: FACTORY_ABI, functionName: "getLaunchedToken", args: [addr(coin)] })).pairToken as string,
+    isMarketName: async (name: string) => {
+      try {
+        const m = await client.readContract({ address: market, abi: MARKET_ABI, functionName: "market", args: [addr(name)] });
+        return m.token.toLowerCase() === name.toLowerCase();
+      } catch { return false; }
+    },
+    isManagedName: async (name: string) => {
+      try { return (await client.readContract({ address: launcher, abi: LAUNCHER_ABI, functionName: "pairCount", args: [addr(name)] })) > 0n; } catch { return false; }
+    },
+  };
+  const kv = { get: (k: string) => env.TICKR_KV.get(k), put: (k: string, v: string) => env.TICKR_KV.put(k, v) };
+  const r = await verifyNewLaunches({ chain, kv, fetch: fetch.bind(globalThis), log: (m) => console.log(m) });
+  return `verify: checked ${r.checked}, verified ${r.verified.length}, retry ${r.retry.length}`;
+}
+
 async function refresh(env: Env) {
   const out = await build(env);
   if (out.tokens.length > 0) {
@@ -754,10 +796,15 @@ export default {
       return;
     }
     ctx.waitUntil(refresh(env).then((o) => console.log(`tokens: ${o.tokens.length} of ${o.stats.candidates} candidates`)));
+    ctx.waitUntil(verifyLaunches(env).then((line) => console.log(line)));
   },
   /** A manual run, for a deploy or a check: `curl -H "x-refresh-key: ..." https://<worker>/refresh`. Reading is what the site does. */
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
+    if (url.pathname === "/verify") {
+      if (!env.REFRESH_KEY || req.headers.get("x-refresh-key") !== env.REFRESH_KEY) return new Response("not found", { status: 404 });
+      return new Response(await verifyLaunches(env), { headers: { "content-type": "text/plain" } });
+    }
     if (url.pathname === "/keep") {
       if (!env.REFRESH_KEY || req.headers.get("x-refresh-key") !== env.REFRESH_KEY) return new Response("not found", { status: 404 });
       return Response.json({ keeper: await keep(env) });
