@@ -322,7 +322,9 @@ async function build(env: Env): Promise<{ tokens: ChainToken[]; stats: Record<st
  */
 async function verifyLaunches(env: Env): Promise<string> {
   if (!env.FACTORY || !env.MARKET_DEPLOYER || !env.TICKER_LAUNCHER) return "verify: not configured";
-  const client = createPublicClient({ transport: http(env.RPC_URL, { retryCount: 3, retryDelay: 400, timeout: 20_000 }) });
+  // the keeper's node when there is one: the public node rate-limits requests from this network, and a pass that
+  // cannot read the launch list has nothing to do. Either way a failure is a line in the log, never a thrown run
+  const client = createPublicClient({ transport: http(env.RPC_ENDPOINT || env.RPC_URL, { retryCount: 3, retryDelay: 600, timeout: 20_000 }) });
   const factory = addr(env.FACTORY), market = addr(env.MARKET_DEPLOYER), launcher = addr(env.TICKER_LAUNCHER);
   const FACTORY_ABI = [
     { type: "function", name: "launchCount", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
@@ -350,8 +352,12 @@ async function verifyLaunches(env: Env): Promise<string> {
     },
   };
   const kv = { get: (k: string) => env.TICKR_KV.get(k), put: (k: string, v: string) => env.TICKR_KV.put(k, v) };
-  const r = await verifyNewLaunches({ chain, kv, fetch: fetch.bind(globalThis), log: (m) => console.log(m) });
-  return `verify: checked ${r.checked}, verified ${r.verified.length}, retry ${r.retry.length}`;
+  try {
+    const r = await verifyNewLaunches({ chain, kv, fetch: fetch.bind(globalThis), log: (m) => console.log(m) });
+    return `verify: checked ${r.checked}, verified ${r.verified.length}, retry ${r.retry.length}`;
+  } catch (e) {
+    return `verify: did not run (${(e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 160)})`;
+  }
 }
 
 async function refresh(env: Env) {
