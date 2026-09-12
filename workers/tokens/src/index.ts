@@ -532,6 +532,9 @@ const TREASURY_HOLY_ABI = [
   ...TREASURY_V2_ABI,
   { type: "function", name: "burnCoin", stateMutability: "nonpayable", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "pendingCoin", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "pendingShareBps", stateMutability: "view", inputs: [], outputs: [{ type: "uint16" }] },
+  { type: "function", name: "shareEffectiveAt", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "applyBuybackShare", stateMutability: "nonpayable", inputs: [], outputs: [] },
 ] as const;
 const ESCROW_ABI = [
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
@@ -843,6 +846,13 @@ async function keep(env: Env): Promise<string[]> {
     // spent on HOLY, which is burned). Same terms, same gating, plus the burn of what is already the coin.
     if (env.KEEPER_HOLY_TREASURY) {
       const holyT = env.KEEPER_HOLY_TREASURY as `0x${string}`;
+      // a proposed raise of the burn share is anyone's to apply once its delay has passed; the keeper is the anyone
+      const [pendingShare, shareAt] = await Promise.all([
+        pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "pendingShareBps" }).catch(() => 0),
+        pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "shareEffectiveAt" }).catch(() => 0n),
+      ]);
+      if (pendingShare > 0 && BigInt(Math.floor(Date.now() / 1000)) >= shareAt) await step("holy.applyShare", { address: holyT, abi: TREASURY_HOLY_ABI, functionName: "applyBuybackShare" });
+      else if (pendingShare > 0) out.push(`holy.applyShare: waiting (${pendingShare} bps from ${shareAt})`);
       const pendingCoin = await pub.readContract({ address: holyT, abi: TREASURY_HOLY_ABI, functionName: "pendingCoin" }).catch(() => 0n);
       if (pendingCoin > 0n) await step("holy.burnCoin", { address: holyT, abi: TREASURY_HOLY_ABI, functionName: "burnCoin" });
       else out.push("holy.burnCoin: nothing to burn");
