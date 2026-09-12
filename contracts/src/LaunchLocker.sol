@@ -179,8 +179,9 @@ contract LaunchLocker is IERC721Receiver, ReentrancyGuard {
     /// are burned, so every sell still takes coins out of circulation.
     ///
     /// So the coin side is not the quote side's allocation. There is no buyback slice and no team slice here:
-    /// what the protocol would have taken is destroyed instead. Under a 40/60 policy that is 40% of the coin fee
-    /// to the creator and 60% burned, and it is deliberate, not an oversight of the split.
+    /// what the protocol would have taken is destroyed instead. Under the live default (5000 / 1000 / 4000, which a
+    /// coin without a club freezes as 6000 / 0 / 4000) that is 60% of the coin fee to the creator and 40% burned,
+    /// and it is deliberate, not an oversight of the split.
     function _splitCoin(address token, FeePolicy memory p, uint256 creatorTaxBps, uint256 coinOut)
         internal
         returns (uint256 creatorCoin, uint256 burnedCoin)

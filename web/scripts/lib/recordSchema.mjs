@@ -3,8 +3,9 @@
 export const ZERO = "0x0000000000000000000000000000000000000000";
 export const ADDRESSES = new Set(["factory", "managedTickerHook", "managedTickerDeployer", "universalRouter", "feeEscrow", "launchLocker", "launchDeployer", "launchSeeder", "buybackVault", "buybackTreasury", "anchorRegistry", "launchAndBuyRouter", "tickerLauncher", "coinQuoteLauncher", "stockQuoteLauncher", "marketQuoteLauncher", "marketQuoteLauncherDeployed", "marketTickerLauncher", "marketTickerDeployer", "v3Factory", "zapRouter", "poolManager", "positionManager", "permit2", "usdg", "weth", "v4Quoter", "genesisToken", "genesisTicker", "genesisV2Token", "genesisV2Name", "stockAAPL", "stockF", "stockNVDA"]);
 export const HASHES = new Set(["genesisPool", "genesisV2Pool"]);
-// genesisV2*: written by GenesisV2.s.sol when the v2 official coin launches. Optional, unlike v1's genesis fields:
-// a record from before that launch has none of them and is still a complete record.
+// genesisV2*: written together by GenesisV2.s.sol's verify() once the v2 official coin's genesis is confirmed on
+// chain. Optional, unlike v1's genesis fields: a record from before that launch has none of them and is still a
+// complete record. Some without the others is refused.
 export const NUMBERS = new Set(["chainId", "startBlock"]);
 export const BOOLEANS = new Set(["sepolia", "genesisActivated"]);
 /** what every live build must carry as a real address, from the record or its documented override */
@@ -36,6 +37,10 @@ export function liveProblems(record, { chainId, origin, src, env }) {
     problems.push(`${k} is not a field of the deployment record`);
   }
   if (record.sepolia === true) problems.push("the record is a Sepolia rehearsal record");
+  // the v2 official coin is written as one unit by GenesisV2.s.sol's verify(): all three fields, or none of them
+  const v2 = ["genesisV2Token", "genesisV2Name", "genesisV2Pool"];
+  const present = v2.filter((k) => record[k] !== undefined && record[k] !== ZERO);
+  if (present.length !== 0 && present.length !== v2.length) problems.push(`the v2 genesis is recorded in part (${present.join(", ")}): all of ${v2.join(", ")} or none`);
   if (record.genesisActivated !== true) problems.push("genesisActivated is not true: the official coin's two activation buys did not land in genesis, or the record predates them; a live build needs an activated genesis");
   for (const name of OVERRIDES) { const v = env[name]; if (v !== undefined && !isAddr(v)) problems.push(`${name} is not an address: ${v}`); }
   if (env.NEXT_PUBLIC_GENESIS_POOL !== undefined && !/^0x[0-9a-fA-F]{64}$/.test(env.NEXT_PUBLIC_GENESIS_POOL)) problems.push("NEXT_PUBLIC_GENESIS_POOL is not a 32 byte hash");

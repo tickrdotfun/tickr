@@ -44,6 +44,8 @@ contract CapacityCompareForkTest is Test {
     address constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
     address constant FUN = 0xF9d30A05A63d795e3eF37b34143f33b2cBEf0f14;
     address constant TESTNAME = 0x4Dd89f107d9b8395237719FA9d621a7A5BC00c52;
+    /// @dev The enabled 82 bps launch configuration on mainnet.
+    uint256 constant CONFIG_82 = 2;
     address constant FACTORY = 0x12EF55f994E6eb6bd55eF55Ce63800cD4425A03f;
     address constant TICKER_LAUNCHER = 0x7f6c8bA781b5bDC499F2BA7501A2178508877649;
     address constant MANAGED_HOOK = 0x3adE2d75475e3262A4dfd1b55c012d39d704eAC0;
@@ -233,31 +235,32 @@ contract CapacityCompareForkTest is Test {
 
     // ---------------------------------------------------------------- complete buys and sells
 
-    /// @dev Two coins with the same launch config, so the same supply and the same opening reserve: one priced
-    /// in the wrapper, one priced in the market name. Their own pools are therefore matched, and what differs
-    /// between the round trips is the bridge and nothing else.
+    /// @dev Two coins with the same launch config, so the same supply, the same opening reserve and the same fee:
+    /// one priced in the wrapper, one priced in the market name. Their own pools are therefore matched, and what
+    /// differs between the round trips is the bridge and nothing else. The config is the enabled 82 bps one, the
+    /// only one a market name's coin may launch on (`NotTheFrozenFee` refuses the others).
     function _twoMatchedCoins() internal returns (address legacy, address market, MarketTickerLauncher ml) {
         address me = address(0xC0FFEE);
         vm.deal(me, 10 ether);
-        uint256 supply = IFactory(FACTORY).getLaunchConfig(0).supply;
+        uint256 supply = IFactory(FACTORY).getLaunchConfig(CONFIG_82).supply;
         uint256 f = IFactory(FACTORY).launchFee();
 
         // the legacy side: the ticker launcher's own path, under the live wrapper's symbol
-        (address ticker,, bytes32 expected,) = ITickerLauncherFull(TICKER_LAUNCHER).previewLaunch("FUN", 0);
+        (address ticker,, bytes32 expected,) = ITickerLauncherFull(TICKER_LAUNCHER).previewLaunch("FUN", CONFIG_82);
         TokenParams memory lp = _params("LEGACYSIDE", expected);
         lp.salt = _saltBelow(lp, ticker, me, supply);
         vm.prank(me);
-        (, legacy,) = ITickerLauncherFull(TICKER_LAUNCHER).launch{value: f}("FUN", lp, 0);
+        (, legacy,) = ITickerLauncherFull(TICKER_LAUNCHER).launch{value: f}("FUN", lp, CONFIG_82);
 
         // the market side: the same config, under the market name
         ml = new MarketTickerLauncher(IFactory(FACTORY), MarketTickerDeployer(MARKET_DEPLOYER));
         vm.prank(IFactory(FACTORY).owner());
         (bool ok,) = FACTORY.call(abi.encodeWithSignature("setRegistrar(address,bool)", address(ml), true));
         require(ok, "setRegistrar");
-        TokenParams memory mp = _params("MARKETSIDE", ml.previewEconomics(0, TESTNAME));
+        TokenParams memory mp = _params("MARKETSIDE", ml.previewEconomics(CONFIG_82, TESTNAME));
         mp.salt = _saltBelow(mp, TESTNAME, me, supply);
         vm.prank(me);
-        (market,) = ml.launch{value: f}(mp, 0, TESTNAME);
+        (market,) = ml.launch{value: f}(mp, CONFIG_82, TESTNAME);
 
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 25 hours);

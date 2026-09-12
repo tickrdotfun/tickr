@@ -2,6 +2,7 @@
 
 import type { TokenData } from "@/hooks/useTokenData";
 import { useTickerClub } from "@/hooks/useTickerClub";
+import { CHAIN_ID } from "@/lib/chain";
 import { useTx } from "@/hooks/useTx";
 import { TickerLauncherAbi } from "@/lib/abis";
 import { ADDRESSES, sameAddr } from "@/lib/addresses";
@@ -31,7 +32,7 @@ export function TickerClub({ d }: { d: TokenData }) {
         label: `claim club for ${meta.symbol ?? "this coin"}`,
         request: (w) => w({ abi: TickerLauncherAbi, address: ADDRESSES.tickerLauncher, functionName: "claimClub", args: [launch.token, c.payers, epoch] }),
       },
-    ]).then((h) => h && club.refetch());
+    ], { account: user, chainId: CHAIN_ID }).then((h) => h && club.refetch());
   };
   const claim = () => {
     if (!c || c.last === undefined) return;

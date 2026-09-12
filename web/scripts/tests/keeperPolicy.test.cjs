@@ -3,7 +3,7 @@ const path = require("path");
 const { src } = require("../ts-load.cjs");
 src("lib/gasHeadroom.ts"); // registers the .ts require hook
 const P = require(path.join(__dirname, "../../../workers/tokens/src/keeper-policy.ts"));
-const { gasWithHeadroom, afterResolve, acquire, record, clear, release, GAS_CEILING } = P;
+const { gasWithHeadroom, afterResolve, acquire, record, clear, release, GAS_CEILING, runOutcome, noteRun } = P;
 const web = src("lib/gasHeadroom.ts");
 
 let n = 0; const t = (name, fn) => { fn(); n++; };
@@ -89,6 +89,29 @@ t("that lost broadcast, once mined, settles and unblocks", () => {
   const d = afterResolve({ settled: true, status: "success" });
   assert.equal(d.clear, true);
   assert.equal(d.mayWrite, true);
+});
+
+t("a transaction mined and reverted is resolved, but it is not work", () => {
+  const d = afterResolve({ settled: true, status: "reverted" });
+  assert.equal(d.clear, true, "its record is cleared: the attempt is settled");
+  assert.equal(d.mayWrite, true, "later writes may go ahead");
+  assert.equal(d.worked, false, "it did not do the work");
+  assert.equal(d.failed, true, "it is counted as a failure");
+  const ok = afterResolve({ settled: true, status: "success" });
+  assert.equal(ok.worked, true);
+  assert.equal(ok.failed, false);
+});
+
+t("runs whose sends all revert raise the alarm instead of resetting it", () => {
+  assert.equal(runOutcome({ worked: 0, failed: 2, couldNot: 0 }), "could not", "reverted sends are not work");
+  assert.equal(runOutcome({ worked: 1, failed: 1, couldNot: 0 }), "worked", "one success is work");
+  assert.equal(runOutcome({ worked: 0, failed: 0, couldNot: 1 }), "could not");
+  assert.equal(runOutcome({ worked: 0, failed: 0, couldNot: 0 }), "nothing to do");
+  let h = { consecutiveNoWork: 0 };
+  const first = noteRun(h, runOutcome({ worked: 0, failed: 1, couldNot: 0 }), "treasury.buy: mined and reverted");
+  assert.equal(first.alarm, undefined, "one is noise");
+  const second = noteRun(first.history, runOutcome({ worked: 0, failed: 1, couldNot: 0 }), "treasury.buy: mined and reverted");
+  assert.match(second.alarm, /2 consecutive runs could not do any work \(treasury.buy: mined and reverted\)/, "two in a row is the alarm");
 });
 
 t("and while it stays unknown, nothing else is written", () => {

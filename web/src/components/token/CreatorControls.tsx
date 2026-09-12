@@ -6,7 +6,7 @@ import type { TokenData } from "@/hooks/useTokenData";
 import { useTx } from "@/hooks/useTx";
 import { FactoryAbi } from "@/lib/abis";
 import { ADDRESSES, sameAddr } from "@/lib/addresses";
-import { explorerAddress } from "@/lib/chain";
+import { explorerAddress, CHAIN_ID } from "@/lib/chain";
 import { shortAddr } from "@/lib/format";
 import { TxStatus } from "../TxStatus";
 
@@ -36,7 +36,7 @@ export function TakeoverNotice({ d }: { d: TokenData }) {
   const open = now >= Number(takeover.effectiveAt);
   const execute = () =>
     tx
-      .run([{ label: "execute the move", request: (w) => w({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "executeCreatorFeeRecipientChange", args: [launch.token] }) }])
+      .run([{ label: "execute the move", request: (w) => w({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "executeCreatorFeeRecipientChange", args: [launch.token] }) }], { account: user, chainId: CHAIN_ID })
       .then((h) => h && d.refetch());
   return (
     <div className="takeover">
@@ -85,7 +85,7 @@ export function MoveFees({ d }: { d: TokenData }) {
   };
   const move = () => {
     if (!target || same) return;
-    tx.run([{ label: "move the fees", request: (w) => w({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "transferCreatorFeeRecipient", args: [launch.token, target] }) }]).then((h) => {
+    tx.run([{ label: "move the fees", request: (w) => w({ abi: FactoryAbi, address: ADDRESSES.factory, functionName: "transferCreatorFeeRecipient", args: [launch.token, target] }) }], { account: user, chainId: CHAIN_ID }).then((h) => {
       if (h) {
         close();
         d.refetch();

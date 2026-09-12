@@ -63,11 +63,17 @@ export type ResolveOutcome =
   | { settled: true; status: "success" | "reverted" }
   | { settled: false; reason: string };
 
-/** What to do with a pending attempt once its receipt has been looked for. */
-export function afterResolve(o: ResolveOutcome): { clear: boolean; mayWrite: boolean; note: string } {
-  if (o.settled) return { clear: true, mayWrite: true, note: `resolved: ${o.status}` };
+/**
+ * What to do with a sent transaction once its receipt has been looked for.
+ *
+ * Resolved and succeeded are different questions. A receipt of either kind resolves the attempt, so its record is
+ * cleared and later writes may go ahead. Only a successful one is work: a transaction mined and reverted moved
+ * nothing, and counting it as work would let a keeper whose every send reverts look healthy to `noteRun`.
+ */
+export function afterResolve(o: ResolveOutcome): { clear: boolean; mayWrite: boolean; worked: boolean; failed: boolean; note: string } {
+  if (o.settled) return { clear: true, mayWrite: true, worked: o.status === "success", failed: o.status !== "success", note: `resolved: ${o.status}` };
   // still unknown: keep the record and write nothing this run
-  return { clear: false, mayWrite: false, note: `unresolved (${o.reason}); no writes until it settles` };
+  return { clear: false, mayWrite: false, worked: false, failed: false, note: `unresolved (${o.reason}); no writes until it settles` };
 }
 
 
@@ -172,10 +178,16 @@ export type WorkOutcome = "worked" | "nothing to do" | "could not";
 /**
  * Whether this run should raise an alarm, given what it managed and what the runs before it managed.
  *
- * "could not" is a preparation failure: an estimate that would not resolve, a gas limit the balance cannot
- * cover, a call that reverts before it is sent. One is noise. Two in a row is the keeper not running, and it
- * will stay that way until someone looks.
+ * "could not" is a run that tried and moved nothing: an estimate that would not resolve, a gas limit the balance
+ * cannot cover, a call that reverts before it is sent, or a transaction mined and reverted. One is noise. Two in a
+ * row is the keeper not running, and it will stay that way until someone looks.
  */
+/** A run's outcome from what its sends did: any success is work; tries that all failed, mined or not, are not. */
+export function runOutcome(t: { worked: number; failed: number; couldNot: number }): WorkOutcome {
+  if (t.worked > 0) return "worked";
+  return t.failed > 0 || t.couldNot > 0 ? "could not" : "nothing to do";
+}
+
 export function noteRun(history: RunHistory, outcome: WorkOutcome, detail?: string): { history: RunHistory; alarm?: string } {
   if (outcome !== "could not") return { history: { consecutiveNoWork: 0, lastNote: detail } };
   const n = history.consecutiveNoWork + 1;

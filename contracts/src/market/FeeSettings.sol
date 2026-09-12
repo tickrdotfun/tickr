@@ -18,16 +18,11 @@ library FeeSettings {
     /// @notice No surcharge on top. The creator's share comes out of the total, not in addition to it.
     uint16 internal constant CREATOR_TAX_BPS = 0;
 
-    /// @notice The creator's share of the coin pool's fee.
-    uint16 internal constant CREATOR_SHARE_BPS = 4_000;
-    /// @notice The protocol's share, which the treasury then halves.
-    uint16 internal constant PROTOCOL_SHARE_BPS = 6_000;
-    /// @notice No club slice under this policy.
-    uint16 internal constant CLUB_SHARE_BPS = 0;
-    /// @notice The locker does not pre-split the protocol's share; the treasury does.
-    uint16 internal constant BUYBACK_BURN_BPS = 0;
-    /// @notice Half of the protocol's share to the buyback, half to the team, which makes the whole 40/30/30.
-    uint16 internal constant BUYBACK_SHARE_BPS = 5_000;
+    // No fee shares here. How a coin pool's fee is divided is the factory's default policy, frozen into each coin
+    // at its launch, and nothing in this library sets or describes it. Live since the market release: 5000 / 1000 /
+    // 4000 (creator / club / protocol), which a coin without a club, as every coin under a fixed-inventory name is,
+    // freezes as 6000 / 0 / 4000. This library once carried a 4000 / 0 / 6000 split that was proposed and not
+    // adopted; it was removed so that no script could install it by reading it from here.
 
     uint256 internal constant Q96 = 1 << 96;
 

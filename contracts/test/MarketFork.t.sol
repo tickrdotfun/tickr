@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {Fork} from "./Fork.sol";
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -43,8 +44,9 @@ contract MarketForkTest is Test {
     int24 constant SPACING = 10;
     int24 constant WIDTH = 30;
 
-    /// @dev Pinned so the numbers in the report are reproducible. Chosen 9 September 2026.
-    uint256 constant FORK_BLOCK = 58_004_346;
+    /// @dev The report's numbers were taken at block 58,004,346 (9 September 2026). Nothing asserted here depends on
+    /// that block, so the suite forks wherever every other fork suite does (the head, or `FORK_BLOCK`); to reproduce
+    /// the report's figures exactly, run with FORK_BLOCK=58004346 against an endpoint that still serves that state.
     address constant FACTORY = 0x12EF55f994E6eb6bd55eF55Ce63800cD4425A03f;
     address constant REGISTRY = 0x7927cB22b4C5AA0DBdd851805d3149AAC07e2BC1;
     /// @dev Who owns the live factory and registry: the hardware wallet. Pranked here, never used for real.
@@ -59,13 +61,7 @@ contract MarketForkTest is Test {
     bool forked;
 
     function setUp() public {
-        string memory url = vm.envOr("FORK_RPC", string(""));
-        if (bytes(url).length == 0) {
-            // the dedicated fork command sets REQUIRE_FORK, and must fail rather than quietly pass
-            require(!vm.envOr("REQUIRE_FORK", false), "FORK_RPC is not set: the fork validation cannot run");
-            return;
-        }
-        vm.createSelectFork(url, FORK_BLOCK);
+        if (!Fork.select()) return;
         forked = true;
         deployer = new MarketTickerDeployer(
             address(this), IERC20(USDG), IPoolManager(POOL_MANAGER), IPositionManager(POSM),

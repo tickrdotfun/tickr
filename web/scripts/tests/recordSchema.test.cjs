@@ -25,12 +25,20 @@ test("an unactivated genesis, a rehearsal record, a foreign field, the wrong cha
   assert.deepEqual(schema.missingRequired({ ...genesisRecord(), universalRouter: schema.ZERO }, { NEXT_PUBLIC_UNIVERSAL_ROUTER: A(4) }), []);
   assert.match(p(genesisRecord(), { origin: "kept" }).join(";"), /not read from/);
 });
-test("a record that also carries the v2 genesis passes, and a malformed v2 field is refused", () => {
+test("a record that also carries the v2 genesis passes; a malformed or partly written v2 genesis is refused", () => {
   const p = (r) => schema.liveProblems(r, { chainId: 4663, origin: "copied", src: "x", env: {} });
   const v2 = { ...genesisRecord(), marketTickerLauncher: A(28), marketTickerDeployer: A(29), genesisV2Token: A(30), genesisV2Name: A(31), genesisV2Pool: `0x${"cd".repeat(32)}` };
   assert.deepEqual(p(v2), []);
   assert.match(p({ ...v2, genesisV2Token: "0x1234" }).join(";"), /genesisV2Token is not an address/);
   assert.match(p({ ...v2, genesisV2Pool: A(33) }).join(";"), /genesisV2Pool is not a 32 byte hash/);
+  // written as one unit: a coin without its name or pool, or any two of three, is a record written part way
+  for (const k of ["genesisV2Token", "genesisV2Name", "genesisV2Pool"]) {
+    const part = { ...v2 };
+    delete part[k];
+    assert.match(p(part).join(";"), /the v2 genesis is recorded in part/, `without ${k}`);
+  }
+  const onlyToken = { ...genesisRecord(), genesisV2Token: A(30) };
+  assert.match(p(onlyToken).join(";"), /recorded in part \(genesisV2Token\)/);
 });
 test("the v2 genesis never records the treasury: the record is bundled into the site's public code", () => {
   assert.ok(!schema.ADDRESSES.has("genesisV2Treasury"));

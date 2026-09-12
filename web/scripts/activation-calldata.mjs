@@ -8,7 +8,6 @@
 // Usage: node scripts/activation-calldata.mjs <coin> <name> <coinPoolFee> <coinPoolSpacing> <wallet> <rpc>
 // Prints one JSON object per phase. It signs nothing and sends nothing.
 import { createPublicClient, http, formatEther } from "viem";
-import { pathToFileURL } from "node:url";
 
 const [coin, name, feeArg, spacingArg, wallet, rpc] = process.argv.slice(2);
 if (!coin || !name || !feeArg || !spacingArg || !wallet || !rpc) {

@@ -13,7 +13,7 @@ import { createPublicClient, encodeFunctionData, erc20Abi, getAddress, http, kec
 /** Addresses arrive from configuration, where the checksum casing may be anything. */
 const addr = (a: string): Address => getAddress(a.toLowerCase());
 
-import { gasWithHeadroom, afterResolve, acquire, record, clear, release, noteRun, balanceWarning, type Pending, type LockState, type RunHistory, type WorkOutcome } from "./keeper-policy";
+import { gasWithHeadroom, afterResolve, acquire, record, clear, release, noteRun, runOutcome, balanceWarning, type Pending, type LockState, type RunHistory, type WorkOutcome } from "./keeper-policy";
 
 type Env = {
   TICKR_KV: KVNamespace;
@@ -586,7 +586,8 @@ async function keep(env: Env): Promise<string[]> {
   // what this run managed, and what the ones before it managed
   const HISTORY_KEY = "keeper:history";
   const history = JSON.parse((await env.TICKR_KV.get(HISTORY_KEY)) ?? "null") as RunHistory | null;
-  let didWork = false, couldNot = 0, firstProblem: string | undefined;
+  // worked: sends that succeeded; failed: sends mined and reverted; couldNot: sends that never went out
+  let worked = 0, failed = 0, couldNot = 0, firstProblem: string | undefined;
 
   const got = await lease("acquire");
   if (!got.ok) {
@@ -628,6 +629,12 @@ async function keep(env: Env): Promise<string[]> {
     out.push(`${p.label} (from an earlier run): ${d.note} ${p.hash}`);
     if (d.clear) await lease("clear", `&hash=${p.hash}`);
     else alert(`${p.label} is unresolved`, { hash: p.hash, nonce: p.nonce, sentAt: new Date(p.at).toISOString(), detail: d.note });
+    if (d.worked) worked++;
+    if (d.failed) {
+      failed++;
+      firstProblem ??= `${p.label}: mined and reverted ${p.hash}`;
+      alert(`${p.label} (from an earlier run) was mined and reverted`, { hash: p.hash, nonce: p.nonce }, "keeper needs attention");
+    }
     mayWrite = d.mayWrite;
   }
 
@@ -643,7 +650,7 @@ async function keep(env: Env): Promise<string[]> {
       out.push(`${label}: not attempted, an earlier send is unresolved`);
       return;
     }
-    let signed: `0x${string}`, hash: `0x${string}`, nonce: number;
+    let signed: `0x${string}`, hash: `0x${string}`, nonce: number, data: `0x${string}`;
     try {
       const estimate = await pub.estimateContractGas({ ...call, account } as Parameters<typeof pub.estimateContractGas>[0]);
       const g = gasWithHeadroom(estimate);
@@ -653,7 +660,7 @@ async function keep(env: Env): Promise<string[]> {
         return;
       }
       nonce = await pub.getTransactionCount({ address: account.address, blockTag: "pending" });
-      const data = encodeFunctionData({ abi: call.abi, functionName: call.functionName, args: call.args } as Parameters<typeof encodeFunctionData>[0]);
+      data = encodeFunctionData({ abi: call.abi, functionName: call.functionName, args: call.args } as Parameters<typeof encodeFunctionData>[0]);
       const request = await wallet.prepareTransactionRequest({ to: call.address, data, gas: g.gas, nonce, account, chain });
       signed = await wallet.signTransaction(request as Parameters<typeof wallet.signTransaction>[0]);
       hash = keccak256(signed);
@@ -685,9 +692,20 @@ async function keep(env: Env): Promise<string[]> {
 
     try {
       const rc = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 });
+      const d = afterResolve({ settled: true, status: rc.status });
       await lease("clear", `&hash=${hash}`);
-      didWork = true;
       out.push(`${label}: ${rc.status} ${hash}`);
+      if (d.worked) worked++;
+      else {
+        // resolved, not done: the record is cleared, and the failure is counted and said, with its reason when the
+        // same call replayed at that block gives one
+        failed++;
+        const reason = await pub
+          .call({ account: account.address, to: call.address, data, blockNumber: rc.blockNumber })
+          .then(() => undefined, (e) => (e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message?.slice(0, 120));
+        firstProblem ??= `${label}: mined and reverted ${hash}${reason ? ` (${reason})` : ""}`;
+        alert(`${label} was mined and reverted`, { hash, nonce, reason }, "keeper needs attention");
+      }
     } catch (e) {
       mayWrite = false;
       out.push(`${label}: unresolved ${hash} (${(e as Error).message?.slice(0, 60)}); later steps skipped`);
@@ -717,7 +735,7 @@ async function keep(env: Env): Promise<string[]> {
     alert("the keeper cannot afford a full cycle", { balanceWei: bal.toString(), needWei: NEED_WEI.toString(), fundAt: account.address }, "keeper needs attention");
   }
 
-  const outcome: WorkOutcome = didWork ? "worked" : couldNot > 0 ? "could not" : "nothing to do";
+  const outcome: WorkOutcome = runOutcome({ worked, failed, couldNot });
   const noted = noteRun(history ?? { consecutiveNoWork: 0 }, outcome, firstProblem);
   await env.TICKR_KV.put(HISTORY_KEY, JSON.stringify(noted.history));
   if (noted.alarm) alert("the keeper has stopped doing work", { detail: noted.alarm, runs: noted.history.consecutiveNoWork }, "keeper needs attention");

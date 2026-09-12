@@ -1,7 +1,8 @@
 /**
  * The hero's ticker window.
  *
- * It tears through a run of example tickers, lands on one, holds it for a beat, then tears off again.
+ * It tears through a run of example tickers without stopping: each word is touched for a tenth of a second and
+ * then torn off again, so the window reads as one continuous reel rather than a series of landings.
  * The blur is a real directional one: an SVG gaussian with a vertical-only deviation, so the words smear
  * along the direction of travel instead of turning to mush. It rides on a duplicate layer that is
  * cross-faded against the sharp one, because a filter primitive cannot be animated from CSS.
@@ -57,8 +58,8 @@ const RUN = [6, 5, 7, 4, 8].find((r) => {
   const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
   return gcd(r, N) === 1;
 }) as number;
-const WHIP = 0.34; // seconds of tearing, for a full run
-const HOLD = 0.86; // seconds the landed word is held still
+const WHIP = 0.2; // seconds of tearing, for a full run
+const HOLD = 0.1; // seconds the landed word is held still: a kiss, not a rest, so the reel reads as continuous
 
 /** One landing per word. The strip is that many runs long, which is a whole number of list copies. */
 const STOPS = Array.from({ length: N }, (_, k) => (k + 1) * RUN);

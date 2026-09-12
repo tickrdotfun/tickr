@@ -14,7 +14,18 @@ const recordPath = path.join(__dirname, "..", "..", "src", "lib", "deployments.j
 const example = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "src", "lib", "deployments.example.json"), "utf8"));
 require.cache[recordPath] = { id: recordPath, filename: recordPath, loaded: true, exports: example };
 require.extensions[".ts"] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText, f);
-const src = (p) => require(path.join(__dirname, "..", "..", "src", p));
+// the `@/` alias, resolved as Next resolves it, so a module that imports through it loads here as it does in the site
+const SRC = path.join(__dirname, "..", "..", "src");
+const Module = require("node:module");
+const resolveFilename = Module._resolveFilename;
+Module._resolveFilename = function (req, ...rest) {
+  if (req.startsWith("@/")) {
+    const base = path.join(SRC, req.slice(2));
+    for (const f of [base, base + ".ts", base + ".tsx", path.join(base, "index.ts")]) if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
+  }
+  return resolveFilename.call(this, req, ...rest);
+};
+const src = (p) => require(path.join(SRC, p));
 module.exports = {
   src,
   wallet: "0x00000000000000000000000000000000000000a1",

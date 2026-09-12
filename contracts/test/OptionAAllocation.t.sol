@@ -59,8 +59,6 @@ contract OptionAAllocationForkTest is Test {
 
     /// @dev The settings being tested. Not a payout figure: the shares the collected fee is divided by.
     uint16 constant BASE_FEE_BPS = FeeSettings.BASE_FEE_BPS;
-    uint16 constant CREATOR_SHARE = FeeSettings.CREATOR_SHARE_BPS;
-    uint16 constant PROTOCOL_SHARE = FeeSettings.PROTOCOL_SHARE_BPS;
 
     MarketTickerLauncher launcher;
     BuybackTreasuryV2 vault; // the treasury this policy pays, wired for the test rather than assumed

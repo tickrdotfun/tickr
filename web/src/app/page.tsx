@@ -13,7 +13,7 @@ export default function Home() {
           <div className="cascade-1">
             <RainbowRule play />
             <p className="hero-tagline mt-4">
-              <span className="text-white font-bold">pair anything</span> on <span className="cap">Robinhood Chain</span>.
+              <span className="font-bold">pair anything</span> on <span className="cap">Robinhood Chain</span>.
             </p>
           </div>
 
@@ -25,13 +25,9 @@ export default function Home() {
             </span>
           </h1>
 
-          <div className="cascade-2 hero-sub">
-            <p>name a pair. launch into a pool that is locked forever. trade from the first block.</p>
-          </div>
-
           <div className="cascade-3 hero-actions flex flex-wrap items-center justify-center gap-3">
             <Link href="/create" className="btn btn-gradient hero-cta no-underline hover:no-underline">
-              create
+              launch
             </Link>
           </div>
         </div>

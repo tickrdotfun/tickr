@@ -2,9 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { explainFromError } from "@/lib/explain";
-import { useBalance, useBlockNumber, usePublicClient, useReadContract, useReadContracts } from "wagmi";
+import { useBalance, usePublicClient, useReadContract, useReadContracts } from "wagmi";
+import { useEvmBlockNumber } from "@/hooks/useEvmBlockNumber";
+import { protectionOn } from "@/lib/evmBlock";
 import { erc20Abi } from "viem";
 import type { TokenData } from "@/hooks/useTokenData";
+import { CHAIN_ID } from "@/lib/chain";
 import { useTx, type WriteFn } from "@/hooks/useTx";
 import { quoterQuoteOnce, useQuoterQuote } from "@/hooks/useQuoterQuote";
 import { previewZapOnce, previewZapSellOnce, useZapPreview, useZapSellPreview, zapParams, zapSellParams } from "@/hooks/useZap";
@@ -88,14 +91,12 @@ export function TradePanel({ d }: { d: TokenData }) {
   });
   const snipeBps = fresh ? Number(snipe.data ?? 0n) : 0;
   // launch protection, in blocks: the end block is a constant of the coin, the current block is watched until it is
-  // past, and the wallet's own room is asked every second while the window is open. no clock decides any of it
+  // past, and the wallet's own room is asked every second while the window is open. no clock decides any of it.
+  // both are EVM block numbers, which on this chain are Ethereum's, not the RPC's height (lib/evmBlock.ts)
   const endsQ = useReadContract({ abi: TokenAbi, address: launch?.token, functionName: "protectionEndsAtBlock", query: { enabled: !!launch, staleTime: Infinity } });
   const endsAt = endsQ.data;
-  const blockNo = useBlockNumber({
-    query: { enabled: !!launch && endsAt !== undefined, refetchInterval: (q) => (endsAt !== undefined && q.state.data !== undefined && q.state.data >= endsAt ? false : 1_000) },
-  });
-  const blockNow = blockNo.data;
-  const guarded = endsAt !== undefined && blockNow !== undefined && blockNow < endsAt;
+  const blockNow = useEvmBlockNumber({ enabled: !!launch && endsAt !== undefined, until: endsAt, everyMs: 1_000 });
+  const guarded = protectionOn(blockNow, endsAt);
   const guard = useReadContracts({
     contracts: [
       { abi: TokenAbi, address: launch?.token, functionName: "launchedBlock" },
@@ -253,7 +254,9 @@ export function TradePanel({ d }: { d: TokenData }) {
         },
       });
     }
-    const h = await tx.run(steps);
+    // bound to the account the trade was reviewed with, which is also the recipient written into its calldata, and
+    // to this chain: a wallet switched during the approval or the fresh quote stops before the next request
+    const h = await tx.run(steps, { account: user, chainId: CHAIN_ID });
     if (h) {
       setAmount("");
       d.refetch();

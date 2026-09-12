@@ -5,6 +5,7 @@ import {VmSafe} from "forge-std/Vm.sol";
 import {Script, console} from "forge-std/Script.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
@@ -12,11 +13,12 @@ import {PathKey} from "v4-periphery/src/libraries/PathKey.sol";
 import {IV4Quoter} from "v4-periphery/src/interfaces/IV4Quoter.sol";
 import {Factory} from "../src/Factory.sol";
 import {Token} from "../src/Token.sol";
-import {TokenParams, Socials, LaunchConfig} from "../src/Types.sol";
+import {TokenParams, Socials, LaunchConfig, LaunchedToken} from "../src/Types.sol";
 import {ILaunchDeployer} from "../src/interfaces/ILaunchDeployer.sol";
 import {MarketTickerLauncher} from "../src/market/MarketTickerLauncher.sol";
 import {MarketTickerDeployer} from "../src/market/MarketTickerDeployer.sol";
 import {UniversalRouterBuy, IUniversalRouter} from "./lib/UniversalRouterBuy.sol";
+import {Permit2Batch} from "./lib/Permit2Batch.sol";
 
 /// @notice The official coin of the v2 path: a new fixed-inventory name, a coin launched under it, and a disclosed
 /// first buy, split between an airdrop and the treasury.
@@ -24,34 +26,39 @@ import {UniversalRouterBuy, IUniversalRouter} from "./lib/UniversalRouterBuy.sol
 /// Nothing about the coin is written here. Its name, its symbol, the name's symbol and every piece of metadata come
 /// from the environment, so this file can sit in the public copy before launch without saying what is coming.
 ///
-/// Why this is not `Genesis.s.sol`. That script launches and buys in one transaction through
-/// `TickerLauncher.launchAndBuy`, so nothing can trade the pool before the treasury holds its slice. The v2 path has
-/// no buy: `MarketTickerLauncher` only launches, and the generic `LaunchAndBuyRouter` cannot launch under a v2 name
-/// because it goes around the registrar those names require. So the first buy is the very next transaction, and what
-/// guards the gap is the coin's own launch protection (`Token._update`):
+/// Stages. A forge script works out every transaction in a simulation before it sends any, so an amount read from a
+/// balance inside one run is the simulation's, not the chain's. The genesis is therefore split into stages, each its
+/// own run, each reading the chain as the previous stage's confirmed receipts left it. `script/genesis-v2.mjs` runs
+/// them in order, checks every receipt between them and keeps a journal, so an interrupted run resumes from what
+/// the chain shows rather than from what was meant to happen. Each stage also refuses on its own when the chain is
+/// not in the state it expects:
 ///
-///   - in the launch block only the launch's own wallets may buy at all, so a buy that lands in the same block as
-///     the launch cannot be preceded. On Robinhood Chain `block.number` is the parent chain's (Ethereum's) block
-///     number, not the L2's, so that block is about twelve seconds long: a buy sent right behind the launch lands
-///     inside it;
-///   - for the next two of those blocks every other wallet is capped at 5% held and 5.5% bought, and for the first
-///     five seconds pays the snipe tax (99% in second 0, 25% in second 1);
-///   - the launching wallet is exempt from all of it, so the disclosed share goes through uncapped and untaxed;
-///   - the coin's address is unknown to anyone until the launch lands, because its salt comes from a secret seed.
+///   launch()    `createAndLaunch`, then the first buy, sent back to back: ETH to USDG to the name to the coin
+///               through Uniswap's canonical Universal Router, whose TAKE_ALL pays the coin from the pool manager
+///               straight to this wallet. Its minimum is the disclosed share. Refuses once the name exists.
+///   buy()       only when the launch landed and its first buy did not: buys what is missing, sized now.
+///   listName()  the name's listing buy, into this wallet, quoted now.
+///   listCoin()  the coin's listing buy, quoted now. The runner sends it only once the name's receipt is confirmed,
+///               so it lands in a later block, as the site's activation requires.
+///   split()     from the balance the chain now shows: exactly the treasury's share to the treasury and everything
+///               past the disclosed share to 0xdEaD, in one Permit2 transaction (script/lib/Permit2Batch.sol), so
+///               the wallet is left holding exactly the airdrop, or nothing moved.
+///   verify()    reads only. Checks the finished state on chain and only then writes the coin, its name and its pool
+///               into the deployment record, which is what opens the site's create page.
+///   plan()      reads only: the predicted addresses and amounts, for the runner.
 ///
-/// The buy carries the disclosed share as its minimum. If anything got in front of it far enough to move the price
-/// past the margin, it reverts rather than paying more than it was sized for.
-///
-/// In order, all from the launching wallet:
-///   1. `createAndLaunch`: the name is made and the coin launched under it.
-///   2. The first buy: ETH to USDG to the name to the coin, through Uniswap's canonical Universal Router, whose
-///      TAKE_ALL pays the coin out of the pool manager straight to this wallet. Nothing between them holds it, so
-///      the exemption applies to the buy itself.
-///   3. The two listing buys, exactly as every launch under a name sends them: the name into the wallet, then the
-///      coin. Chart sites price a name from a swap that lands in a wallet and a coin from a buy after its launch.
-///   4. The split: exactly the treasury's share to the treasury, exactly the airdrop's share kept here for
-///      `AirdropV2.s.sol`, and everything the buys brought in past the disclosed share burned, so the published
-///      figures are exact rather than approximately right.
+/// What protects the first buy, and what does not. `MarketTickerLauncher` has no buy, and the generic
+/// `LaunchAndBuyRouter` cannot launch under a v2 name because it goes around the registrar those names require, so
+/// the first buy is a separate transaction. Between the two, the coin's own launch protection (`Token._update`) is
+/// the guard: in the launch block no other wallet can take the coin out of the pool manager, for the next two blocks
+/// other wallets are capped at 5% held and 5.5% bought, and for five seconds they pay the snipe tax. On Robinhood
+/// Chain `block.number` is Ethereum's, so the launch block is about twelve seconds long. The launching wallet is
+/// exempt. The coin's address is unknown until the launch lands, because its salt comes from a secret seed.
+/// This is protection, not exclusivity: another sender's transaction can land between the launch and the buy, and a
+/// buyer who settles into ERC-6909 claims inside the pool manager is not stopped by transfer-based rules at all
+/// (docs 09). The buy's minimum bounds what it receives; it does not promise the price it was sized at or that it
+/// comes first. If something got far enough ahead to push the output under the share, it reverts and `buy()` sizes
+/// the rest again.
 ///
 /// env (all required unless a default is named):
 ///   EXPECTED_CHAIN          the chain id this run is meant for; anything else stops it
@@ -61,16 +68,21 @@ import {UniversalRouterBuy, IUniversalRouter} from "./lib/UniversalRouterBuy.sol
 ///   V2_NAME_SYMBOL          the new name's symbol
 ///   V2_COIN_NAME, V2_COIN_SYMBOL
 ///   V2_COIN_LOGO, V2_COIN_DESCRIPTION, V2_COIN_X, V2_COIN_TELEGRAM, V2_COIN_DISCORD, V2_COIN_WEBSITE,
-///   V2_COIN_FARCASTER       metadata, default empty
+///   V2_COIN_FARCASTER       metadata, default empty. Every stage recomputes the coin's address from these, so they
+///                           must stay the same from the launch to the end
+///   V2_MAX_BUY_ETH          the most ETH every buy of this genesis may spend, together: the first buy, any re-sized
+///                           recovery buy, and both listing buys. Each is checked against it before it is signed,
+///                           with the buys still to come reserved, and a run stops rather than spend past it. The
+///                           wallet's balance is not the approval. It does not cover the launch fee or gas
 ///   V2_BUY_BPS              the first buy as a share of supply
 ///   V2_TREASURY_BPS         the treasury's part of it; the rest is the airdrop
-///   V2_TREASURY_HOLDBACK    raw coins of the treasury's part kept here instead, to go out with the airdrop on the
-///                           treasury's behalf (a wallet paid from the team's share rather than the holders'), so the
-///                           treasury never has to sign anything; default 0
+///   V2_EXTRA_KEPT           raw coins kept here on top of the airdrop's share, taken out of the surplus the buy
+///                           brought in past the disclosed share — the part that is otherwise burned. It comes from
+///                           neither the treasury's share nor the holders', and goes out with the airdrop, so nobody
+///                           else has to sign anything. The split refuses if the surplus cannot cover it; default 0
 ///   CONFIG_ID               the enabled 82 bps configuration, default 2
 ///   V2_LISTING_NAME_ETH     default 0.0005 ether; V2_LISTING_COIN_ETH, default 0.001 ether: the reference's amounts
-///
-/// Refuses to run twice: once the record carries `genesisV2Token`, it stops.
+///   DEPLOY_RECORD           the record, relative to the project; default deployments/<chain id>.json
 ///
 /// This file holds one contract and must stay that way (`forge script` needs `--tc` otherwise). Helpers live in
 /// script/lib.
@@ -83,9 +95,9 @@ contract GenesisV2 is Script {
     address internal constant DEAD = 0x000000000000000000000000000000000000dEaD;
     /// @dev ETH on top of the sized amount, so a move in the ETH/USDG pool between sizing and sending, or a small
     /// buy landing first, still leaves the output at or above the disclosed share. What it buys past the share is
-    /// burned in step 4.
+    /// burned by `split()`.
     uint256 internal constant BUY_MARGIN_BPS = 300;
-    /// @dev Room for the transactions' own gas when checking the wallet can pay for the run.
+    /// @dev Room for the transactions' own gas when checking the wallet can pay.
     uint256 internal constant GAS_ALLOWANCE = 0.01 ether;
 
     struct Ctx {
@@ -96,109 +108,236 @@ contract GenesisV2 is Script {
         address usdg;
         IUniversalRouter router;
         IV4Quoter quoter;
+        IAllowanceTransfer permit2;
         uint256 configId;
         uint256 pk;
-        address me;
-        address treasury;
-        uint256 supply;
         uint256 buyBps;
         uint256 treasuryBps;
-        uint256 holdback;
+        uint256 extraKept;
         string nameSymbol;
         uint8 nameDecimals;
         bytes32 seed;
         string path;
+        bool recorded;
     }
 
-    struct Result {
+    /// @notice What the genesis will make and move, all of it fixed by the environment before anything is sent.
+    struct Plan {
+        address me;
+        address treasury;
         address name;
         address coin;
-        bytes32 poolId;
-        uint256 ethBuy;
-        uint256 bought;
-        uint256 toTreasury;
-        uint256 kept;
-        uint256 burned;
+        bytes32 nameSalt;
+        uint256 supply;
+        uint256 maxBuyEth; // the most ETH every buy may spend, together, the listing buys included: V2_MAX_BUY_ETH
+        uint256 nameListingEth; // V2_LISTING_NAME_ETH
+        uint256 coinListingEth; // V2_LISTING_COIN_ETH
+        uint256 target; // the first buy, raw coins
+        uint256 toTreasury; // the treasury's whole share
+        uint256 kept; // what stays in the wallet for the airdrop
     }
 
-    function run() external returns (Result memory r) {
-        Ctx memory c = _context();
+    // ---------------------------------------------------------------------------------------------------------------
+    // stages
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// @notice The predicted name and coin and the amounts. Reads only.
+    function plan() external view returns (Plan memory pl) {
+        (, pl,) = _setup();
+    }
+
+    /// @notice The launch transaction exactly as stage 1 sends it. Reads only: the runner compares it byte for byte
+    /// with the transaction that landed.
+    function launchCall() external view returns (address to, uint256 value, bytes memory data) {
+        (Ctx memory c, Plan memory pl, TokenParams memory p) = _setup();
+        to = address(c.launcher);
+        value = c.factory.launchFee();
+        data = abi.encodeCall(MarketTickerLauncher.createAndLaunch, (pl.nameSalt, c.nameSymbol, c.nameDecimals, p, c.configId));
+    }
+
+    /// @notice Stage 1: the launch and the first buy, back to back.
+    function launch() external returns (Plan memory pl, uint256 ethBuy) {
+        Ctx memory c;
+        TokenParams memory p;
+        (c, pl, p) = _setup();
         _preflight(c);
+        require(c.names.market(pl.name).token == address(0), "genesis v2: the name already exists, so the launch has run: go on from the next stage");
 
-        // 1. the name, somewhere high so that nearly any coin address sorts below it
-        bytes32 nameSalt;
-        (nameSalt, r.name) = _grindName(c);
+        ethBuy = _sizeLaunchBuy(c, pl, p);
+        console.log("  genesis v2 first buy sized, wei", ethBuy);
+        _withinBudget(pl, pl.nameListingEth + pl.coinListingEth, ethBuy); // the listing buys still to come are reserved
+        _sendLaunch(c, pl, p, ethBuy);
+        console.log("  genesis v2 launch and first buy sent");
+    }
 
-        // 2. the coin: its parameters, and a salt that ends its address in 6942 below the name
-        TokenParams memory p = _params(c, r.name);
-        p.salt = _grindSalt(c.launchDeployer, c.me, p, c.supply, c.seed, r.name);
-        r.coin = c.launchDeployer.predictToken(c.me, p, c.supply);
-        require(uint16(uint160(r.coin)) == VANITY_SUFFIX, "genesis v2: the predicted coin does not end in 6942");
-        require(r.coin < r.name, "genesis v2: the coin must sort below its name");
-        console.log("  genesis v2 name predicted", r.name);
-        console.log("  genesis v2 coin predicted", r.coin);
-
-        // 3. the first buy, sized in a simulation of the launch it follows, then thrown away
-        uint256 target = (c.supply * c.buyBps) / 10_000;
-        r.ethBuy = _sizeBuy(c, nameSalt, p, r.name, r.coin, target);
-        uint256 nameEth = vm.envOr("V2_LISTING_NAME_ETH", uint256(0.0005 ether));
-        uint256 coinEth = vm.envOr("V2_LISTING_COIN_ETH", uint256(0.001 ether));
+    /// @dev The two transactions of stage 1, back to back, once the wallet is known to cover them and the listing buys
+    /// to come.
+    function _sendLaunch(Ctx memory c, Plan memory pl, TokenParams memory p, uint256 ethBuy) internal {
         uint256 fee = c.factory.launchFee();
-        require(c.me.balance >= fee + r.ethBuy + nameEth + coinEth + GAS_ALLOWANCE, "genesis v2: the wallet cannot pay for the run");
-        console.log("  genesis v2 first buy sized, wei", r.ethBuy);
-
+        uint256 listing = pl.nameListingEth + pl.coinListingEth;
+        require(pl.me.balance >= fee + ethBuy + listing + GAS_ALLOWANCE, "genesis v2: the wallet cannot pay for the run");
         vm.startBroadcast(c.pk);
-
-        // 4. launch
-        address gotName;
-        address gotCoin;
-        (gotName, gotCoin, r.poolId) = c.launcher.createAndLaunch{value: fee}(nameSalt, c.nameSymbol, c.nameDecimals, p, c.configId);
-        require(gotName == r.name && gotCoin == r.coin, "genesis v2: the launch did not land where predicted");
-
-        // 5. the first buy, the very next transaction, with the disclosed share as its minimum
-        PoolKey[] memory toCoin = _route(c, r.name, r.coin, 3);
-        UniversalRouterBuy.buy(c.router, c.me, toCoin, r.ethBuy, target, block.timestamp + 30 minutes);
-        r.bought = IERC20(r.coin).balanceOf(c.me);
-        require(r.bought >= target, "genesis v2: the first buy came in under the disclosed share");
-        console.log("  genesis v2 first buy, coins", r.bought / 1e18);
-
-        // 6. the two listing buys
-        _list(c, r.name, r.coin, nameEth, coinEth);
-
-        // 7. the split: exact shares out, everything past them burned. The holdback is the treasury's, kept here to
-        //    go out with the airdrop on its behalf
-        r.toTreasury = (c.supply * c.treasuryBps) / 10_000 - c.holdback;
-        r.kept = target - r.toTreasury;
-        IERC20(r.coin).transfer(c.treasury, r.toTreasury);
-        r.burned = IERC20(r.coin).balanceOf(c.me) - r.kept;
-        if (r.burned > 0) IERC20(r.coin).transfer(DEAD, r.burned);
-
+        (address gotName, address gotCoin,) = c.launcher.createAndLaunch{value: fee}(pl.nameSalt, c.nameSymbol, c.nameDecimals, p, c.configId);
+        require(gotName == pl.name && gotCoin == pl.coin, "genesis v2: the launch did not land where predicted");
+        UniversalRouterBuy.buy(c.router, pl.me, _route(c, pl.name, pl.coin, 3), ethBuy, pl.target, block.timestamp + 30 minutes);
         vm.stopBroadcast();
+    }
 
-        require(IERC20(r.coin).balanceOf(c.me) == r.kept, "genesis v2: the wallet does not hold exactly the airdrop");
-        console.log("  genesis v2 to the treasury", r.toTreasury / 1e18);
-        console.log("  genesis v2 kept for the airdrop", r.kept / 1e18);
-        if (c.holdback > 0) console.log("  genesis v2 of which held back from the treasury's share, raw", c.holdback);
-        console.log("  genesis v2 burned past the share", r.burned);
+    /// @notice Stage 1, again for the buy only: when the launch landed and its first buy did not.
+    function buy() external returns (uint256 ethBuy) {
+        (Ctx memory c, Plan memory pl,) = _setup();
+        _requireLaunched(c, pl);
+        require(IERC20(pl.name).balanceOf(pl.me) == 0, "genesis v2: the name's listing buy is in, so the first buy cannot be missing");
+        uint256 have = IERC20(pl.coin).balanceOf(pl.me);
+        require(have < pl.target, "genesis v2: the first buy is already in");
+        uint256 need = pl.target - have;
+        PoolKey[] memory route = _route(c, pl.name, pl.coin, 3);
+        ethBuy = (_search(c, route, need) * (10_000 + BUY_MARGIN_BPS)) / 10_000;
+        // what the buys have already spent, from the runner's journal; alone, this stage assumes nothing was spent.
+        // the listing buys come after this one, so their amounts are reserved here too
+        _withinBudget(pl, vm.envOr("V2_BUY_SPENT_WEI", uint256(0)) + pl.nameListingEth + pl.coinListingEth, ethBuy);
+        require(pl.me.balance >= ethBuy + GAS_ALLOWANCE, "genesis v2: the wallet cannot pay for the buy");
+        console.log("  genesis v2 missing coins, raw", need);
+        vm.startBroadcast(c.pk);
+        UniversalRouterBuy.buy(c.router, pl.me, route, ethBuy, need, block.timestamp + 30 minutes);
+        vm.stopBroadcast();
+    }
 
-        // a dry run must never mark the record: written under a broadcast only, or when asked for with WRITE_RECORD=true
-        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.envOr("WRITE_RECORD", false)) {
-            vm.writeJson(vm.toString(r.coin), c.path, ".genesisV2Token");
-            vm.writeJson(vm.toString(r.name), c.path, ".genesisV2Name");
-            vm.writeJson(vm.toString(r.poolId), c.path, ".genesisV2Pool");
-            // not the treasury: the site bundles this record into its public code, and the treasury's address is one
-            // publish.sh keeps out of the public copy. It is on chain as the coin's creator-fee recipient anyway
-            console.log("  genesis v2 recorded in", c.path);
-        } else {
-            console.log("  record not written: no broadcast (set WRITE_RECORD=true to write from a dry run)");
+    /// @notice Stage 2: the name's listing buy, quoted against the chain as it is now.
+    function listName() external {
+        (Ctx memory c, Plan memory pl,) = _setup();
+        _requireLaunched(c, pl);
+        require(IERC20(pl.coin).balanceOf(pl.me) >= pl.target, "genesis v2: the first buy is not in: run buy()");
+        require(IERC20(pl.name).balanceOf(pl.me) == 0, "genesis v2: the name's listing buy is already in");
+        // the coin's listing buy is still to come, so it is reserved against the ceiling here
+        _withinBudget(pl, vm.envOr("V2_BUY_SPENT_WEI", uint256(0)) + pl.coinListingEth, pl.nameListingEth);
+        _listingBuy(c, pl, _route(c, pl.name, pl.coin, 2), pl.nameListingEth);
+    }
+
+    /// @notice Stage 3: the coin's listing buy, quoted now. The runner sends it only after the name's receipt.
+    function listCoin() external {
+        (Ctx memory c, Plan memory pl,) = _setup();
+        _requireLaunched(c, pl);
+        require(IERC20(pl.name).balanceOf(pl.me) > 0, "genesis v2: the name's listing buy comes first");
+        require(IERC20(pl.coin).balanceOf(pl.me) >= pl.target, "genesis v2: the first buy is not in: run buy()");
+        _withinBudget(pl, vm.envOr("V2_BUY_SPENT_WEI", uint256(0)), pl.coinListingEth);
+        _listingBuy(c, pl, _route(c, pl.name, pl.coin, 3), pl.coinListingEth);
+    }
+
+    /// @notice Stage 4: the split, from the balance the chain shows now, in one transaction that moves coins.
+    function split() external returns (uint256 toTreasury, uint256 burned) {
+        (Ctx memory c, Plan memory pl,) = _setup();
+        _requireLaunched(c, pl);
+        require(IERC20(pl.name).balanceOf(pl.me) > 0, "genesis v2: the listing buys come before the split");
+        uint256 have = IERC20(pl.coin).balanceOf(pl.me);
+        // below the disclosed share means the split has already gone out (it is the only thing that lowers this
+        // balance) or the first buy never landed; either way there is nothing to split
+        require(have >= pl.target, "genesis v2: the wallet holds less than the first buy: split already, or the buy is missing");
+        toTreasury = pl.toTreasury;
+        require(have >= pl.target + c.extraKept, "genesis v2: the buy did not bring in enough past the share to cover V2_EXTRA_KEPT");
+        burned = have - pl.target - c.extraKept;
+        address[] memory to = new address[](burned > 0 ? 2 : 1);
+        uint256[] memory amounts = new uint256[](to.length);
+        (to[0], amounts[0]) = (pl.treasury, toTreasury);
+        if (burned > 0) (to[1], amounts[1]) = (DEAD, burned);
+        vm.startBroadcast(c.pk);
+        Permit2Batch.send(c.permit2, pl.coin, pl.me, to, amounts);
+        vm.stopBroadcast();
+        console.log("  genesis v2 to the treasury, raw", toTreasury);
+        console.log("  genesis v2 burned past the share, raw", burned);
+        console.log("  genesis v2 kept for the airdrop, raw", pl.kept);
+        if (c.extraKept > 0) console.log("  genesis v2 of which out of the surplus instead of burned, raw", c.extraKept);
+    }
+
+    /// @notice Stage 5: reads the finished genesis from the chain and, only if all of it checks, writes it into the
+    /// record. Never under a broadcast: what it writes must describe confirmed state, not a simulation of sends.
+    function verify() external returns (Plan memory pl, bytes32 poolId) {
+        require(
+            !vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) && !vm.isContext(VmSafe.ForgeContext.ScriptResume),
+            "genesis v2: verify reads only: run it without --broadcast"
+        );
+        Ctx memory c;
+        (c, pl,) = _setup();
+        poolId = _checkFinished(c, pl);
+        console.log("  genesis v2 verified on chain: coin", pl.coin);
+        console.log("  genesis v2 verified on chain: name", pl.name);
+
+        if (c.recorded) {
+            console.log("  record already holds this coin");
+            return (pl, poolId);
+        }
+        vm.writeJson(vm.toString(pl.coin), c.path, ".genesisV2Token");
+        vm.writeJson(vm.toString(pl.name), c.path, ".genesisV2Name");
+        vm.writeJson(vm.toString(poolId), c.path, ".genesisV2Pool");
+        // not the treasury: the site bundles this record into its public code, and the treasury's address is one
+        // publish.sh keeps out of the public copy. It is on chain as the coin's creator-fee recipient anyway
+        console.log("  genesis v2 recorded in", c.path);
+    }
+
+    /// @dev The finished genesis, as the chain shows it: the coin this wallet launched, under its name, on the planned
+    /// fee terms, both listing buys' marks, exactly the airdrop left in the wallet, the treasury paid, and no
+    /// allowance from the split left open.
+    function _checkFinished(Ctx memory c, Plan memory pl) internal view returns (bytes32 poolId) {
+        _requireLaunched(c, pl);
+        poolId = c.factory.poolIdOf(pl.coin);
+        require(poolId != bytes32(0), "genesis v2: the coin has no pool");
+        require(
+            c.factory.getLaunchedToken(pl.coin).creatorTaxBps == 0 && c.factory.creatorFeeRecipientOf(pl.coin) == pl.treasury,
+            "genesis v2: the coin's fee terms are not the planned ones"
+        );
+        require(IERC20(pl.name).balanceOf(pl.me) > 0, "genesis v2: the name's listing buy is missing");
+        require(IERC20(pl.coin).balanceOf(pl.me) == pl.kept, "genesis v2: the wallet does not hold exactly the airdrop");
+        require(IERC20(pl.coin).balanceOf(pl.treasury) >= pl.toTreasury, "genesis v2: the treasury does not hold its share");
+        require(Permit2Batch.spent(c.permit2, pl.coin, pl.me), "genesis v2: an allowance from the split is still open");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // the plan
+    // ---------------------------------------------------------------------------------------------------------------
+
+    function _setup() internal view returns (Ctx memory c, Plan memory pl, TokenParams memory p) {
+        c = _context();
+        require(vm.envUint("EXPECTED_CHAIN") == block.chainid, "genesis v2: wrong chain");
+        require(c.seed != bytes32(0), "genesis v2: set V2_SEED to a random bytes32");
+        require(bytes(c.nameSymbol).length > 0, "genesis v2: no name symbol");
+        require(address(c.names) == address(c.launcher.deployer()), "genesis v2: the record's name deployer is not the launcher's");
+        c.nameDecimals = c.launcher.requiredDecimals();
+        LaunchConfig memory cfg = c.factory.getLaunchConfig(c.configId);
+        pl.me = vm.addr(c.pk);
+        pl.treasury = vm.envAddress("TREASURY");
+        pl.supply = cfg.supply;
+        require(pl.treasury != address(0) && pl.treasury != pl.me, "genesis v2: the treasury must be a separate wallet");
+        require(c.buyBps > c.treasuryBps && c.buyBps <= 1_000, "genesis v2: the buy must exceed the treasury's part and stay within 10%");
+        pl.maxBuyEth = vm.envUint("V2_MAX_BUY_ETH");
+        pl.nameListingEth = vm.envOr("V2_LISTING_NAME_ETH", uint256(0.0005 ether));
+        pl.coinListingEth = vm.envOr("V2_LISTING_COIN_ETH", uint256(0.001 ether));
+        require(pl.maxBuyEth > pl.nameListingEth + pl.coinListingEth, "genesis v2: V2_MAX_BUY_ETH must cover the listing buys and the first buy");
+        pl.target = (pl.supply * c.buyBps) / 10_000;
+        require(c.extraKept <= pl.target / 20, "genesis v2: V2_EXTRA_KEPT is more than a twentieth of the buy: check the figure");
+        pl.toTreasury = (pl.supply * c.treasuryBps) / 10_000;
+        // what the wallet keeps: the airdrop's share, plus anything paid out of the surplus the buy brought in past
+        // the disclosed share — the part that is otherwise burned. It comes from neither the treasury's share nor
+        // the holders', and the split refuses if the surplus cannot cover it
+        pl.kept = pl.target - pl.toTreasury + c.extraKept;
+
+        // the name, somewhere high so that nearly any coin address sorts below it
+        (pl.nameSalt, pl.name) = _grindName(c);
+        // the coin: its parameters, and a salt that ends its address in 6942 below the name
+        p = _params(c, pl);
+        p.salt = _grindSalt(c.launchDeployer, pl.me, p, pl.supply, c.seed, pl.name);
+        pl.coin = c.launchDeployer.predictToken(pl.me, p, pl.supply);
+        require(uint16(uint160(pl.coin)) == VANITY_SUFFIX, "genesis v2: the predicted coin does not end in 6942");
+        require(pl.coin < pl.name, "genesis v2: the coin must sort below its name");
+        if (c.recorded) {
+            require(vm.readFile(c.path).readAddress(".genesisV2Token") == pl.coin, "genesis v2: the record holds a different v2 genesis coin");
         }
     }
 
     function _context() internal view returns (Ctx memory c) {
         c.path = string.concat(vm.projectRoot(), "/", vm.envOr("DEPLOY_RECORD", string.concat("deployments/", vm.toString(block.chainid), ".json")));
         string memory j = vm.readFile(c.path);
-        require(!vm.keyExistsJson(j, ".genesisV2Token"), "genesis v2: the record already has a v2 genesis coin");
-        require(vm.keyExistsJson(j, ".universalRouter") && vm.keyExistsJson(j, ".v4Quoter"), "genesis v2: the record has no Universal Router or quoter");
+        c.recorded = vm.keyExistsJson(j, ".genesisV2Token");
+        require(vm.keyExistsJson(j, ".universalRouter") && vm.keyExistsJson(j, ".v4Quoter") && vm.keyExistsJson(j, ".permit2"), "genesis v2: the record has no Universal Router, quoter or Permit2");
         c.factory = Factory(payable(j.readAddress(".factory")));
         c.launchDeployer = ILaunchDeployer(j.readAddress(".launchDeployer"));
         c.launcher = MarketTickerLauncher(j.readAddress(".marketTickerLauncher"));
@@ -206,48 +345,57 @@ contract GenesisV2 is Script {
         c.usdg = j.readAddress(".usdg");
         c.router = IUniversalRouter(j.readAddress(".universalRouter"));
         c.quoter = IV4Quoter(j.readAddress(".v4Quoter"));
+        c.permit2 = IAllowanceTransfer(j.readAddress(".permit2"));
         c.configId = vm.envOr("CONFIG_ID", uint256(2));
         c.pk = vm.envUint("PRIVATE_KEY");
-        c.me = vm.addr(c.pk);
-        c.treasury = vm.envAddress("TREASURY");
         c.buyBps = vm.envUint("V2_BUY_BPS");
         c.treasuryBps = vm.envUint("V2_TREASURY_BPS");
-        c.holdback = vm.envOr("V2_TREASURY_HOLDBACK", uint256(0));
+        c.extraKept = vm.envOr("V2_EXTRA_KEPT", uint256(0));
         c.nameSymbol = vm.envString("V2_NAME_SYMBOL");
         c.seed = vm.envBytes32("V2_SEED");
     }
 
+    /// @dev The buys may spend `V2_MAX_BUY_ETH` and no more, counting every buy together: `spent` is what earlier buys
+    /// took plus what the buys still to come are reserved. A wallet's balance is not
+    /// permission: a buy re-sized after someone else moved the price can cost more than the one that was approved, and
+    /// raising the ceiling for it is a decision, taken deliberately, not something a script does on its own.
+    function _withinBudget(Plan memory pl, uint256 spent, uint256 more) internal pure {
+        require(
+            spent + more <= pl.maxBuyEth,
+            "genesis v2: the buy would take the ETH spent on buys past V2_MAX_BUY_ETH: review the price and raise it deliberately"
+        );
+    }
+
+    /// @dev What only the launch needs: the record not yet marked, the enabled 82 bps configuration, a wallet the
+    /// factory lets launch, and the v2 launcher still a registrar.
     function _preflight(Ctx memory c) internal view {
-        require(vm.envUint("EXPECTED_CHAIN") == block.chainid, "genesis v2: wrong chain");
-        require(c.seed != bytes32(0), "genesis v2: set V2_SEED to a random bytes32");
-        require(c.treasury != address(0) && c.treasury != c.me, "genesis v2: the treasury must be a separate wallet");
-        require(c.buyBps > c.treasuryBps && c.buyBps <= 1_000, "genesis v2: the buy must exceed the treasury's part and stay within 10%");
-        require(bytes(c.nameSymbol).length > 0, "genesis v2: no name symbol");
+        require(!c.recorded, "genesis v2: the record already has a v2 genesis coin");
         LaunchConfig memory cfg = c.factory.getLaunchConfig(c.configId);
         require(cfg.enabled && cfg.baseFeeBps == 82, "genesis v2: the configuration is not the enabled 82 bps one");
-        c.supply = cfg.supply;
-        require(c.holdback < (c.supply * c.treasuryBps) / 10_000, "genesis v2: the holdback must be less than the treasury's share");
-        require(c.factory.launchEnabled() && c.factory.canLaunch(c.me), "genesis v2: this wallet cannot launch");
+        require(c.factory.launchEnabled() && c.factory.canLaunch(vm.addr(c.pk)), "genesis v2: this wallet cannot launch");
         require(c.factory.registrars(address(c.launcher)), "genesis v2: the v2 launcher is not a registrar");
-        require(address(c.names) == address(c.launcher.deployer()), "genesis v2: the record's name deployer is not the launcher's");
-        c.nameDecimals = c.launcher.requiredDecimals();
+    }
+
+    /// @dev Every stage after the launch acts only on the coin this wallet launched, at the predicted address, under
+    /// the predicted name. Metadata changed since the launch predicts another address, and stops here.
+    function _requireLaunched(Ctx memory c, Plan memory pl) internal view {
+        LaunchedToken memory t = c.factory.getLaunchedToken(pl.coin);
+        require(t.exists && t.deployer == pl.me && t.pairToken == pl.name, "genesis v2: no coin launched by this wallet at the predicted address: is the env the launch's?");
+        require(c.names.market(pl.name).token == pl.name, "genesis v2: the name is not a v2 market");
     }
 
     /// @dev Tries salts derived from the seed until the name lands with a top nibble of 0xF. The coin must sort below
-    /// its name, so a high name leaves fifteen coin addresses in sixteen eligible. A name already made there is refused.
+    /// its name, so a high name leaves fifteen coin addresses in sixteen eligible.
     function _grindName(Ctx memory c) internal view returns (bytes32 salt, address name) {
         for (uint256 i; i < 4_096; i++) {
             salt = keccak256(abi.encodePacked(c.seed, "name", i));
             name = c.launcher.predictName(salt, c.nameSymbol, c.nameDecimals);
-            if (uint160(name) >> 156 == 0xF) {
-                require(c.names.market(name).token == address(0), "genesis v2: that name already exists");
-                return (salt, name);
-            }
+            if (uint160(name) >> 156 == 0xF) return (salt, name);
         }
         revert("genesis v2: no name salt found");
     }
 
-    function _params(Ctx memory c, address name) internal view returns (TokenParams memory p) {
+    function _params(Ctx memory c, Plan memory pl) internal view returns (TokenParams memory p) {
         p = TokenParams({
             name: vm.envString("V2_COIN_NAME"),
             symbol: vm.envString("V2_COIN_SYMBOL"),
@@ -260,14 +408,18 @@ contract GenesisV2 is Script {
                 vm.envOr("V2_COIN_WEBSITE", string("")),
                 vm.envOr("V2_COIN_FARCASTER", string(""))
             ),
-            creatorFeeRecipient: c.treasury,
+            creatorFeeRecipient: pl.treasury,
             creatorTaxBps: 0, // the v2 path refuses any other value
             buybackEnabled: false, // the creator's whole share goes to the treasury, as with the v1 official coin
-            expectedEconomics: c.launcher.previewEconomics(c.configId, name),
+            expectedEconomics: c.launcher.previewEconomics(c.configId, pl.name),
             salt: bytes32(0)
         });
         require(bytes(p.name).length > 0 && bytes(p.symbol).length > 0, "genesis v2: the coin needs a name and a symbol");
     }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // buying
+    // ---------------------------------------------------------------------------------------------------------------
 
     /// @dev ETH to USDG, USDG to the name, and with `hops` = 3 the name to the coin.
     function _route(Ctx memory c, address name, address coin, uint256 hops) internal view returns (PoolKey[] memory r) {
@@ -277,17 +429,23 @@ contract GenesisV2 is Script {
         if (hops == 3) r[2] = c.factory.poolKeyOf(coin);
     }
 
-    /// @dev The ETH that buys `target` coins, found against a launch made in a simulation and thrown away. Forty
-    /// halvings between a ten-thousandth and ten ETH. A quote the route cannot give counts as too much. The launch is
-    /// the same as the real one, so the pools are the same; the margin covers the ETH/USDG pool moving in between.
-    function _sizeBuy(Ctx memory c, bytes32 nameSalt, TokenParams memory p, address name, address coin, uint256 target) internal returns (uint256) {
+    /// @dev The ETH that buys the disclosed share, found against a launch made in a simulation and thrown away. The
+    /// launch is the same as the real one, so the pools are the same; the margin covers the ETH/USDG pool moving in
+    /// between, and what the margin buys past the share is burned by `split()`.
+    function _sizeLaunchBuy(Ctx memory c, Plan memory pl, TokenParams memory p) internal returns (uint256) {
         uint256 snap = vm.snapshotState();
-        vm.deal(c.me, c.me.balance + 50 ether);
+        vm.deal(pl.me, pl.me.balance + 50 ether);
         uint256 fee = c.factory.launchFee();
-        vm.startPrank(c.me);
-        c.launcher.createAndLaunch{value: fee}(nameSalt, c.nameSymbol, c.nameDecimals, p, c.configId);
+        vm.startPrank(pl.me);
+        c.launcher.createAndLaunch{value: fee}(pl.nameSalt, c.nameSymbol, c.nameDecimals, p, c.configId);
         vm.stopPrank();
-        PoolKey[] memory route = _route(c, name, coin, 3);
+        uint256 eth = _search(c, _route(c, pl.name, pl.coin, 3), pl.target);
+        vm.revertToState(snap);
+        return (eth * (10_000 + BUY_MARGIN_BPS)) / 10_000;
+    }
+
+    /// @dev The least ETH, to forty halvings between a ten-thousandth and ten ETH, that the quoter says buys `want`.
+    function _search(Ctx memory c, PoolKey[] memory route, uint256 want) internal returns (uint256) {
         uint256 lo = 0.0001 ether;
         uint256 hi = 10 ether;
         for (uint256 i; i < 40; i++) {
@@ -296,12 +454,11 @@ contract GenesisV2 is Script {
             // therefore "too much", never "too little": treating it as too little walks the search up and away from
             // the answer, which a shallow dollar pool (the Sepolia rehearsal's) shows at once
             uint256 out = _quote(c, route, mid);
-            if (out != 0 && out < target) lo = mid;
+            if (out != 0 && out < want) lo = mid;
             else hi = mid;
         }
-        require(_quote(c, route, hi) >= target, "genesis v2: the route cannot fill the first buy");
-        vm.revertToState(snap);
-        return (hi * (10_000 + BUY_MARGIN_BPS)) / 10_000;
+        require(_quote(c, route, hi) >= want, "genesis v2: the route cannot fill the buy");
+        return hi;
     }
 
     function _quote(Ctx memory c, PoolKey[] memory route, uint256 amountIn) internal returns (uint256 out) {
@@ -313,20 +470,15 @@ contract GenesisV2 is Script {
         }
     }
 
-    /// @dev The two listing buys, one transaction each, both to this wallet: the name through its own pool, then the
-    /// coin through the name's pool and its own. Each quote is taken outside the broadcast, one percent under.
-    function _list(Ctx memory c, address name, address coin, uint256 nameEth, uint256 coinEth) internal {
-        PoolKey[] memory toName = _route(c, name, coin, 2);
-        PoolKey[] memory toCoin = _route(c, name, coin, 3);
-        vm.stopBroadcast();
-        uint256 minName = UniversalRouterBuy.minimum(UniversalRouterBuy.quote(c.quoter, toName, nameEth));
+    /// @dev One listing buy to this wallet, exactly as every launch under a name sends it: a quote taken now, outside
+    /// the broadcast, one percent under.
+    function _listingBuy(Ctx memory c, Plan memory pl, PoolKey[] memory route, uint256 eth) internal {
+        require(pl.me.balance >= eth + GAS_ALLOWANCE, "genesis v2: the wallet cannot pay for the listing buy");
+        uint256 minOut = UniversalRouterBuy.minimum(UniversalRouterBuy.quote(c.quoter, route, eth));
         vm.startBroadcast(c.pk);
-        UniversalRouterBuy.buy(c.router, c.me, toName, nameEth, minName, block.timestamp + 30 minutes);
+        UniversalRouterBuy.buy(c.router, pl.me, route, eth, minOut, block.timestamp + 30 minutes);
         vm.stopBroadcast();
-        uint256 minCoin = UniversalRouterBuy.minimum(UniversalRouterBuy.quote(c.quoter, toCoin, coinEth));
-        vm.startBroadcast(c.pk);
-        UniversalRouterBuy.buy(c.router, c.me, toCoin, coinEth, minCoin, block.timestamp + 30 minutes);
-        console.log("  genesis v2 listing buys sent: name, then coin");
+        console.log("  genesis v2 listing buy sent, hops", route.length);
     }
 
     /// Mirrors LaunchDeployer, exactly as `Genesis.s.sol` does: the coin lands at CREATE2(deployer, keccak256(initiator
@@ -336,7 +488,6 @@ contract GenesisV2 is Script {
         bytes32 initCodeHash = keccak256(
             abi.encodePacked(type(Token).creationCode, abi.encode(p.name, p.symbol, p.logo, p.description, p.socials, supply, deployer.factory()))
         );
-        uint256 tries;
         assembly ("memory-safe") {
             let buf := mload(0x40)
             mstore(0x40, add(buf, 0x100))
@@ -354,12 +505,10 @@ contract GenesisV2 is Script {
                 let a := and(keccak256(add(buf, 128), 85), 0xffffffffffffffffffffffffffffffffffffffff)
                 if and(eq(and(a, 0xffff), 0x6942), lt(a, below)) {
                     found := userSalt
-                    tries := add(i, 1)
                     break
                 }
             }
         }
         require(found != bytes32(0), "genesis v2: no coin salt found");
-        console.log("  genesis v2 coin salt found after tries", tries);
     }
 }

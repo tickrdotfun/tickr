@@ -6,7 +6,7 @@ const reads = (rows) => ({
   launchConfigCount: async () => BigInt(rows.length),
   getLaunchConfig: async (i) => { const r = rows[Number(i)]; if (!r) throw new Error("no such config"); return r; },
 });
-let n = 0; const t = (name, fn) => { fn(); n++; };
+let n = 0;
 const run = async (name, fn) => { await fn(); n++; };
 
 (async () => {

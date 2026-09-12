@@ -39,6 +39,8 @@ contract LiquiditySpecForkTest is Test {
     address constant LAUNCH_DEPLOYER = 0xD86C1Cc523256519Dbd608318395e0C97e0368d6;
     address constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
     address constant TESTNAME = 0x4Dd89f107d9b8395237719FA9d621a7A5BC00c52;
+    /// @dev The enabled 82 bps launch configuration on mainnet, the only one a market name's coin may launch on.
+    uint256 constant CONFIG_82 = 2;
 
     address creator = address(0xC0FFEE);
     address buyer = address(0xB0B);
@@ -54,11 +56,11 @@ contract LiquiditySpecForkTest is Test {
         (bool ok,) = FACTORY.call(abi.encodeWithSignature("setRegistrar(address,bool)", address(ml), true));
         require(ok, "setRegistrar");
 
-        uint256 supply = IFactory(FACTORY).getLaunchConfig(0).supply;
+        uint256 supply = IFactory(FACTORY).getLaunchConfig(CONFIG_82).supply;
         TokenParams memory p = TokenParams({
             name: "CURVE", symbol: "CURVE", logo: "", description: "",
             socials: Socials("", "", "", "", ""), creatorFeeRecipient: address(0), creatorTaxBps: 0,
-            buybackEnabled: false, expectedEconomics: ml.previewEconomics(0, TESTNAME), salt: bytes32(0)
+            buybackEnabled: false, expectedEconomics: ml.previewEconomics(CONFIG_82, TESTNAME), salt: bytes32(0)
         });
         for (uint256 i = 1; i < 80_000; ++i) {
             p.salt = bytes32(i);
@@ -67,7 +69,7 @@ contract LiquiditySpecForkTest is Test {
         uint256 f = IFactory(FACTORY).launchFee();
         vm.deal(creator, 10 ether);
         vm.prank(creator);
-        (coin,) = ml.launch{value: f}(p, 0, TESTNAME);
+        (coin,) = ml.launch{value: f}(p, CONFIG_82, TESTNAME);
         phantom = ml.economics().phantomQuote;
 
         vm.roll(block.number + 1); // a coin refuses to move in its own launch block

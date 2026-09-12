@@ -5,7 +5,7 @@ import { useBuyback } from "@/hooks/useBuyback";
 import { useTx } from "@/hooks/useTx";
 import { BuybackTreasuryAbi } from "@/lib/abis";
 import { ADDRESSES } from "@/lib/addresses";
-import { explorerTx, explorerAddress } from "@/lib/chain";
+import { explorerTx, explorerAddress, CHAIN_ID } from "@/lib/chain";
 import { fmtAmount, fmtNumber, pct, shortAddr } from "@/lib/format";
 import { TxStatus } from "../TxStatus";
 
@@ -26,7 +26,7 @@ export function Buyback({ d }: { d: TokenData }) {
 
   const buy = () =>
     tx
-      .run([{ label: `buy and burn ${ts}`, request: (w) => w({ abi: BuybackTreasuryAbi, address: ADDRESSES.buybackTreasury, functionName: "buy" }) }])
+      .run([{ label: `buy and burn ${ts}`, request: (w) => w({ abi: BuybackTreasuryAbi, address: ADDRESSES.buybackTreasury, functionName: "buy" }) }], { chainId: CHAIN_ID })
       .then((h) => h && b.refetch());
 
   return (

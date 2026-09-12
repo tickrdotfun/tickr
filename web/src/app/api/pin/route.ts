@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createPublicClient, http, parseEther, type Address } from "viem";
 import { decodeUploadAuth, verifyUploadAuth } from "@/lib/uploadAuth";
 import { CHAIN_ID, robinhoodChain } from "@/lib/chain";
+import { askWorker, decideBudget, type BudgetDecision } from "@/lib/pinBudget";
 
 /**
  * Pins a coin's image to IPFS through Pinata. The key lives in `PINATA_JWT` on the server and never reaches the
@@ -9,7 +10,9 @@ import { CHAIN_ID, robinhoodChain } from "@/lib/chain";
  *
  * What stands between a script and the pinning bill, in order: the origin check (advisory, a header can be forged),
  * shared counters in the tokens Worker (per address, for everyone, and a hard daily budget), and a memory of files
- * already pinned so the same bytes are never pinned or counted twice. A wallet signature can be demanded on top
+ * already pinned so the same bytes are never pinned or counted twice. When those counters cannot be asked, or do not
+ * answer properly within three seconds, the upload is refused with a 503, never let through on a count of this
+ * instance's own (lib/pinBudget.ts). A wallet signature can be demanded on top
  * (UPLOAD_SIGNATURE=on), which ties every upload to a funded address; it is off, because signing to pick a picture
  * reads as a transaction to the person doing it. Every decision is logged as one JSON line for the Worker's observability. A creator never sees any
  * of it fail: whenever this route says no, the create page stores the image on-chain with the coin instead.
@@ -73,21 +76,11 @@ const KEY = process.env.BUDGET_KEY;
 function shared(): boolean {
   return !!TOKENS && !!KEY;
 }
-async function worker<T>(path: string, body?: unknown): Promise<T | undefined> {
-  if (!TOKENS || !KEY) return undefined;
-  try {
-    const r = await fetch(`${TOKENS}${path}`, {
-      method: body === undefined ? "GET" : "POST",
-      headers: { "x-budget-key": KEY, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!r.ok) return undefined;
-    return (await r.json()) as T;
-  } catch {
-    return undefined;
-  }
+function worker<T>(path: string, body?: unknown): Promise<T | undefined> {
+  return askWorker<T>(TOKENS, KEY, path, body);
 }
-/** when the shared counters cannot be asked, this instance counts on its own: thirty an hour per address */
+/** a development server with no Worker counts on its own, thirty an hour per address; a deployment never does */
+const LOCAL_ONLY = process.env.NODE_ENV !== "production" && !shared();
 const LOCAL_WINDOW_MS = 60 * 60_000;
 const LOCAL_PER_WINDOW = 30;
 const hits = new Map<string, number[]>();
@@ -99,11 +92,10 @@ function overLocalBudget(ip: string): boolean {
   if (hits.size > 5_000) hits.clear();
   return recent.length > LOCAL_PER_WINDOW;
 }
-type Budget = { allowed: boolean; by?: string; counts?: Record<string, { count: number; limit: number }> };
-async function overBudget(ip: string, wallet?: string): Promise<{ over: boolean; by: string }> {
-  const b = await worker<Budget>("budget", { ip, wallet });
-  if (b) return { over: b.allowed !== true, by: b.by ?? "shared" };
-  return { over: overLocalBudget(ip), by: "local" };
+/** the shared budget's answer; unreachable, slow or malformed is a refusal (lib/pinBudget.ts) */
+async function overBudget(ip: string, wallet?: string): Promise<BudgetDecision> {
+  const answer = shared() ? await worker<unknown>("budget", { ip, wallet }) : undefined;
+  return decideBudget(answer, { allowed: LOCAL_ONLY, over: () => overLocalBudget(ip) });
 }
 function clientIp(req: Request): string {
   return (req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
@@ -147,15 +139,18 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   let kv = false;
   const stats = await worker<unknown>("pin-stats");
+  // the create page pins only when this says so, and otherwise stores the image with the coin: so it says so only
+  // when an upload could actually pass the budget, which needs the Worker to answer (or a dev server's own count)
+  const pinning = !!process.env.PINATA_JWT && (LOCAL_ONLY || stats !== undefined);
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const env = getCloudflareContext().env as Record<string, unknown>;
     kv = !!env.NEXT_INC_CACHE_KV;
     // names only, never values: which secrets the worker was given, and whether they reached process.env
     const secretNames = Object.keys(env).filter((k) => /JWT|KEY|SECRET/i.test(k));
-    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, envHasJwt: "PINATA_JWT" in env, secretNames, kv, signature: SIGN, shared: shared(), stats, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
+    return NextResponse.json({ pinning, envHasJwt: "PINATA_JWT" in env, secretNames, kv, signature: SIGN, shared: shared(), stats, bindings: Object.keys(env).filter((k) => !/JWT|KEY|SECRET/i.test(k)) });
   } catch {
-    return NextResponse.json({ pinning: !!process.env.PINATA_JWT, kv, signature: SIGN, shared: shared(), stats, bindings: [] });
+    return NextResponse.json({ pinning, kv, signature: SIGN, shared: shared(), stats, bindings: [] });
   }
 }
 
@@ -201,6 +196,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ image: seen.image, gateway: "https://gateway.pinata.cloud/ipfs/", deduplicated: true });
     }
     const budget = await overBudget(ip, wallet);
+    if (budget.over && budget.unavailable) {
+      log({ refused: "budget-unavailable", by: budget.by, wallet, ip });
+      return NextResponse.json({ error: "uploads are paused right now. the create page stores the image with the coin instead.", code: "budget-unavailable" }, { status: 503 });
+    }
     if (budget.over) {
       log({ refused: "budget", by: budget.by, wallet, ip });
       return NextResponse.json({ error: "too many uploads right now. the create page stores the image with the coin instead.", code: "budget" }, { status: 429 });

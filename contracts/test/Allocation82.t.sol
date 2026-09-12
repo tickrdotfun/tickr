@@ -51,8 +51,10 @@ contract Allocation82ForkTest is Test {
 
     /// @notice The settings being tested. Not a payout figure: the shares the collected fee is divided by.
     uint16 constant BASE_FEE_BPS = FeeSettings.BASE_FEE_BPS;
-    uint16 constant CREATOR_SHARE = FeeSettings.CREATOR_SHARE_BPS;
-    uint16 constant PROTOCOL_SHARE = FeeSettings.PROTOCOL_SHARE_BPS;
+    /// @dev The 4000 / 0 / 6000 split this file measured when it was proposed. It was not adopted: the live default
+    /// is Option A (see OptionAAllocation.t.sol). Kept here, and only here, so the measurement stays reproducible.
+    uint16 constant CREATOR_SHARE = 4_000;
+    uint16 constant PROTOCOL_SHARE = 6_000;
 
     MarketTickerLauncher launcher;
     BuybackTreasuryV2 vault; // the treasury this policy pays, wired for the test rather than assumed

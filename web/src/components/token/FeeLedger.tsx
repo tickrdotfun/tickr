@@ -2,6 +2,7 @@
 
 import type { TokenData } from "@/hooks/useTokenData";
 import { gasWithHeadroom } from "@/lib/gasHeadroom";
+import { CHAIN_ID } from "@/lib/chain";
 import { useTx } from "@/hooks/useTx";
 import { usePublicClient } from "wagmi";
 import { FeeEscrowAbi, LaunchLockerAbi } from "@/lib/abis";
@@ -38,6 +39,9 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
    * The wallet estimates for itself and is subject to the same race, so the limit is set here with headroom
    * measured on chain rather than left to whatever the wallet last saw.
    */
+  /** Every request here goes out from the account on screen, on this chain, or not at all. */
+  const bind = { account: user, chainId: CHAIN_ID };
+
   const collect = () =>
     tx
       .run([
@@ -59,12 +63,12 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
             return w({ ...call, gas: sized.gas });
           },
         },
-      ])
+      ], bind)
       .then((h) => h && d.refetch());
 
   const claimCoin = () =>
     tx
-      .run([{ label: `claim ${ts}`, request: (w) => w({ abi: FeeEscrowAbi, address: ADDRESSES.feeEscrow, functionName: "claimToken", args: [launch.token] }) }])
+      .run([{ label: `claim ${ts}`, request: (w) => w({ abi: FeeEscrowAbi, address: ADDRESSES.feeEscrow, functionName: "claimToken", args: [launch.token] }) }], bind)
       .then((h) => h && d.refetch());
 
   const claimQuote = () =>
@@ -73,7 +77,7 @@ export function FeeLedger({ d, split, burnedUsd }: { d: TokenData; split?: FeeSp
         nativePair
           ? { label: "claim ETH", request: (w) => w({ abi: FeeEscrowAbi, address: ADDRESSES.feeEscrow, functionName: "claim" }) }
           : { label: `claim ${qs}`, request: (w) => w({ abi: FeeEscrowAbi, address: ADDRESSES.feeEscrow, functionName: "claimToken", args: [launch.pairToken] }) },
-      ])
+      ], bind)
       .then((h) => h && d.refetch());
 
   return (

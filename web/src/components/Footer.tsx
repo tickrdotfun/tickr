@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ATTRIBUTION, SOCIALS } from "@/lib/constants";
+import { SOCIALS } from "@/lib/constants";
 import { TickrIcon } from "./Mark";
 import { RainbowRule } from "./RainbowRule";
 
@@ -13,7 +13,6 @@ export function Footer() {
         <span className="pt-2">
           <TickrIcon size={20} />
         </span>
-        <em className="text-[14px]">{ATTRIBUTION}</em>
         <span className="sm:ml-auto flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px]">
           {/* the chain, as its mark rather than a line of text */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
